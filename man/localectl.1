@@ -39,6 +39,21 @@ permissions, and most subcommands require root.
 Show the current locale and keyboard configuration in human-readable
 form. This is the default command when none is given.
 .TP
+.BI list-keymaps " [FILTER]"
+List all console keymaps installed under
+.IR /usr/share/kbd/keymaps/ .
+Keymap names are derived by stripping the directory path and
+.B .map.gz
+(or
+.BR .map )
+extension from each file found.
+The optional
+.I FILTER
+argument is passed to
+.BR grep (1)
+as a case-insensitive pattern.
+Does not require root.
+.TP
 .BI list-locales " [FILTER]"
 List all locales available to the C library via
 .BR "locale -a" .
@@ -161,6 +176,31 @@ Set the X11 layout, model, variant, and compose key option:
 localectl set-x11-keymap us pc105 "" compose:ralt
 .EE
 .RE
+.TP
+.BI list-x11-keymap-models " [FILTER]"
+List available X11 keyboard models from
+.IR /usr/share/X11/xkb/rules/base.lst .
+The optional
+.I FILTER
+is matched case-insensitively against the model code and description.
+.TP
+.BI list-x11-keymap-layouts " [FILTER]"
+List available X11 keyboard layouts.
+.TP
+.BI "list-x11-keymap-variants [LAYOUT] [FILTER]"
+List available X11 keyboard variants.
+When
+.I LAYOUT
+is given, only variants that apply to that layout are printed
+(matching the
+.RI \(lq LAYOUT : \(rq
+prefix in
+.IR base.lst ).
+.I FILTER
+is applied on top of the layout restriction.
+.TP
+.BI list-x11-keymap-options " [FILTER]"
+List available X11 keyboard options (e.g. compose key, Ctrl placement).
 .SH EXIT STATUS
 Returns 0 on success and 1 on error (for example, an unknown locale
 variable, an invalid value, a missing argument, or insufficient

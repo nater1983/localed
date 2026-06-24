@@ -100,3 +100,31 @@ All notable changes to `localed` are documented in this file.
   so users can narrow the output. Does not require root.
   Examples: `localectl list-locales`, `localectl list-locales en_US`,
   `localectl list-locales UTF-8`.
+
+## [0.1.5] - 2026-06-22
+
+### Added (`localectl`)
+- `list-keymaps [FILTER]` subcommand: scans `/usr/share/kbd/keymaps/`
+  recursively for `*.map.gz` / `*.map` files, strips path and extension to
+  produce bare keymap names, sorts and deduplicates, then optionally pipes
+  through `grep -i FILTER`.  Does not require root.
+  Examples: `localectl list-keymaps`, `localectl list-keymaps de`,
+  `localectl list-keymaps dvorak`.
+
+## [0.1.6] - 2026-06-22
+
+### Added (`localectl`)
+- `list-x11-keymap-models [FILTER]` — lists X11 keyboard models from
+  `/usr/share/X11/xkb/rules/base.lst` (`! model` section).
+- `list-x11-keymap-layouts [FILTER]` — lists X11 keyboard layouts
+  (`! layout` section).
+- `list-x11-keymap-variants [LAYOUT] [FILTER]` — lists X11 keyboard
+  variants (`! variant` section).  When `LAYOUT` is given, restricts output
+  to variants whose description begins with `LAYOUT:`, matching upstream
+  systemd `localectl` behaviour.
+- `list-x11-keymap-options [FILTER]` — lists X11 keyboard options
+  (`! option` section), e.g. compose key assignments and Ctrl placement.
+
+All four commands parse `base.lst` with portable POSIX awk (no gawk
+dependency), optionally filter results case-insensitively, and require no
+root. They match the full command set of systemd 257's `localectl`.
