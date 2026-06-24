@@ -1,0 +1,58 @@
+option(
+  'polkit',
+  type        : 'feature',
+  value       : 'auto',
+  description : 'Use polkit for authorising Set* D-Bus method calls',
+)
+
+option(
+  'dbus_system_service_dir',
+  type        : 'string',
+  value       : '',
+  description : 'Directory for D-Bus system service files '
+              + '(default: <datadir>/dbus-1/system-services)',
+)
+
+option(
+  'dbus_system_conf_dir',
+  type        : 'string',
+  value       : '',
+  description : 'Directory for D-Bus system bus configuration files '
+              + '(default: <datadir>/dbus-1/system.d)',
+)
+
+option(
+  'polkit_policy_dir',
+  type        : 'string',
+  value       : '',
+  description : 'Directory for polkit .policy files '
+              + '(default: <datadir>/polkit-1/actions)',
+)
+
+option(
+  'lang_sh',
+  type        : 'string',
+  value       : '/etc/profile.d/lang.sh',
+  description : 'Path to the Slackware locale shell script (export KEY=value format)',
+)
+
+option(
+  'rc_keymap',
+  type        : 'string',
+  value       : '/etc/rc.d/rc.keymap',
+  description : 'Path to the Slackware rc.keymap shell script (sets console keymap via loadkeys)',
+)
+
+option(
+  'x11_keyboard_conf',
+  type        : 'string',
+  value       : '/etc/X11/xorg.conf.d/00-keyboard.conf',
+  description : 'Path to the Xorg InputClass keyboard config file',
+)
+
+option(
+  'privileged-group',
+  type        : 'string',
+  value       : 'wheel',
+  description : 'Group allowed to change locale/keyboard without authentication',
+)

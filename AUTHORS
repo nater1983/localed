@@ -1,0 +1,20 @@
+AUTHORS
+=======
+
+localed - org.freedesktop.locale1 over plain D-Bus, no systemd
+required. Maintained for Slackware and other non-systemd Linux
+systems.
+
+Maintainer
+----------
+Nathaniel Russell <naterussell83@gmail.com>
+    Project creator and maintainer. Initial implementation of the
+    daemon, D-Bus interface, PolKit policy, meson build, and
+    SlackBuild packaging. GitHub: @nater1983
+
+----
+
+If you've contributed to localed and don't see your name here,
+please open a pull request adding yourself, or file an issue at
+https://github.com/nater1983/localed/issues so this file can be
+corrected.

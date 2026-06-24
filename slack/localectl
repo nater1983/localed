@@ -1,0 +1,326 @@
+#!/usr/bin/env bash
+#
+# localectl - control the system locale and keyboard layout
+# Slackware implementation - writes files directly.
+# localed picks up changes via inotify and updates D-Bus properties.
+#
+# Copyright 2026, GPLv2+
+
+LOCALE_FILE="/etc/locale.conf"
+RC_KEYMAP_FILE="/etc/rc.d/rc.keymap"
+RC_KEYMAP_TOGGLE_FILE="/etc/rc.d/rc.keymap.toggle"
+X11_KEYBOARD_FILE="/etc/X11/xorg.conf.d/00-keyboard.conf"
+
+KNOWN_LOCALE_VARS=(
+  LANG LANGUAGE
+  LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES
+  LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION
+)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+die() {
+  echo "localectl: $*" >&2
+  exit 1
+}
+
+require_root() {
+  [ "$EUID" -ne 0 ] && die "must be root to change locale/keyboard settings"
+  return 0
+}
+
+locale_var_is_known() {
+  local key="$1"
+  local v
+  for v in "${KNOWN_LOCALE_VARS[@]}"; do
+    [ "$v" = "$key" ] && return 0
+  done
+  return 1
+}
+
+locale_value_is_safe() {
+  # Allow alnum plus _ . - @ : ,
+  [[ "$1" =~ ^[A-Za-z0-9_.@:,-]+$ ]]
+}
+
+# Read a KEY=value (or KEY="value") from a file; print the value.
+kv_read() {
+  local file="$1" key="$2"
+  [ -f "$file" ] || return
+  grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'
+}
+
+# Atomically write or remove a KEY="value" entry in a KEY=value file.
+# Passing an empty value removes the key entirely.
+kv_set() {
+  local file="$1" key="$2" value="$3"
+  local tmp
+
+  touch "$file" 2>/dev/null || die "cannot write $file"
+
+  tmp=$(mktemp "${file}.XXXXXX") || die "cannot create temp file"
+
+  grep -v "^${key}=" "$file" > "$tmp" 2>/dev/null || true
+
+  if [ -n "$value" ]; then
+    echo "${key}=\"${value}\"" >> "$tmp"
+  fi
+
+  mv "$tmp" "$file" || { rm -f "$tmp"; die "cannot update $file"; }
+}
+
+# ---------------------------------------------------------------------------
+# rc.keymap read/write helpers (Slackware-specific)
+# ---------------------------------------------------------------------------
+
+# Parse the loadkeys argument from a Slackware rc.keymap script.
+rcl_read_rc_keymap() {
+  local file="$1"
+  [ -f "$file" ] || return
+  grep -oP '(?<=loadkeys )\S+' "$file" 2>/dev/null | head -1
+}
+
+# Read the toggle keymap from the sidecar file.
+rcl_read_rc_keymap_toggle() {
+  local file="$1"
+  [ -f "$file" ] || return
+  head -1 "$file" 2>/dev/null | tr -d '\n'
+}
+
+# Write (or overwrite) a Slackware rc.keymap script.
+rcl_write_rc_keymap() {
+  local file="$1" keymap="$2"
+  local dir tmp
+
+  dir=$(dirname "$file")
+  mkdir -p "$dir" || die "cannot create $dir"
+
+  tmp=$(mktemp "${file}.XXXXXX") || die "cannot create temp file"
+
+  if [ -n "$keymap" ]; then
+    cat > "$tmp" << EOF
+#!/bin/bash
+# Written by localectl - see localed(8)
+# More keymaps are in /usr/share/kbd/keymaps
+if [ -x /usr/bin/loadkeys ]; then
+  /usr/bin/loadkeys ${keymap}
+fi
+EOF
+  else
+    cat > "$tmp" << 'EOF'
+#!/bin/bash
+# Written by localectl - see localed(8)
+# No keymap configured
+EOF
+  fi
+
+  chmod 755 "$tmp"
+  mv "$tmp" "$file" || { rm -f "$tmp"; die "cannot update $file"; }
+}
+
+# Write (or remove) the toggle keymap sidecar file.
+rcl_write_rc_keymap_toggle() {
+  local file="$1" toggle="$2"
+
+  if [ -z "$toggle" ]; then
+    rm -f "$file"
+    return
+  fi
+
+  local tmp
+  tmp=$(mktemp "${file}.XXXXXX") || die "cannot create temp file"
+  printf '%s\n' "$toggle" > "$tmp"
+  mv "$tmp" "$file" || { rm -f "$tmp"; die "cannot update $file"; }
+}
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+
+cmd_status() {
+  echo "   System Locale:"
+  local found=0
+  local v val
+  for v in "${KNOWN_LOCALE_VARS[@]}"; do
+    val=$(kv_read "$LOCALE_FILE" "$v")
+    if [ -n "$val" ]; then
+      printf "             %s=%s\n" "$v" "$val"
+      found=1
+    fi
+  done
+  [ "$found" -eq 0 ] && echo "             (none)"
+
+  echo ""
+  local vc_keymap
+  vc_keymap=$(rcl_read_rc_keymap "$RC_KEYMAP_FILE")
+  echo "  VC Keymap: ${vc_keymap:-(none)}"
+  local toggle
+  toggle=$(rcl_read_rc_keymap_toggle "$RC_KEYMAP_TOGGLE_FILE")
+  [ -n "$toggle" ] && echo "     VC Toggle: $toggle"
+
+  echo ""
+  local layout model variant options
+  layout=$(grep -oP '(?<=XkbLayout" ")([^"]+)' "$X11_KEYBOARD_FILE" 2>/dev/null || true)
+  model=$(grep -oP '(?<=XkbModel" ")([^"]+)' "$X11_KEYBOARD_FILE" 2>/dev/null || true)
+  variant=$(grep -oP '(?<=XkbVariant" ")([^"]+)' "$X11_KEYBOARD_FILE" 2>/dev/null || true)
+  options=$(grep -oP '(?<=XkbOptions" ")([^"]+)' "$X11_KEYBOARD_FILE" 2>/dev/null || true)
+
+  echo "  X11 Layout: ${layout:-(none)}"
+  [ -n "$model"   ] && echo "   X11 Model: $model"
+  [ -n "$variant" ] && echo " X11 Variant: $variant"
+  [ -n "$options" ] && echo " X11 Options: $options"
+}
+
+# ---------------------------------------------------------------------------
+# set-locale KEY=value [KEY=value ...]
+# ---------------------------------------------------------------------------
+
+cmd_set_locale() {
+  require_root
+  [ "$#" -eq 0 ] && die "set-locale requires at least one KEY=value argument"
+
+  local pair key value
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    value="${pair#*=}"
+
+    locale_var_is_known "$key" || die "unknown locale variable '$key'"
+
+    if [ -n "$value" ] && ! locale_value_is_safe "$value"; then
+      die "invalid value for $key: '$value'"
+    fi
+  done
+
+  # All validated; apply.
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    value="${pair#*=}"
+    kv_set "$LOCALE_FILE" "$key" "$value"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# set-keymap KEYMAP [KEYMAP_TOGGLE]
+# ---------------------------------------------------------------------------
+
+cmd_set_keymap() {
+  require_root
+  [ "$#" -eq 0 ] && die "set-keymap requires a KEYMAP argument"
+
+  local keymap="$1"
+  local toggle="${2:-}"
+
+  rcl_write_rc_keymap "$RC_KEYMAP_FILE" "$keymap"
+  rcl_write_rc_keymap_toggle "$RC_KEYMAP_TOGGLE_FILE" "$toggle"
+}
+
+# ---------------------------------------------------------------------------
+# set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]
+# ---------------------------------------------------------------------------
+
+cmd_set_x11_keymap() {
+  require_root
+  [ "$#" -eq 0 ] && die "set-x11-keymap requires at least a LAYOUT argument"
+
+  local layout="$1"
+  local model="${2:-}"
+  local variant="${3:-}"
+  local options="${4:-}"
+
+  local dir
+  dir=$(dirname "$X11_KEYBOARD_FILE")
+  mkdir -p "$dir" || die "cannot create $dir"
+
+  local tmp
+  tmp=$(mktemp "${X11_KEYBOARD_FILE}.XXXXXX") || die "cannot create temp file"
+
+  cat > "$tmp" << EOF
+# Written by localectl - see localed(8)
+Section "InputClass"
+    Identifier "system-keyboard"
+    MatchIsKeyboard "on"
+    Option "XkbLayout" "${layout}"
+    Option "XkbModel" "${model}"
+    Option "XkbVariant" "${variant}"
+    Option "XkbOptions" "${options}"
+EndSection
+EOF
+
+  mv "$tmp" "$X11_KEYBOARD_FILE" || { rm -f "$tmp"; die "cannot update $X11_KEYBOARD_FILE"; }
+}
+
+# ---------------------------------------------------------------------------
+# list-locales
+# ---------------------------------------------------------------------------
+
+cmd_list_locales() {
+  local filter="${1:-}"
+
+  # locale(1) is part of glibc and always present on Slackware.
+  # "locale -a" lists every locale the C library can use without generation.
+  if ! command -v locale >/dev/null 2>&1; then
+    die "locale(1) not found - cannot list available locales"
+  fi
+
+  if [ -n "$filter" ]; then
+    locale -a 2>/dev/null | grep -i "$filter"
+  else
+    locale -a 2>/dev/null
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# usage
+# ---------------------------------------------------------------------------
+
+usage() {
+  cat << EOF
+Usage: localectl [OPTIONS] COMMAND [ARGUMENT...]
+
+Commands:
+  status                          Show current locale and keyboard settings
+  list-locales [FILTER]           List available locales (optional grep filter)
+  set-locale KEY=value [...]      Set system locale variables in lang.sh
+  set-keymap KEYMAP [TOGGLE]      Set the virtual console keymap
+  set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]
+                                  Set the X11 keyboard layout
+
+Options:
+  -h, --help                      Show this help and exit
+
+Known locale variables:
+  LANG LANGUAGE LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY
+  LC_MESSAGES LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT
+  LC_IDENTIFICATION
+
+Examples:
+  localectl list-locales
+  localectl list-locales UTF-8
+  localectl list-locales en_US
+  localectl set-locale LANG=en_US.UTF-8
+  localectl set-locale LANG=en_US.UTF-8 LC_TIME=en_GB.UTF-8
+  localectl set-keymap us
+  localectl set-x11-keymap de pc105 nodeadkeys
+  localectl set-x11-keymap us pc105 "" compose:ralt
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
+case "${1:-status}" in
+  status)                 shift; cmd_status "$@" ;;
+  list-locales)           shift; cmd_list_locales "$@" ;;
+  set-locale)             shift; cmd_set_locale "$@" ;;
+  set-keymap)             shift; cmd_set_keymap "$@" ;;
+  set-x11-keymap)         shift; cmd_set_x11_keymap "$@" ;;
+  -h|--help)              usage ;;
+  *)
+    echo "localectl: unknown command '$1'" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

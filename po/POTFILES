@@ -1,0 +1,7 @@
+# Files containing translatable strings.
+# Paths are relative to the project root.
+# Run 'ninja -C build localed-pot' to regenerate localed.pot after editing.
+
+src/main.c
+src/rcl-locale.c
+data/org.freedesktop.locale1.policy

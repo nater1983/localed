@@ -1,0 +1,9 @@
+polkit.addRule(
+  function(action, subject) {
+    if ((action.id == "org.freedesktop.locale1.set-locale" ||
+         action.id == "org.freedesktop.locale1.set-keyboard")
+        && subject.isInGroup("@PRIVILEGED_GROUP@")) {
+      return polkit.Result.YES;
+    }
+  }
+);

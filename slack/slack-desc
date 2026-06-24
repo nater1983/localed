@@ -1,0 +1,19 @@
+# HOW TO EDIT THIS FILE:
+# The "handy ruler" below makes it easier to edit a package description.
+# Line up the first '|' above the ':' following the base package name, and
+# the '|' on the right side marks the last column you can put a character in.
+# You must make exactly 11 lines for the formatting to be correct.  It's also
+# customary to leave one blank line after the last line of description.
+
+        |-----handy-ruler------------------------------------------------------|
+localed: localed (locale daemon for org.freedesktop.locale1)
+localed:
+localed: localed is a system service that manages the system locale and
+localed: keyboard configuration. It implements the
+localed: org.freedesktop.locale1 D-Bus interface as a drop-in
+localed: replacement for systemd-localed on systems without systemd.
+localed:
+localed: It supports PolKit authentication and manages locale.conf,
+localed: vconsole.conf, and X11 keyboard layout configuration.
+localed:
+localed:

@@ -1,0 +1,296 @@
+.\" Manpage for localed
+.TH LOCALED 8 "June 2026" "localed" "System Administration"
+.SH NAME
+localed \- D-Bus locale and keyboard management daemon for non-systemd Linux systems
+.SH SYNOPSIS
+.B /usr/libexec/localed
+.RB [ \-\-debug ]
+.SH DESCRIPTION
+.B localed
+is a standalone system daemon that implements the
+.B org.freedesktop.locale1
+D-Bus interface using direct D-Bus activation, with no dependency on
+.IR systemd .
+It exposes the same locale and keyboard properties as
+.BR systemd-localed (8)
+on systemd-based distributions, allowing desktop tools such as
+.B gnome-control-center
+to read and edit the system locale and keyboard configuration on
+systems that use
+.B elogind
+and a D-Bus/PolKit stack without systemd.
+.PP
+.B localed
+does not poll or hold any files open for writing on its own initiative.
+Instead it watches its source files with
+.BR inotify (7)
+and re-reads them whenever they change, regardless of who changed them
+\(em the bundled
+.BR localectl (1)
+client, a hand edit, or any other tool. After a resync it emits
+.B PropertiesChanged
+on the D-Bus object for every property whose value actually changed.
+.PP
+.B localed
+is normally started on demand by D-Bus activation when a client first
+calls a method or reads a property on the
+.B org.freedesktop.locale1
+bus name. It can also be started manually for debugging.
+.SH OPTIONS
+.TP
+.B \-\-debug
+Enable verbose debug logging to standard error in addition to syslog.
+.SH "D-BUS INTERFACE"
+.B localed
+registers the object
+.B /org/freedesktop/locale1
+on the system bus, implementing the
+.B org.freedesktop.locale1
+interface.
+.SS Properties
+All properties are read-only over D-Bus; values are changed via the
+.B Set*
+methods described below, or by editing the underlying files directly
+(see
+.BR FILES ),
+which
+.B localed
+picks up automatically via inotify.
+.TP
+.B Locale \fR(as)
+An array of
+.RB ` KEY=value '
+strings describing the active locale settings.
+Keys are drawn from the standard set:
+.BR LANG ,
+.BR LANGUAGE ,
+.BR LC_CTYPE ,
+.BR LC_NUMERIC ,
+.BR LC_TIME ,
+.BR LC_COLLATE ,
+.BR LC_MONETARY ,
+.BR LC_MESSAGES ,
+.BR LC_PAPER ,
+.BR LC_NAME ,
+.BR LC_ADDRESS ,
+.BR LC_TELEPHONE ,
+.BR LC_MEASUREMENT ,
+and
+.BR LC_IDENTIFICATION .
+Only keys with non-empty values are included in the array; absent keys
+are not emitted as empty strings. Values are read from
+.I /etc/locale.conf
+(see
+.BR FILES ).
+.TP
+.B VConsoleKeymap \fR(s)
+The primary virtual console keymap name, read from the
+.B KEYMAP
+key in
+.IR /etc/vconsole.conf .
+.TP
+.B VConsoleKeymapToggle \fR(s)
+The secondary (toggle) console keymap, read from the
+.B KEYMAP_TOGGLE
+key in
+.IR /etc/vconsole.conf .
+May be empty.
+.TP
+.B X11Layout \fR(s)
+The XkbLayout string (e.g.
+.RB ` us ',
+.RB ` de ',
+.RB ` gb,us ')
+read from the Xorg InputClass config file (see
+.BR FILES ).
+.TP
+.B X11Model \fR(s)
+The XkbModel string (e.g.
+.RB ` pc105 ').
+.TP
+.B X11Variant \fR(s)
+The XkbVariant string (e.g.
+.RB ` intl '
+or
+.RB ` nodeadkeys ').
+May be empty.
+.TP
+.B X11Options \fR(s)
+The XkbOptions string (e.g.
+.RB ` terminate:ctrl_alt_bksp,compose:ralt ').
+May be empty.
+.SS Methods
+.TP
+.B SetLocale(as locale, b interactive)
+Validates and writes the given locale assignments to
+.IR /etc/locale.conf .
+Each element of
+.I locale
+must be of the form
+.IR KEY = value ,
+where
+.I KEY
+is one of the fourteen known locale variable names and
+.I value
+uses only alphanumerics plus
+.BR _ , . , - , @ , : , .
+An empty
+.I value
+removes that key from the file. Unknown keys cause the entire call to
+fail. Requires the
+.B org.freedesktop.locale1.set-locale
+PolKit action.
+.TP
+.B SetVConsoleKeyboard(s keymap, s keymap_toggle, b convert, b interactive)
+Writes
+.I keymap
+and
+.I keymap_toggle
+to
+.IR /etc/vconsole.conf .
+When
+.I convert
+is
+.B true
+and
+.I keymap
+is non-empty, a matching X11 layout is derived from the built-in
+conversion table and written to the Xorg keyboard config file. The
+conversion is best-effort; if no mapping exists for
+.IR keymap ,
+the X11 file is left unmodified. Requires the
+.B org.freedesktop.locale1.set-keyboard
+PolKit action.
+.TP
+.B SetX11Keyboard(s layout, s model, s variant, s options, b convert, b interactive)
+Writes the Xorg
+.IR InputClass
+keyboard stanza (XkbLayout, XkbModel, XkbVariant, XkbOptions) to the
+keyboard config file. When
+.I convert
+is
+.B true
+and
+.I layout
+is non-empty, a matching console keymap is derived from the built-in
+conversion table and written to
+.IR /etc/vconsole.conf .
+Requires the
+.B org.freedesktop.locale1.set-keyboard
+PolKit action.
+.PP
+For every method that takes an
+.I interactive
+argument, a value of
+.B true
+indicates the caller is willing to wait for a PolKit authentication
+dialog; a value of
+.B false
+means the call fails immediately with
+.B org.freedesktop.DBus.Error.AuthFailed
+unless the caller is already authorised.
+.SH AUTHORIZATION
+Access to the
+.B Set*
+methods over D-Bus is controlled by
+.BR polkit (8)
+using the following actions, declared in
+.IR /usr/share/polkit-1/actions/org.freedesktop.locale1.policy :
+.TP
+.B org.freedesktop.locale1.set-locale
+.TQ
+.B org.freedesktop.locale1.set-keyboard
+.PP
+By default these actions require
+.B auth_admin
+for inactive or remote callers and
+.B auth_admin_keep
+for an active local session, matching upstream
+.BR systemd-localed (8)
+policy. A PolKit rule installed at
+.I /usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules
+additionally grants unconditional access to members of the privileged
+group selected at build time (default
+.RB ` wheel ',
+see the
+.B privileged-group
+meson option), so desktop session tools are not prompted for a password
+on every locale or keyboard change. Group membership changes only take
+effect for new login sessions.
+.PP
+These PolKit actions govern D-Bus callers only. The bundled
+.BR localectl (1)
+client bypasses D-Bus entirely and writes the underlying files
+directly; its own authorization is ordinary Unix file permissions,
+meaning it requires root for every write subcommand.
+.SH FILES
+.TP
+.I /etc/locale.conf
+System locale settings, stored as
+.BR KEY=value
+assignments. Read for the
+.B Locale
+property; written atomically by
+.B SetLocale
+and by
+.BR localectl (1).
+Watched with
+.BR inotify (7).
+.TP
+.I /etc/rc.d/rc.keymap
+Slackware console keyboard script. Called by the boot process to load
+the keyboard map via
+.BR loadkeys (1).
+.B localed
+parses the
+.B loadkeys
+argument for the
+.B VConsoleKeymap
+property and regenerates the script atomically when
+.B SetVConsoleKeyboard
+is called. Watched with
+.BR inotify (7).
+.TP
+.I /etc/rc.d/rc.keymap.toggle
+Sidecar file persisting
+.B VConsoleKeymapToggle
+across reboots. Contains the bare keymap name on a single line.
+Absent when no toggle keymap is configured.
+Created and managed exclusively by
+.BR localed .
+Slackware has no native toggle-keymap concept.
+.TP
+.I /etc/X11/xorg.conf.d/00-keyboard.conf
+Xorg
+.I InputClass
+stanza describing the X11 keyboard layout. Written in the canonical
+format used by
+.BR systemd-localed (8)
+so Xorg picks it up on next start. Watched with
+.BR inotify (7).
+The directory is created automatically if it does not exist when
+.B SetX11Keyboard
+is called.
+.TP
+.I /usr/share/polkit-1/actions/org.freedesktop.locale1.policy
+PolKit action declarations and default authorization requirements.
+.TP
+.I /usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules
+PolKit rule granting the configured privileged group unconditional
+access to both locale1 actions.
+.SH "SEE ALSO"
+.BR localectl (1),
+.BR locale.conf (5),
+.BR vconsole.conf (5),
+.BR polkit (8),
+.BR pkcheck (1),
+.BR inotify (7)
+.SH AUTHOR
+Nathaniel Russell <naterussell83@gmail.com>
+.SH LICENSE
+This program is free software, distributed under the GNU General Public
+License, version 2 or later. See the source for copying conditions.
+.SH BUGS
+Report bugs at
+.UR https://github.com/nater1983/localed
+.UE .

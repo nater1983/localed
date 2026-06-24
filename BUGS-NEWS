@@ -1,0 +1,32 @@
+BUGS-NEWS
+=========
+
+Known issues and notable behaviour for localed 0.1.0.
+
+BUGS
+----
+
+* The built-in keymap ↔ X11 conversion table is intentionally minimal.
+  Keymaps not present in the table are silently ignored when convert=true
+  is passed; the other side is left unchanged rather than guessing.
+  A future release may read the full conversion table from the kbd(4)
+  package data (typically /usr/share/kbd/keymaps/) if present.
+
+* X11 keyboard config parsing uses a simple string-search strategy on the
+  xorg.conf.d InputClass stanza.  Non-standard formatting (e.g. options on
+  the same line, mixed quoting) may not be read back correctly.  Always use
+  localectl or localed itself to write 00-keyboard.conf to avoid this.
+
+* The Locale property array is populated in canonical variable order
+  (LANG first, then LC_* alphabetically by the order in the spec).  Clients
+  that compare the array as a bag of strings rather than a set should sort
+  before comparing.
+
+* locale.conf values containing a comma are accepted (LANGUAGE uses colons,
+  but the safe-value check also allows commas for forward compatibility).
+  Values containing characters outside [A-Za-z0-9_.@:,-] are rejected.
+
+REPORTING BUGS
+--------------
+
+Please report bugs at https://github.com/nater1983/localed/issues

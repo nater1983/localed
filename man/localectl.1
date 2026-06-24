@@ -1,0 +1,210 @@
+.\" Manpage for localectl (localed bash client)
+.TH LOCALECTL 1 "June 2026" "localed" "User Commands"
+.SH NAME
+localectl \- control the system locale and keyboard layout
+.SH SYNOPSIS
+.B localectl
+.RI [ OPTIONS ]
+.IR COMMAND " [" ARGUMENT ...]
+.SH DESCRIPTION
+.B localectl
+is a Bash client used to query and change the system locale and
+keyboard layout configuration.
+.PP
+Unlike a typical D-Bus client,
+.B localectl
+writes directly to
+.I /etc/locale.conf
+and
+.I /etc/vconsole.conf
+(and, for X11 keyboard settings,
+.IR /etc/X11/xorg.conf.d/00-keyboard.conf ).
+The
+.B localed
+daemon watches these files with
+.BR inotify (7)
+and automatically updates its
+.B org.freedesktop.locale1
+D-Bus properties and emits
+.B PropertiesChanged
+signals whenever they are modified, whether by
+.B localectl
+or any other tool. This means
+.B localectl
+itself never talks to D-Bus or PolKit; it relies on ordinary file
+permissions, and most subcommands require root.
+.SH COMMANDS
+.TP
+.B status
+Show the current locale and keyboard configuration in human-readable
+form. This is the default command when none is given.
+.TP
+.BI list-locales " [FILTER]"
+List all locales available to the C library via
+.BR "locale -a" .
+The optional
+.I FILTER
+argument is passed to
+.BR grep (1)
+as a case-insensitive pattern, so
+.B "localectl list-locales en_US"
+narrows the output to en_US locales only.
+Does not require root.
+.TP
+.BI set-locale " KEY=value [KEY=value ...]"
+Set one or more locale variables.
+.I KEY
+must be one of
+.BR LANG ,
+.BR LANGUAGE ,
+.BR LC_CTYPE ,
+.BR LC_NUMERIC ,
+.BR LC_TIME ,
+.BR LC_COLLATE ,
+.BR LC_MONETARY ,
+.BR LC_MESSAGES ,
+.BR LC_PAPER ,
+.BR LC_NAME ,
+.BR LC_ADDRESS ,
+.BR LC_TELEPHONE ,
+.BR LC_MEASUREMENT ,
+or
+.BR LC_IDENTIFICATION .
+Each assignment is written to
+.IR /etc/locale.conf .
+Passing an empty value (e.g.
+.BR LC_TIME= )
+removes that key from the file.
+.TP
+.BI set-keymap " KEYMAP [KEYMAP_TOGGLE]"
+Set the virtual console keymap (and optionally the toggle keymap).
+Written to
+.I /etc/vconsole.conf
+as
+.B KEYMAP
+and
+.BR KEYMAP_TOGGLE .
+.TP
+.BI set-x11-keymap " LAYOUT [MODEL [VARIANT [OPTIONS]]]"
+Set the X11 keyboard layout.
+.I LAYOUT
+is required; all other arguments are optional and default to an empty
+string (which suppresses that Option line in the Xorg config).
+Written to
+.IR /etc/X11/xorg.conf.d/00-keyboard.conf .
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Show a short usage summary and exit.
+.SH EXAMPLES
+.PP
+Show the current status:
+.PP
+.RS
+.EX
+localectl status
+.EE
+.RE
+.PP
+List all available locales:
+.PP
+.RS
+.EX
+localectl list-locales
+.EE
+.RE
+.PP
+List only en_US locales:
+.PP
+.RS
+.EX
+localectl list-locales en_US
+.EE
+.RE
+.PP
+Set the system locale:
+.PP
+.RS
+.EX
+localectl set-locale LANG=en_US.UTF-8
+.EE
+.RE
+.PP
+Set multiple locale variables at once:
+.PP
+.RS
+.EX
+localectl set-locale LANG=en_US.UTF-8 LC_TIME=en_GB.UTF-8
+.EE
+.RE
+.PP
+Set the console keymap:
+.PP
+.RS
+.EX
+localectl set-keymap us
+.EE
+.RE
+.PP
+Set the X11 keyboard layout with a variant:
+.PP
+.RS
+.EX
+localectl set-x11-keymap de pc105 nodeadkeys
+.EE
+.RE
+.PP
+Set the X11 layout, model, variant, and compose key option:
+.PP
+.RS
+.EX
+localectl set-x11-keymap us pc105 "" compose:ralt
+.EE
+.RE
+.SH EXIT STATUS
+Returns 0 on success and 1 on error (for example, an unknown locale
+variable, an invalid value, a missing argument, or insufficient
+permissions).
+.SH AUTHORIZATION
+All subcommands other than
+.B status
+require root. There is no PolKit prompt or D-Bus round trip in
+.B localectl
+itself; the daemon's PolKit policy governs only direct D-Bus callers
+such as
+.BR gnome-control-center (1).
+.SH FILES
+.TP
+.I /etc/locale.conf
+System locale settings. Rewritten atomically (temporary file plus
+rename) on every write. Created automatically on first root invocation
+if missing.
+.TP
+.I /etc/rc.d/rc.keymap
+Slackware console keyboard script. Regenerated atomically on every
+.B set-keymap
+invocation. The directory is created automatically if missing.
+.TP
+.I /etc/rc.d/rc.keymap.toggle
+Sidecar file for the toggle keymap. Created when a toggle keymap is
+set; removed when the toggle is cleared.
+.TP
+.I /etc/X11/xorg.conf.d/00-keyboard.conf
+Xorg InputClass keyboard configuration. Rewritten atomically on every
+write. The parent directory is created automatically if missing.
+.SH SEE ALSO
+.BR localed (8),
+.BR locale.conf (5),
+.BR vconsole.conf (5),
+.BR inotify (7)
+.SH AUTHOR
+Written by Nathaniel Russell.
+.PP
+Part of the
+.B localed
+project, a non-systemd implementation of the
+.B org.freedesktop.locale1
+D-Bus interface for Slackware Linux.
+.SH LICENSE
+This program is free software, distributed under the GNU General Public
+License, version 2 or later. See the source for copying conditions.

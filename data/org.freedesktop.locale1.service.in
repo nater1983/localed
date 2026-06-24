@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.freedesktop.locale1
+Exec=@SBINDIR@/localed
+User=root

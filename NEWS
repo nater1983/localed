@@ -1,0 +1,102 @@
+# Changelog
+
+All notable changes to `localed` are documented in this file.
+
+## [0.1.0] - 2026-06-21
+
+### Added
+- Initial project scaffolding: `main.c`, `rcl-locale.c`/`.h`,
+  `meson.build`, `meson_options.txt`, `README.md`
+- D-Bus interface description (`org.freedesktop.locale1.xml`),
+  service activation file (`.service.in`), polkit policy (`.policy`),
+  and polkit rules template (`.rules.in`)
+- SlackBuild packaging script
+- `localectl` companion shell script (writes files directly; localed
+  picks up changes via inotify)
+- Full `org.freedesktop.locale1` D-Bus interface:
+  - Properties: `Locale` (as), `VConsoleKeymap`, `VConsoleKeymapToggle`,
+    `X11Layout`, `X11Model`, `X11Variant`, `X11Options`
+  - Methods: `SetLocale`, `SetVConsoleKeyboard`, `SetX11Keyboard`
+- inotify watches on `/etc/locale.conf`, `/etc/vconsole.conf`, and
+  `/etc/X11/xorg.conf.d/00-keyboard.conf`; `PropertiesChanged` emitted
+  on any file change
+- Asynchronous PolKit authorisation (agent dialog never stalls the main loop)
+- Built-in console-keymap ↔ X11 layout conversion table used when
+  `convert=true` is passed to `SetVConsoleKeyboard` or `SetX11Keyboard`
+- Input validation for locale values and keyboard strings
+- Atomic file writes (temp file + rename) for all three config files
+- Reconnect/name-lost D-Bus ownership pattern (survives dbus-daemon
+  restarts without the service going permanently dark)
+- Colourised interactive logging and syslog(3) daemon-context logging
+- Man pages: `localed(8)` and `localectl(1)`
+- GPLv2 license file
+
+## [0.1.1] - 2026-06-21
+
+### Fixed
+- `SetLocale` now accepts a single bare locale string with no `KEY=` prefix
+  and treats it as `LANG=<value>`, matching upstream systemd-localed behaviour
+  (gap 2 vs systemd 257). Example: `SetLocale(["en_US.UTF-8"], true)` now
+  correctly sets `LANG=en_US.UTF-8` instead of returning an error.
+
+## [0.1.2] - 2026-06-22
+
+### Fixed
+- `SetLocale` now auto-derives `LANGUAGE` from `LANG` when `LANGUAGE` is not
+  provided in the call, matching upstream systemd-localed behaviour (gap 1 vs
+  systemd 257). The derivation uses the same 13-entry language-fallback table
+  as upstream (verbatim copy of systemd's `src/locale/language-fallback-map`),
+  embedded directly rather than read from a runtime file.
+  Example: `SetLocale(["LANG=en_AU"], true)` now also writes
+  `LANGUAGE=en_AU:en_GB` to `/etc/locale.conf`.
+  The match is exact (bare locale code without encoding suffix), identical to
+  upstream — `LANG=en_AU.UTF-8` does NOT trigger the fallback, which is
+  intentional and matches the upstream table's key format.
+
+## [0.1.3] - 2026-06-22
+
+### Changed
+- **Slackware keyboard support**: replaced `/etc/vconsole.conf` (a systemd /
+  freedesktop convention not used by Slackware) with `/etc/rc.d/rc.keymap`
+  as the backing file for the `VConsoleKeymap` D-Bus property.
+  - `localed` now parses the `loadkeys` argument from `rc.keymap` on startup
+    and via inotify whenever the file changes.
+  - `SetVConsoleKeyboard` regenerates `rc.keymap` atomically (temp + rename)
+    and marks it executable (0755) so Slackware's init picks it up.
+  - `VConsoleKeymapToggle` is persisted in `/etc/rc.d/rc.keymap.toggle`
+    (a small sidecar file with the bare keymap name) since Slackware has no
+    native toggle-keymap concept. The file is created on set and removed on
+    clear.
+  - The meson option `vconsole_conf` has been renamed to `rc_keymap`
+    (default: `/etc/rc.d/rc.keymap`). The toggle sidecar path is derived
+    automatically as `<rc_keymap>.toggle`.
+  - `localectl set-keymap` now calls `rcl_write_rc_keymap()` /
+    `rcl_write_rc_keymap_toggle()` instead of writing a KEY=value file.
+  - `localectl status` now reads the keymap via `rcl_read_rc_keymap()` /
+    `rcl_read_rc_keymap_toggle()`.
+
+## [0.1.4] - 2026-06-22
+
+### Changed
+- **Slackware locale support**: replaced `/etc/locale.conf` (freedesktop
+  standard not used by Slackware) with `/etc/profile.d/lang.sh` as the
+  backing file for the `Locale` D-Bus property.
+  - `rcl_read_lang_sh()` parses `export KEY="value"` lines, strips the
+    `export` prefix and quotes, ignores non-locale exports, and returns only
+    known locale variables.
+  - `rcl_write_lang_sh()` performs a read-modify-write: preserves comments
+    and non-locale exports verbatim, then rewrites locale variable lines at
+    the end in canonical variable order (`LANG`, `LANGUAGE`, `LC_*`).
+    Writes are atomic (temp file + rename). The directory is created if
+    absent.
+  - The meson option `locale_conf` has been renamed to `lang_sh`
+    (default: `/etc/profile.d/lang.sh`).
+  - The now-unused `read_key_value_pairs()` and `write_key_value_file()`
+    internal helpers have been removed; dead code reduction.
+
+### Added (`localectl`)
+- `list-locales [FILTER]` subcommand: runs `locale -a` (always available
+  on Slackware via glibc) and optionally pipes through `grep -i FILTER`
+  so users can narrow the output. Does not require root.
+  Examples: `localectl list-locales`, `localectl list-locales en_US`,
+  `localectl list-locales UTF-8`.
