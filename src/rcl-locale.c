@@ -474,22 +474,30 @@ rcl_read_rc_keymap( const gchar *path )
     if( line[0] == '#' || line[0] == '\0' )
       continue;
 
+    /* Skip the [ -x /usr/bin/loadkeys ] test line — it contains ']'.
+     * On the actual invocation line, the keymap is the last whitespace-
+     * delimited token after "loadkeys". */
+    if( strstr( line, "loadkeys" ) && !strchr( line, ']' ) )
     {
       const gchar *p = strstr( line, "loadkeys" );
-      if( p )
+      p += strlen( "loadkeys" );
+      while( *p == ' ' || *p == '\t' ) p++;
+      if( *p && *p != '#' && *p != '\0' )
       {
-        p += strlen( "loadkeys" );
-        /* skip whitespace */
-        while( *p == ' ' || *p == '\t' )
-          p++;
-        if( *p && *p != '#' && *p != '\n' )
+        /* $NF: walk to the last token on the line */
+        const gchar *tok = p;
+        while( *p )
         {
-          /* read until whitespace or end */
-          const gchar *end = p;
-          while( *end && *end != ' ' && *end != '\t' && *end != '\n' )
-            end++;
-          result = g_strndup( p, (gsize)(end - p) );
+          if( ( *p == ' ' || *p == '\t' ) && *(p+1) && *(p+1) != ' ' && *(p+1) != '\t' )
+            tok = p + 1;
+          p++;
         }
+        /* trim trailing whitespace */
+        const gchar *end = p;
+        while( end > tok && ( *(end-1) == ' ' || *(end-1) == '\t' || *(end-1) == '\n' ) )
+          end--;
+        if( end > tok )
+          result = g_strndup( tok, (gsize)(end - tok) );
       }
     }
   }

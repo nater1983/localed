@@ -76,10 +76,12 @@ kv_set() {
 # ---------------------------------------------------------------------------
 
 # Parse the loadkeys argument from a Slackware rc.keymap script.
+# Skip comment lines and the [ -x /usr/bin/loadkeys ] test line
+# (which contains "]"); on the actual invocation line, $NF is the keymap.
 rcl_read_rc_keymap() {
   local file="$1"
   [ -f "$file" ] || return
-  grep -oP '(?<=loadkeys )\S+' "$file" 2>/dev/null | head -1
+  awk '/loadkeys/ && !/^[[:space:]]*#/ && !/\]/ { print $NF; exit }' "$file"
 }
 
 # Read the toggle keymap from the sidecar file.
