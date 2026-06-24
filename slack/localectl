@@ -252,6 +252,122 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# list-x11-keymap-models / layouts / variants / options
+#
+# All four parse /usr/share/X11/xkb/rules/base.lst which is shipped by the
+# xkeyboard-config package.  The file has four sections introduced by a
+# "! section" header line; entries are "  code   description" pairs.
+#
+# list-x11-keymap-variants accepts an optional LAYOUT argument: when given,
+# only variants whose description starts with "LAYOUT:" are printed, matching
+# upstream systemd localectl behaviour.
+# ---------------------------------------------------------------------------
+
+XKB_BASE_LST="/usr/share/X11/xkb/rules/base.lst"
+
+# Internal helper: extract a named section from base.lst.
+# Usage: _xkb_section SECTIONNAME [FILTER]
+# Prints the code (first field) of every entry in the section, optionally
+# filtered case-insensitively.
+_xkb_section() {
+  local section="$1" filter="${2:-}"
+
+  if [ ! -f "$XKB_BASE_LST" ]; then
+    die "$XKB_BASE_LST not found (is xkeyboard-config installed?)"
+  fi
+
+  awk -v section="$section" -v filter="$filter" '
+    /^! /      { in_section = ($2 == section); next }
+    /^[[:space:]]*$/ { next }
+    in_section {
+      code = $1
+      if (code == "") next
+      if (filter == "" || tolower(code) ~ tolower(filter) \
+                       || tolower($0)   ~ tolower(filter))
+        print code
+    }
+  ' "$XKB_BASE_LST" | sort -u
+}
+
+cmd_list_x11_keymap_models() {
+  _xkb_section "model" "${1:-}"
+}
+
+cmd_list_x11_keymap_layouts() {
+  _xkb_section "layout" "${1:-}"
+}
+
+cmd_list_x11_keymap_variants() {
+  local layout="${1:-}" filter="${2:-}"
+
+  if [ ! -f "$XKB_BASE_LST" ]; then
+    die "$XKB_BASE_LST not found (is xkeyboard-config installed?)"
+  fi
+
+  # When a layout is given, restrict to variants whose description begins
+  # with "LAYOUT:" (the format used in base.lst).  The filter arg (if any)
+  # is then applied on top of that.
+  awk -v layout="$layout" -v filter="$filter" '
+    /^! /      { in_section = ($2 == "variant"); next }
+    /^[[:space:]]*$/ { next }
+    in_section {
+      code = $1
+      # desc is everything after the code and its trailing whitespace
+      desc = substr($0, index($0, code) + length(code))
+      sub(/^[[:space:]]+/, "", desc)
+      if (code == "") next
+      if (layout != "" && index(desc, layout ":") != 1) next
+      if (filter != "" && tolower(code) !~ tolower(filter) \
+                       && tolower(desc) !~ tolower(filter)) next
+      print code
+    }
+  ' "$XKB_BASE_LST" | sort -u
+}
+
+cmd_list_x11_keymap_options() {
+  local filter="${1:-}"
+
+  if [ ! -f "$XKB_BASE_LST" ]; then
+    die "$XKB_BASE_LST not found (is xkeyboard-config installed?)"
+  fi
+
+  # Options are "group:name" tokens; print the full token (both the group
+  # header line and the individual options), matching upstream localectl.
+  awk -v filter="$filter" '
+    /^! /      { in_section = ($2 == "option"); next }
+    /^[[:space:]]*$/ { next }
+    in_section {
+      code = $1
+      if (code == "") next
+      if (filter == "" || tolower(code) ~ tolower(filter) \
+                       || tolower($0)   ~ tolower(filter))
+        print code
+    }
+  ' "$XKB_BASE_LST" | sort -u
+}
+
+# ---------------------------------------------------------------------------
+# list-keymaps
+# ---------------------------------------------------------------------------
+
+cmd_list_keymaps() {
+  local filter="${1:-}"
+  local kbddir="/usr/share/kbd/keymaps"
+
+  if [ ! -d "$kbddir" ]; then
+    die "keymap directory $kbddir not found (is kbd installed?)"
+  fi
+
+  # Strip path and extensions (.map.gz, .map) to get bare keymap names,
+  # sort, deduplicate, then optionally filter.
+  find "$kbddir" -type f \( -name "*.map.gz" -o -name "*.map" \) \
+    | xargs -I{} basename {} \
+    | sed -e 's/\.map\.gz$//' -e 's/\.map$//' \
+    | sort -u \
+    | if [ -n "$filter" ]; then grep -i "$filter"; else cat; fi
+}
+
+# ---------------------------------------------------------------------------
 # list-locales
 # ---------------------------------------------------------------------------
 
@@ -281,11 +397,17 @@ Usage: localectl [OPTIONS] COMMAND [ARGUMENT...]
 
 Commands:
   status                          Show current locale and keyboard settings
+  list-keymaps [FILTER]           List available console keymaps (optional grep filter)
   list-locales [FILTER]           List available locales (optional grep filter)
   set-locale KEY=value [...]      Set system locale variables in lang.sh
   set-keymap KEYMAP [TOGGLE]      Set the virtual console keymap
   set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]
                                   Set the X11 keyboard layout
+  list-x11-keymap-models [FILTER]    List available X11 keyboard models
+  list-x11-keymap-layouts [FILTER]   List available X11 keyboard layouts
+  list-x11-keymap-variants [LAYOUT] [FILTER]
+                                     List available X11 keyboard variants
+  list-x11-keymap-options [FILTER]   List available X11 keyboard options
 
 Options:
   -h, --help                      Show this help and exit
@@ -296,6 +418,8 @@ Known locale variables:
   LC_IDENTIFICATION
 
 Examples:
+  localectl list-keymaps
+  localectl list-keymaps de
   localectl list-locales
   localectl list-locales UTF-8
   localectl list-locales en_US
@@ -304,6 +428,10 @@ Examples:
   localectl set-keymap us
   localectl set-x11-keymap de pc105 nodeadkeys
   localectl set-x11-keymap us pc105 "" compose:ralt
+  localectl list-x11-keymap-models
+  localectl list-x11-keymap-layouts
+  localectl list-x11-keymap-variants us
+  localectl list-x11-keymap-options compose
 EOF
 }
 
@@ -313,10 +441,15 @@ EOF
 
 case "${1:-status}" in
   status)                 shift; cmd_status "$@" ;;
+  list-keymaps)           shift; cmd_list_keymaps "$@" ;;
   list-locales)           shift; cmd_list_locales "$@" ;;
   set-locale)             shift; cmd_set_locale "$@" ;;
   set-keymap)             shift; cmd_set_keymap "$@" ;;
-  set-x11-keymap)         shift; cmd_set_x11_keymap "$@" ;;
+  set-x11-keymap)              shift; cmd_set_x11_keymap "$@" ;;
+  list-x11-keymap-models)      shift; cmd_list_x11_keymap_models "$@" ;;
+  list-x11-keymap-layouts)     shift; cmd_list_x11_keymap_layouts "$@" ;;
+  list-x11-keymap-variants)    shift; cmd_list_x11_keymap_variants "$@" ;;
+  list-x11-keymap-options)     shift; cmd_list_x11_keymap_options "$@" ;;
   -h|--help)              usage ;;
   *)
     echo "localectl: unknown command '$1'" >&2
