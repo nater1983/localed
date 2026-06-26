@@ -72,6 +72,20 @@ kv_set() {
 }
 
 # ---------------------------------------------------------------------------
+# Pager support
+# ---------------------------------------------------------------------------
+
+# Pipe stdout through $PAGER (default: less) unless --no-pager was given or
+# stdout is not a terminal.  Usage: some_command | _run_pager
+_run_pager() {
+  if [ "$NO_PAGER" -eq 1 ] || [ ! -t 1 ]; then
+    cat
+  else
+    "${PAGER:-less}" -FRX
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # rc.keymap read/write helpers (Slackware-specific)
 # ---------------------------------------------------------------------------
 
@@ -208,42 +222,83 @@ _x11_to_vc() {
   return 0
 }
 
+# Read a single locale variable from lang.sh (export KEY="value" format).
+rcl_lang_sh_get() {
+  local file="$1" key="$2"
+  [ -f "$file" ] || return
+  awk -v key="$key" '
+    $0 ~ "^[[:space:]]*export[[:space:]]+" key "=" {
+      val = $0
+      sub(/^[^=]*=/, "", val)
+      gsub(/^"|"$/, "", val)
+      print val
+      exit
+    }
+  ' "$file"
+}
+
+# Read a single XkbOption value from the X11 keyboard config file.
+rcl_x11_read_opt() {
+  local key="$1"
+  [ -f "$X11_KEYBOARD_FILE" ] || return
+  awk -v key="$key" '
+    $0 ~ "Option[[:space:]]+\"" key "\"" {
+      # extract the second quoted string on the line
+      n = split($0, a, "\"")
+      print a[4]
+      exit
+    }
+  ' "$X11_KEYBOARD_FILE"
+}
+
 # ---------------------------------------------------------------------------
 # status
 # ---------------------------------------------------------------------------
 
+# Print one status line with the label right-aligned in a 16-char field.
+# Usage: _status_line "Label" "value"
+_status_line() {
+  printf "%16s: %s\n" "$1" "$2"
+}
+
 cmd_status() {
-  echo "   System Locale:"
-  local found=0
-  local v val
+  # ── Locale ──────────────────────────────────────────────────────────────
+  local found=0 first=1 v val indent="                  "
   for v in "${KNOWN_LOCALE_VARS[@]}"; do
-    val=$(kv_read "$LOCALE_FILE" "$v")
-    if [ -n "$val" ]; then
-      printf "             %s=%s\n" "$v" "$val"
-      found=1
+    val=$(rcl_lang_sh_get "$LANG_SH_FILE" "$v")
+    [ -z "$val" ] && continue
+    if [ "$first" -eq 1 ]; then
+      _status_line "System Locale" "$v=$val"
+      first=0
+    else
+      # continuation lines aligned to value column (18 spaces)
+      printf "%s%s=%s\n" "$indent" "$v" "$val"
     fi
+    found=1
   done
-  [ "$found" -eq 0 ] && echo "             (none)"
+  [ "$found" -eq 0 ] && _status_line "System Locale" "n/a"
 
-  echo ""
-  local vc_keymap
+  # ── Console keyboard ────────────────────────────────────────────────────
+  local vc_keymap toggle
   vc_keymap=$(rcl_read_rc_keymap "$RC_KEYMAP_FILE")
-  echo "  VC Keymap: ${vc_keymap:-(none)}"
-  local toggle
   toggle=$(rcl_read_rc_keymap_toggle "$RC_KEYMAP_TOGGLE_FILE")
-  [ -n "$toggle" ] && echo "     VC Toggle: $toggle"
+  _status_line "VC Keymap" "${vc_keymap:-(unset)}"
+  [ -n "$toggle" ] && _status_line "VC Keymap Tgl" "$toggle"
 
-  echo ""
+  # ── X11 keyboard ────────────────────────────────────────────────────────
   local layout model variant options
-  layout=$(grep -oP '(?<=XkbLayout" ")([^"]+)' "$X11_KEYBOARD_FILE" 2>/dev/null || true)
-  model=$(grep -oP '(?<=XkbModel" ")([^"]+)' "$X11_KEYBOARD_FILE" 2>/dev/null || true)
-  variant=$(grep -oP '(?<=XkbVariant" ")([^"]+)' "$X11_KEYBOARD_FILE" 2>/dev/null || true)
-  options=$(grep -oP '(?<=XkbOptions" ")([^"]+)' "$X11_KEYBOARD_FILE" 2>/dev/null || true)
+  layout=$(rcl_x11_read_opt XkbLayout)
+  model=$(rcl_x11_read_opt XkbModel)
+  variant=$(rcl_x11_read_opt XkbVariant)
+  options=$(rcl_x11_read_opt XkbOptions)
 
-  echo "  X11 Layout: ${layout:-(none)}"
-  [ -n "$model"   ] && echo "   X11 Model: $model"
-  [ -n "$variant" ] && echo " X11 Variant: $variant"
-  [ -n "$options" ] && echo " X11 Options: $options"
+  _status_line "X11 Layout"  "${layout:-(unset)}"
+  # Show Model/Variant/Options whenever a layout is configured, even if empty
+  if [ -n "$layout" ]; then
+    _status_line "X11 Model"   "${model:--}"
+    _status_line "X11 Variant" "${variant:--}"
+    _status_line "X11 Options" "${options:--}"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -370,11 +425,11 @@ _xkb_section() {
 }
 
 cmd_list_x11_keymap_models() {
-  _xkb_section "model" "${1:-}"
+  _xkb_section "model" "${1:-}" | _run_pager
 }
 
 cmd_list_x11_keymap_layouts() {
-  _xkb_section "layout" "${1:-}"
+  _xkb_section "layout" "${1:-}" | _run_pager
 }
 
 cmd_list_x11_keymap_variants() {
@@ -401,7 +456,7 @@ cmd_list_x11_keymap_variants() {
                        && tolower(desc) !~ tolower(filter)) next
       print code
     }
-  ' "$XKB_BASE_LST" | sort -u
+  ' "$XKB_BASE_LST" | sort -u | _run_pager
 }
 
 cmd_list_x11_keymap_options() {
@@ -444,7 +499,8 @@ cmd_list_keymaps() {
     | xargs -I{} basename {} \
     | sed -e 's/\.map\.gz$//' -e 's/\.map$//' \
     | sort -u \
-    | if [ -n "$filter" ]; then grep -i "$filter"; else cat; fi
+    | if [ -n "$filter" ]; then grep -i "$filter"; else cat; fi \
+    | _run_pager
 }
 
 # ---------------------------------------------------------------------------
@@ -464,7 +520,7 @@ cmd_list_locales() {
     locale -a 2>/dev/null | grep -i "$filter"
   else
     locale -a 2>/dev/null
-  fi
+  fi | _run_pager
 }
 
 # ---------------------------------------------------------------------------
@@ -493,6 +549,7 @@ Commands:
   list-x11-keymap-options [FILTER]   List available X11 keyboard options
 
 Options:
+  --no-pager                      Do not pipe list output through a pager
   -h, --help                      Show this help and exit
 
 Known locale variables:
@@ -524,6 +581,15 @@ EOF
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
+
+# Global flags (consumed before the command)
+NO_PAGER=0
+while true; do
+  case "${1:-}" in
+    --no-pager) NO_PAGER=1; shift ;;
+    *)          break ;;
+  esac
+done
 
 case "${1:-status}" in
   status)                 shift; cmd_status "$@" ;;

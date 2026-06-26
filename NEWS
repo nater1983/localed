@@ -160,3 +160,31 @@ root. They match the full command set of systemd 257's `localectl`.
 - Bash conversion table (`_vc_to_x11` / `_x11_to_vc`) mirroring the C
   daemon's `keymap_map[]` table exactly, including first-layout extraction
   from comma-separated layout strings like `"cz,us"`.
+
+## [0.1.8] - 2026-06-22
+
+### Changed (`localectl status`)
+- Output now uses right-aligned 16-character label fields matching systemd
+  localectl exactly:
+  ```
+     System Locale: LANG=en_US.UTF-8
+                    LC_TIME=en_GB.UTF-8
+         VC Keymap: us
+        X11 Layout: cz,us
+         X11 Model: pc104
+       X11 Variant: ,dvorak
+       X11 Options: grp:win_space_toggle
+  ```
+- Multiple locale variables are shown with the first on the label line and
+  continuations indented to the value column (18 spaces).
+- X11 Model, Variant, and Options are always shown when a layout is set,
+  even when empty (shown as `-`), matching upstream behaviour.
+- X11 value reading replaced with portable awk (`rcl_x11_read_opt`) instead
+  of `grep -oP` lookbehind, which failed on non-PCRE grep builds.
+- Locale reading replaced with `rcl_lang_sh_get` (awk-based) for the same
+  portability reason.
+
+### Added (`localectl`)
+- `--no-pager` global flag: suppresses piping list command output through
+  `$PAGER` (default: `less -FRX`). Output is also never paged when stdout
+  is not a terminal. Applied to all six `list-*` commands.
