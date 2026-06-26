@@ -4,7 +4,7 @@
 localectl \- control the system locale and keyboard layout
 .SH SYNOPSIS
 .B localectl
-.RI [ OPTIONS ]
+.RB [ \-\-no\-convert ]
 .IR COMMAND " [" ARGUMENT ...]
 .SH DESCRIPTION
 .B localectl
@@ -103,11 +103,33 @@ and
 .BI set-x11-keymap " LAYOUT [MODEL [VARIANT [OPTIONS]]]"
 Set the X11 keyboard layout.
 .I LAYOUT
-is required; all other arguments are optional and default to an empty
-string (which suppresses that Option line in the Xorg config).
+is required; all other arguments are optional.
+Any argument not supplied is read from the current
+.I X11_KEYBOARD_FILE
+and preserved unchanged, so you can update a single field without
+having to repeat all the others.
+Pass an explicit empty string
+.RB ( \(dq\(dq )
+to clear a field.
 Written to
 .IR /etc/X11/xorg.conf.d/00-keyboard.conf .
 .SH OPTIONS
+.TP
+.BR \-\-no\-convert
+When used with
+.B set-keymap
+or
+.BR set-x11-keymap ,
+suppress the automatic conversion between the console keymap and the
+X11 keyboard layout.
+Without this flag,
+.B set-keymap
+also updates the X11 keyboard layout using the built-in conversion
+table, and
+.B set-x11-keymap
+also updates the console keymap.
+The conversion is best-effort; if no table entry exists for the given
+keymap or layout, the other side is left unchanged rather than guessing.
 .TP
 .BR \-h ", " \-\-help
 Show a short usage summary and exit.

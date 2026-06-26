@@ -128,3 +128,35 @@ All notable changes to `localed` are documented in this file.
 All four commands parse `base.lst` with portable POSIX awk (no gawk
 dependency), optionally filter results case-insensitively, and require no
 root. They match the full command set of systemd 257's `localectl`.
+
+## [0.1.7] - 2026-06-22
+
+### Changed (`localectl`)
+- `set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]` now reads the current
+  values from the X11 keyboard config file and uses them as defaults for any
+  argument not supplied on the command line.  This allows updating a single
+  field without repeating all the others:
+    localectl set-x11-keymap cz,us pc104   # keeps existing variant and options
+  Passing an explicit empty string `""` still clears that field:
+    localectl set-x11-keymap cz,us "" "" grp:alt_shift_toggle
+  The distinction is made via `${N-default}` (unset) vs `${N:-default}`
+  (unset or empty), so the behaviour is unambiguous.
+
+## [0.1.7] - 2026-06-22
+
+### Fixed
+- `set-x11-keymap` and `set-keymap` now perform bidirectional conversion by
+  default (matching systemd localectl behaviour): `set-x11-keymap` also
+  updates `/etc/rc.d/rc.keymap` and `set-keymap` also updates the X11
+  keyboard config, using the same 26-entry conversion table as the daemon.
+- X11 keyboard config parser correctly handles tab-indented `Option` lines
+  and multi-layout values such as `"cz,us"` and `",dvorak"`.
+
+### Added (`localectl`)
+- `--no-convert` flag for `set-keymap` and `set-x11-keymap`: suppresses the
+  automatic cross-conversion, writing only the target file.
+- `rcl_write_x11_keyboard` internal helper extracted so both `set-x11-keymap`
+  and the convert path in `set-keymap` share one write implementation.
+- Bash conversion table (`_vc_to_x11` / `_x11_to_vc`) mirroring the C
+  daemon's `keymap_map[]` table exactly, including first-layout extraction
+  from comma-separated layout strings like `"cz,us"`.

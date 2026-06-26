@@ -138,6 +138,77 @@ rcl_write_rc_keymap_toggle() {
 }
 
 # ---------------------------------------------------------------------------
+# Keyboard conversion table (console keymap <-> X11 layout)
+# Mirrors the table in rcl-locale.c so localectl's direct-write path and the
+# D-Bus daemon path produce the same conversions.
+# ---------------------------------------------------------------------------
+
+# _vc_to_x11 KEYMAP -> sets _X11_LAYOUT and _X11_VARIANT (or empty strings)
+_vc_to_x11() {
+  _X11_LAYOUT="" _X11_VARIANT=""
+  case "$1" in
+    us)          _X11_LAYOUT=us   _X11_VARIANT="" ;;
+    uk)          _X11_LAYOUT=gb   _X11_VARIANT="" ;;
+    de|de-latin1) _X11_LAYOUT=de  _X11_VARIANT="" ;;
+    fr|fr-latin1) _X11_LAYOUT=fr  _X11_VARIANT="" ;;
+    es)          _X11_LAYOUT=es   _X11_VARIANT="" ;;
+    it)          _X11_LAYOUT=it   _X11_VARIANT="" ;;
+    pt-latin1)   _X11_LAYOUT=pt   _X11_VARIANT="" ;;
+    ru|ru4)      _X11_LAYOUT=ru   _X11_VARIANT="" ;;
+    se-latin1)   _X11_LAYOUT=se   _X11_VARIANT="" ;;
+    no-latin1)   _X11_LAYOUT=no   _X11_VARIANT="" ;;
+    dk-latin1)   _X11_LAYOUT=dk   _X11_VARIANT="" ;;
+    nl)          _X11_LAYOUT=nl   _X11_VARIANT="" ;;
+    trq)         _X11_LAYOUT=tr   _X11_VARIANT="" ;;
+    pl)          _X11_LAYOUT=pl   _X11_VARIANT="" ;;
+    cz-lat2)     _X11_LAYOUT=cz   _X11_VARIANT="" ;;
+    fi)          _X11_LAYOUT=fi   _X11_VARIANT="" ;;
+    gr)          _X11_LAYOUT=gr   _X11_VARIANT="" ;;
+    il)          _X11_LAYOUT=il   _X11_VARIANT="" ;;
+    jp106)       _X11_LAYOUT=jp   _X11_VARIANT="" ;;
+    ua)          _X11_LAYOUT=ua   _X11_VARIANT="" ;;
+    be-latin1)   _X11_LAYOUT=be   _X11_VARIANT="" ;;
+    ch)          _X11_LAYOUT=ch   _X11_VARIANT=de_nodeadkeys ;;
+    ch-fr)       _X11_LAYOUT=ch   _X11_VARIANT=fr ;;
+    *)           return 1 ;;
+  esac
+  return 0
+}
+
+# _x11_to_vc LAYOUT -> sets _VC_KEYMAP (or empty string)
+_x11_to_vc() {
+  _VC_KEYMAP=""
+  # Use only the first layout in a comma-separated list
+  local layout="${1%%,*}"
+  case "$layout" in
+    us) _VC_KEYMAP=us       ;;
+    gb) _VC_KEYMAP=uk       ;;
+    de) _VC_KEYMAP=de       ;;
+    fr) _VC_KEYMAP=fr       ;;
+    es) _VC_KEYMAP=es       ;;
+    it) _VC_KEYMAP=it       ;;
+    pt) _VC_KEYMAP=pt-latin1 ;;
+    ru) _VC_KEYMAP=ru       ;;
+    se) _VC_KEYMAP=se-latin1 ;;
+    no) _VC_KEYMAP=no-latin1 ;;
+    dk) _VC_KEYMAP=dk-latin1 ;;
+    nl) _VC_KEYMAP=nl       ;;
+    tr) _VC_KEYMAP=trq      ;;
+    pl) _VC_KEYMAP=pl       ;;
+    cz) _VC_KEYMAP=cz-lat2  ;;
+    fi) _VC_KEYMAP=fi       ;;
+    gr) _VC_KEYMAP=gr       ;;
+    il) _VC_KEYMAP=il       ;;
+    jp) _VC_KEYMAP=jp106    ;;
+    ua) _VC_KEYMAP=ua       ;;
+    be) _VC_KEYMAP=be-latin1 ;;
+    ch) _VC_KEYMAP=ch       ;;
+    *)  return 1 ;;
+  esac
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # status
 # ---------------------------------------------------------------------------
 
@@ -209,6 +280,12 @@ cmd_set_locale() {
 
 cmd_set_keymap() {
   require_root
+
+  local no_convert=0
+  if [ "${1:-}" = "--no-convert" ]; then
+    no_convert=1; shift
+  fi
+
   [ "$#" -eq 0 ] && die "set-keymap requires a KEYMAP argument"
 
   local keymap="$1"
@@ -216,20 +293,17 @@ cmd_set_keymap() {
 
   rcl_write_rc_keymap "$RC_KEYMAP_FILE" "$keymap"
   rcl_write_rc_keymap_toggle "$RC_KEYMAP_TOGGLE_FILE" "$toggle"
+
+  if [ "$no_convert" -eq 0 ] && [ -n "$keymap" ]; then
+    if _vc_to_x11 "$keymap"; then
+      rcl_write_x11_keyboard "$_X11_LAYOUT" "" "$_X11_VARIANT" ""
+    fi
+  fi
 }
 
-# ---------------------------------------------------------------------------
-# set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]
-# ---------------------------------------------------------------------------
-
-cmd_set_x11_keymap() {
-  require_root
-  [ "$#" -eq 0 ] && die "set-x11-keymap requires at least a LAYOUT argument"
-
-  local layout="$1"
-  local model="${2:-}"
-  local variant="${3:-}"
-  local options="${4:-}"
+# Write /etc/X11/xorg.conf.d/00-keyboard.conf atomically.
+rcl_write_x11_keyboard() {
+  local layout="$1" model="${2:-}" variant="${3:-}" options="${4:-}"
 
   local dir
   dir=$(dirname "$X11_KEYBOARD_FILE")
@@ -252,6 +326,10 @@ EOF
 
   mv "$tmp" "$X11_KEYBOARD_FILE" || { rm -f "$tmp"; die "cannot update $X11_KEYBOARD_FILE"; }
 }
+
+# ---------------------------------------------------------------------------
+# set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # list-x11-keymap-models / layouts / variants / options
@@ -402,9 +480,12 @@ Commands:
   list-keymaps [FILTER]           List available console keymaps (optional grep filter)
   list-locales [FILTER]           List available locales (optional grep filter)
   set-locale KEY=value [...]      Set system locale variables in lang.sh
-  set-keymap KEYMAP [TOGGLE]      Set the virtual console keymap
-  set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]
-                                  Set the X11 keyboard layout
+  set-keymap [--no-convert] KEYMAP [TOGGLE]
+                                  Set the virtual console keymap
+  set-x11-keymap [--no-convert] LAYOUT [MODEL [VARIANT [OPTIONS]]]
+                                  Set the X11 keyboard layout.
+                                  Omitted args keep their current value;
+                                  pass "" to explicitly clear a field.
   list-x11-keymap-models [FILTER]    List available X11 keyboard models
   list-x11-keymap-layouts [FILTER]   List available X11 keyboard layouts
   list-x11-keymap-variants [LAYOUT] [FILTER]
@@ -428,6 +509,9 @@ Examples:
   localectl set-locale LANG=en_US.UTF-8
   localectl set-locale LANG=en_US.UTF-8 LC_TIME=en_GB.UTF-8
   localectl set-keymap us
+  localectl set-x11-keymap cz,us pc104 ,dvorak grp:win_space_toggle
+  localectl set-x11-keymap cz,us pc104      # keeps existing variant and options
+  localectl set-x11-keymap cz,us "" "" grp:alt_shift_toggle  # clear model/variant, set options
   localectl set-x11-keymap de pc105 nodeadkeys
   localectl set-x11-keymap us pc105 "" compose:ralt
   localectl list-x11-keymap-models
