@@ -47,9 +47,10 @@ meson setup build -Ddbus_system_service_dir=/usr/share/dbus-1/system-services
 
 # Override locale file paths (Slackware defaults shown)
 meson setup build \
-  -Dlocale_conf=/etc/locale.conf \
-  -Dvconsole_conf=/etc/vconsole.conf \
-  -Dx11_keyboard_conf=/etc/X11/xorg.conf.d/00-keyboard.conf
+    -Drc_keymap=/etc/rc.d/rc.keymap \
+    -Dlang_sh=/etc/profile.d/lang.sh \
+    -Dprivileged-group=wheel \
+    -Dx11_keyboard_conf=/etc/X11/xorg.conf.d/00-keyboard.conf
 ```
 
 ## Installing
