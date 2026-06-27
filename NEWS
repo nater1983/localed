@@ -141,10 +141,6 @@ root. They match the full command set of systemd 257's `localectl`.
     localectl set-x11-keymap cz,us "" "" grp:alt_shift_toggle
   The distinction is made via `${N-default}` (unset) vs `${N:-default}`
   (unset or empty), so the behaviour is unambiguous.
-
-## [0.1.7] - 2026-06-22
-
-### Fixed
 - `set-x11-keymap` and `set-keymap` now perform bidirectional conversion by
   default (matching systemd localectl behaviour): `set-x11-keymap` also
   updates `/etc/rc.d/rc.keymap` and `set-keymap` also updates the X11
@@ -188,3 +184,70 @@ root. They match the full command set of systemd 257's `localectl`.
 - `--no-pager` global flag: suppresses piping list command output through
   `$PAGER` (default: `less -FRX`). Output is also never paged when stdout
   is not a terminal. Applied to all six `list-*` commands.
+
+## [0.1.9] - 2026-06-27
+
+### Security
+
+- **`localectl set-locale` wrote to wrong file**: `cmd_set_locale` called
+  `kv_set` targeting `/etc/locale.conf`, which the daemon never reads.
+  The daemon reads and writes `/etc/profile.d/lang.sh` exclusively. Fixed
+  by replacing `kv_set` with a new `rcl_write_lang_sh()` function that
+  writes `export KEY="value"` format to the correct path.
+
+- **`LANG_SH_FILE` undefined in `localectl`**: `cmd_status` referenced
+  `$LANG_SH_FILE` before it was assigned, causing the locale section of
+  `localectl status` to always display `n/a`. Fixed by defining
+  `LANG_SH_FILE="/etc/profile.d/lang.sh"` at the top of the script.
+
+- **`cmd_set_x11_keymap` missing from `localectl`**: the dispatch table
+  referenced `cmd_set_x11_keymap` but the function was never defined,
+  causing `localectl set-x11-keymap` to always fail with
+  `command not found`. Function implemented with full argument handling,
+  read-current-values semantics for omitted fields, validation, and
+  `--no-convert` support.
+
+- **XKB option value length not bounded**: `extract_xkb_option()` had no
+  length cap on values parsed from the X11 keyboard config file. Added
+  `#define MAX_XKB_VALUE_LEN 256`; values exceeding this are silently
+  ignored and fall back to empty string, with a `g_warning` logged.
+
+- **Temp file leaked on rename failure**: all four atomic write functions
+  (`write_x11_keyboard_conf`, `rcl_write_rc_keymap`,
+  `rcl_write_rc_keymap_toggle`, `rcl_write_lang_sh`) failed to unlink the
+  temp file when `g_rename()` returned an error, leaving stale `.tmp` files
+  on disk. Fixed by adding `g_unlink(tmp_path)` in each rename-failure
+  branch.
+
+- **Shell injection in `rcl_write_rc_keymap` (C daemon)**: keymap values
+  written into `/etc/rc.d/rc.keymap` were interpolated unquoted into the
+  generated shell script. A value such as `us $(reboot)` would pass the
+  previous validator and execute `reboot` as root when `rc.keymap` is
+  sourced at boot. Values are now written as `/usr/bin/loadkeys "<keymap>"`.
+
+- **Shell injection in `localectl rcl_write_x11_keyboard`**: the X11
+  keyboard config was written via a double-quoted heredoc, allowing
+  `$(...)`-style expansion of layout, model, variant, and options values.
+  Replaced with a single-quoted heredoc (`<< 'HEREDOC'`) for the static
+  skeleton and `printf '%s'` for each variable field. Combined with the
+  tightened validator below, injection is blocked at two independent layers.
+
+- **Overly permissive keyboard value validator**: `rcl_keyboard_value_is_safe()`
+  previously denied only `"`, `\`, and control characters, leaving shell
+  metacharacters (`$`, `` ` ``, `!`, `(`, `)`, `;`, `|`, `&`, `>`, `<`,
+  `*`, `?`, space, etc.) as accepted input that could reach `rc.keymap` or
+  `xorg.conf.d`. The validator now uses a strict allowlist:
+  `[A-Za-z0-9\-_.,+:]` only — sufficient for all real keymap and XKB
+  identifiers. Applied in both the C daemon and `localectl`.
+
+- **Undefined behaviour in `rcl_write_rc_keymap_toggle`**: the function
+  had no `return` statement on the write path, making the caller's use of
+  the `gboolean` result undefined behaviour under C99/C11. Fixed by adding
+  `return ok` and the matching `g_free` calls before it.
+
+### Changed
+
+- Documented the trust assumption in `rcl_write_lang_sh`: non-locale lines
+  in `lang.sh` are preserved verbatim on the basis that `lang.sh` is a
+  root-owned system file. Any caller that sources user-supplied content into
+  `lang.sh` before invoking this function is responsible for sanitising it.
