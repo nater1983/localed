@@ -71,9 +71,9 @@ meson setup \
   --localstatedir=/var \
   --mandir=/usr/man \
   --buildtype=release \
+  -Drc_keymap=/etc/rc.d/rc.keymap \
+  -Dlang_sh=/etc/profile.d/lang.sh \
   -Dprivileged-group=wheel \
-  -Dlocale_conf=/etc/locale.conf \
-  -Dvconsole_conf=/etc/vconsole.conf \
   -Dx11_keyboard_conf=/etc/X11/xorg.conf.d/00-keyboard.conf \
   .. || exit 1
   "${NINJA:=ninja}" $NUMJOBS || exit 1
