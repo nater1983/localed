@@ -6,7 +6,7 @@
 #
 # Copyright 2026, GPLv2+
 
-LOCALE_FILE="/etc/locale.conf"
+LANG_SH_FILE="/etc/profile.d/lang.sh"
 RC_KEYMAP_FILE="/etc/rc.d/rc.keymap"
 RC_KEYMAP_TOGGLE_FILE="/etc/rc.d/rc.keymap.toggle"
 X11_KEYBOARD_FILE="/etc/X11/xorg.conf.d/00-keyboard.conf"
@@ -105,6 +105,14 @@ rcl_read_rc_keymap_toggle() {
   head -1 "$file" 2>/dev/null | tr -d '\n'
 }
 
+keyboard_value_is_safe() {
+  # Reject control characters, double-quotes, and backslashes.
+  # Mirrors rcl_keyboard_value_is_safe() in rcl-locale.c.
+  [[ "$1" =~ $'\001'-$'\037' ]] && return 1
+  [[ "$1" == *'"'* || "$1" == *'\\'* ]] && return 1
+  return 0
+}
+
 # Write (or overwrite) a Slackware rc.keymap script.
 rcl_write_rc_keymap() {
   local file="$1" keymap="$2"
@@ -116,20 +124,24 @@ rcl_write_rc_keymap() {
   tmp=$(mktemp "${file}.XXXXXX") || die "cannot create temp file"
 
   if [ -n "$keymap" ]; then
-    cat > "$tmp" << EOF
+    # Single-quoted heredoc: no shell expansion inside.
+    # The validated keymap is appended via printf to prevent injection.
+    {
+      cat << 'HEREDOC'
 #!/bin/bash
 # Written by localectl - see localed(8)
 # More keymaps are in /usr/share/kbd/keymaps
 if [ -x /usr/bin/loadkeys ]; then
-  /usr/bin/loadkeys ${keymap}
-fi
-EOF
+HEREDOC
+      printf '  /usr/bin/loadkeys "%s"\n' "$keymap"
+      echo 'fi'
+    } > "$tmp"
   else
-    cat > "$tmp" << 'EOF'
+    cat > "$tmp" << 'HEREDOC'
 #!/bin/bash
 # Written by localectl - see localed(8)
 # No keymap configured
-EOF
+HEREDOC
   fi
 
   chmod 755 "$tmp"
@@ -321,12 +333,67 @@ cmd_set_locale() {
     fi
   done
 
-  # All validated; apply.
+  # All validated; apply using lang.sh-aware writer (export KEY="value" format).
+  rcl_write_lang_sh "$@"
+}
+
+# Write locale variable assignments to /etc/profile.d/lang.sh.
+# Preserves existing non-locale lines.  Accepts KEY=value pairs as arguments.
+rcl_write_lang_sh() {
+  local file="$LANG_SH_FILE"
+  local dir tmp
+
+  dir=$(dirname "$file")
+  mkdir -p "$dir" || die "cannot create $dir"
+
+  tmp=$(mktemp "${file}.XXXXXX") || die "cannot create temp file"
+
+  # Build associative array of incoming updates
+  declare -A updates
+  local pair key value
   for pair in "$@"; do
     key="${pair%%=*}"
     value="${pair#*=}"
-    kv_set "$LOCALE_FILE" "$key" "$value"
+    updates["$key"]="$value"
   done
+
+  {
+    echo "# Written by localectl - see localed(8)"
+
+    # Preserve non-locale lines (comments, unrecognised exports, etc.)
+    if [ -f "$file" ]; then
+      while IFS= read -r line; do
+        local stripped="${line#"${line%%[![:space:]]*}"}"  # lstrip
+        # Drop old "Written by localectl" header
+        [[ "$stripped" == *"Written by localectl"* ]] && continue
+        # Drop blank lines (we'll re-emit at end)
+        [ -z "$stripped" ] && continue
+        # Drop known locale exports (rewritten below in canonical order)
+        if [[ "$stripped" == export\ * ]]; then
+          local rest="${stripped#export }"
+          rest="${rest#"${rest%%[![:space:]]*}"}"
+          local lkey="${rest%%=*}"
+          locale_var_is_known "$lkey" && continue
+        fi
+        printf '%s\n' "$line"
+      done < "$file"
+    fi
+
+    # Emit locale variables in canonical order
+    local v cur_val new_val
+    for v in "${KNOWN_LOCALE_VARS[@]}"; do
+      if [[ -v updates["$v"] ]]; then
+        new_val="${updates[$v]}"
+      else
+        # Preserve existing value for vars not being updated
+        cur_val=$(rcl_lang_sh_get "$file" "$v")
+        new_val="$cur_val"
+      fi
+      [ -n "$new_val" ] && printf 'export %s="%s"\n' "$v" "$new_val"
+    done
+  } > "$tmp"
+
+  mv "$tmp" "$file" || { rm -f "$tmp"; die "cannot update $file"; }
 }
 
 # ---------------------------------------------------------------------------
@@ -345,6 +412,9 @@ cmd_set_keymap() {
 
   local keymap="$1"
   local toggle="${2:-}"
+
+  keyboard_value_is_safe "$keymap" || die "invalid keymap '$keymap'"
+  [ -n "$toggle" ] && { keyboard_value_is_safe "$toggle" || die "invalid keymap toggle '$toggle'"; }
 
   rcl_write_rc_keymap "$RC_KEYMAP_FILE" "$keymap"
   rcl_write_rc_keymap_toggle "$RC_KEYMAP_TOGGLE_FILE" "$toggle"
@@ -386,7 +456,43 @@ EOF
 # set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
+cmd_set_x11_keymap() {
+  require_root
+
+  local no_convert=0
+  if [ "${1:-}" = "--no-convert" ]; then
+    no_convert=1; shift
+  fi
+
+  [ "$#" -eq 0 ] && die "set-x11-keymap requires a LAYOUT argument"
+
+  local layout="$1"
+  # Omitted args read the current value; explicit "" clears the field.
+  local model variant options
+  if [ "$#" -ge 2 ]; then model="$2";   else model=$(rcl_x11_read_opt XkbModel);   fi
+  if [ "$#" -ge 3 ]; then variant="$3"; else variant=$(rcl_x11_read_opt XkbVariant); fi
+  if [ "$#" -ge 4 ]; then options="$4"; else options=$(rcl_x11_read_opt XkbOptions); fi
+
+  # Validate all fields; mirrors rcl_keyboard_value_is_safe() in rcl-locale.c
+  local field fname
+  for field_pair in "layout:$layout" "model:$model" "variant:$variant" "options:$options"; do
+    fname="${field_pair%%:*}"
+    field="${field_pair#*:}"
+    if [ -n "$field" ] && ! keyboard_value_is_safe "$field"; then
+      die "invalid X11 keyboard $fname value '$field'"
+    fi
+  done
+
+  rcl_write_x11_keyboard "$layout" "$model" "$variant" "$options"
+
+  if [ "$no_convert" -eq 0 ] && [ -n "$layout" ]; then
+    if _x11_to_vc "$layout"; then
+      rcl_write_rc_keymap "$RC_KEYMAP_FILE" "$_VC_KEYMAP"
+    fi
+  fi
+}
+
+
 # list-x11-keymap-models / layouts / variants / options
 #
 # All four parse /usr/share/X11/xkb/rules/base.lst which is shipped by the
