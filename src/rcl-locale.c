@@ -328,6 +328,11 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
    with an empty value are still emitted (most tools treat a present-but-
    empty Option the same as an absent one).
    -------------------------------------------------------------------------- */
+/* Maximum length for any single XKB option value extracted from the config
+   file.  Values longer than this are almost certainly malformed or malicious
+   (real XKB layout/model/variant/options strings are well under 64 chars). */
+#define MAX_XKB_VALUE_LEN  256
+
 static gchar *
 extract_xkb_option( const gchar *contents, const gchar *option_name )
 {
@@ -349,7 +354,14 @@ extract_xkb_option( const gchar *contents, const gchar *option_name )
       {
         gchar *value_end = strchr( value_start + 1, '"' );
         if( value_end )
-          result = g_strndup( value_start + 1, (gsize)(value_end - value_start - 1) );
+        {
+          gsize len = (gsize)(value_end - value_start - 1);
+          if( len <= MAX_XKB_VALUE_LEN )
+            result = g_strndup( value_start + 1, len );
+          else
+            g_warning( "extract_xkb_option: value for '%s' exceeds %d bytes, ignoring",
+                       option_name, MAX_XKB_VALUE_LEN );
+        }
       }
     }
   }
@@ -419,6 +431,7 @@ write_x11_keyboard_conf( const gchar *path,
   {
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                  "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
+    g_unlink( tmp_path );
     ok = FALSE;
   }
 
@@ -553,6 +566,7 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
+      g_unlink( tmp_path );
       ok = FALSE;
     }
   }
@@ -607,12 +621,9 @@ rcl_write_rc_keymap_toggle( const gchar *path,
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
+      g_unlink( tmp_path );
       ok = FALSE;
     }
-
-    g_free( tmp_path );
-    g_free( line );
-    return ok;
   }
 }
 
@@ -882,6 +893,7 @@ rcl_write_lang_sh( const gchar         *path,
   {
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                  "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
+    g_unlink( tmp_path );
     ok = FALSE;
   }
 
