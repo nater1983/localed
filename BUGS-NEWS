@@ -1,7 +1,7 @@
 BUGS-NEWS
 =========
 
-Known issues and notable behaviour for localed 0.1.0.
+Known issues and notable behaviour for localed 0.1.9.
 
 BUGS
 ----
@@ -25,6 +25,54 @@ BUGS
 * locale.conf values containing a comma are accepted (LANGUAGE uses colons,
   but the safe-value check also allows commas for forward compatibility).
   Values containing characters outside [A-Za-z0-9_.@:,-] are rejected.
+
+* The D-Bus bus policy (org.freedesktop.locale1.conf) contains an
+  unrestricted <allow send_destination> rule in the default context, meaning
+  any bus peer may send Set* method calls.  Authorisation is enforced by
+  PolKit and the calls are harmless without a valid PolKit grant, but
+  defence-in-depth would restrict Set* to privileged peers at the bus-policy
+  layer as well.  This will be tightened in a future release.
+
+FIXED IN 0.1.9
+--------------
+
+* localectl set-locale silently wrote to /etc/locale.conf instead of
+  /etc/profile.d/lang.sh, so changes were never picked up by the daemon.
+  (Fixed: rcl_write_lang_sh() now targets the correct file.)
+
+* LANG_SH_FILE was undefined in localectl, causing "localectl status" to
+  always show "n/a" for the system locale.
+  (Fixed: variable defined at top of script.)
+
+* localectl set-x11-keymap always failed with "command not found" because
+  cmd_set_x11_keymap() was referenced in the dispatch table but never
+  implemented.
+  (Fixed: function fully implemented.)
+
+* extract_xkb_option() imposed no length limit on parsed XKB values,
+  making it possible for a malformed or adversarial xorg.conf.d file to
+  produce arbitrarily long D-Bus property strings.
+  (Fixed: MAX_XKB_VALUE_LEN = 256 enforced; oversized values ignored.)
+
+* All four atomic write functions leaked the temp file on rename(2) failure.
+  (Fixed: g_unlink(tmp_path) added to each rename-failure branch.)
+
+* rcl_write_rc_keymap() wrote the keymap value unquoted into the generated
+  rc.keymap shell script. The previous validator accepted shell metacharacters
+  ($, `, !, etc.), allowing a crafted keymap name to inject arbitrary shell
+  commands executed as root at boot.
+  (Fixed: value double-quoted in the format string; validator tightened to
+  allowlist [A-Za-z0-9\-_.,+:] in both the C daemon and localectl.)
+
+* localectl rcl_write_x11_keyboard() wrote XKB field values inside a
+  double-quoted heredoc, allowing $(...) expansion of layout/model/variant/
+  options values.
+  (Fixed: single-quoted heredoc for the static skeleton; printf '%s' for
+  each variable field.)
+
+* rcl_write_rc_keymap_toggle() had no return statement on the write path,
+  making the gboolean result seen by the caller undefined behaviour.
+  (Fixed: return ok added before closing brace.)
 
 REPORTING BUGS
 --------------
