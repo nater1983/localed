@@ -548,7 +548,7 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
     "if [ -x /usr/bin/loadkeys ]; then\n" );
 
   if( keymap && keymap[0] != '\0' )
-    g_string_append_printf( out, "  /usr/bin/loadkeys %s\n", keymap );
+    g_string_append_printf( out, "  /usr/bin/loadkeys \"%s\"\n", keymap );
   else
     g_string_append( out, "  : # no keymap configured\n" );
 
@@ -624,6 +624,10 @@ rcl_write_rc_keymap_toggle( const gchar *path,
       g_unlink( tmp_path );
       ok = FALSE;
     }
+
+    g_free( tmp_path );
+    g_free( line );
+    return ok;
   }
 }
 
@@ -657,8 +661,13 @@ rcl_locale_value_is_safe( const gchar *value )
   return TRUE;
 }
 
-/* Console keymap names and X11 layout/model/variant/options strings forbid
-   quotes, backslashes, and control characters. */
+/* Console keymap names and X11 layout/model/variant/options strings are
+   restricted to a strict allowlist: alphanumeric characters plus the handful
+   of punctuation that appears in real keymap and XKB identifiers.
+   Shell metacharacters ($, `, !, (, ), ;, |, &, >, <, *, ?, ~, {, }, space,
+   etc.) are implicitly denied — they never appear in legitimate values and
+   would be dangerous if written into rc.keymap or xorg.conf.d (both are
+   executed/sourced as shell or parsed by Xorg). */
 static gboolean
 rcl_keyboard_value_is_safe( const gchar *value )
 {
@@ -670,10 +679,17 @@ rcl_keyboard_value_is_safe( const gchar *value )
   for( p = value; *p; p++ )
   {
     guchar c = (guchar) *p;
-    if( c < 0x20 || c == 0x7f )
-      return FALSE;
-    if( c == '"' || c == '\\' )
-      return FALSE;
+    if( g_ascii_isalnum(c) )
+      continue;
+    switch( c )
+    {
+      /* Separators used in XKB option strings ("grp:win_space_toggle"),
+         layout lists ("us,de"), and variant names ("nodeadkeys"). */
+      case '-': case '_': case '.': case ',': case '+': case ':':
+        continue;
+      default:
+        return FALSE;
+    }
   }
   return TRUE;
 }
@@ -822,7 +838,16 @@ rcl_write_lang_sh( const gchar         *path,
 
   out = g_string_new( "# Written by localed - see localed(8)\n" );
 
-  /* Re-read the file to preserve non-locale lines */
+  /* Re-read the file to preserve non-locale lines.
+   *
+   * Trust assumption: lang.sh is a root-owned file under /etc.  Non-locale
+   * lines (comments, PATH exports, etc.) are copied verbatim from the
+   * existing file without further sanitisation.  An attacker who can already
+   * write to lang.sh has full root-level control of the login environment
+   * by other means, so preserving those lines does not widen the attack
+   * surface beyond what already exists.  Any caller that sources user-
+   * supplied content into lang.sh before calling this function violates
+   * that assumption and must sanitise the content itself. */
   if( g_file_get_contents( path, &contents, NULL, NULL ) )
   {
     lines = g_strsplit( contents, "\n", -1 );
