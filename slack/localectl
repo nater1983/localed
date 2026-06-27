@@ -437,17 +437,22 @@ rcl_write_x11_keyboard() {
   local tmp
   tmp=$(mktemp "${X11_KEYBOARD_FILE}.XXXXXX") || die "cannot create temp file"
 
-  cat > "$tmp" << EOF
+  # Single-quoted heredoc: no shell expansion.  Values are written via
+  # printf so shell metacharacters in layout/model/variant/options cannot
+  # be interpreted even if keyboard_value_is_safe() is somehow bypassed.
+  {
+    cat << 'HEREDOC'
 # Written by localectl - see localed(8)
 Section "InputClass"
     Identifier "system-keyboard"
     MatchIsKeyboard "on"
-    Option "XkbLayout" "${layout}"
-    Option "XkbModel" "${model}"
-    Option "XkbVariant" "${variant}"
-    Option "XkbOptions" "${options}"
-EndSection
-EOF
+HEREDOC
+    printf '    Option "XkbLayout" "%s"\n'  "$layout"
+    printf '    Option "XkbModel" "%s"\n'   "$model"
+    printf '    Option "XkbVariant" "%s"\n' "$variant"
+    printf '    Option "XkbOptions" "%s"\n' "$options"
+    echo 'EndSection'
+  } > "$tmp"
 
   mv "$tmp" "$X11_KEYBOARD_FILE" || { rm -f "$tmp"; die "cannot update $X11_KEYBOARD_FILE"; }
 }
