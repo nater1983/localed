@@ -95,7 +95,14 @@ _run_pager() {
 rcl_read_rc_keymap() {
   local file="$1"
   [ -f "$file" ] || return
-  awk '/loadkeys/ && !/^[[:space:]]*#/ && !/\]/ { print $NF; exit }' "$file"
+  # The writer quotes the keymap: /usr/bin/loadkeys "us"
+  # Extract $NF then strip surrounding double-quotes.
+  awk '/loadkeys/ && !/^[[:space:]]*#/ && !/\]/ {
+    tok = $NF
+    gsub(/^"|"$/, "", tok)
+    print tok
+    exit
+  }' "$file"
 }
 
 # Read the toggle keymap from the sidecar file.
@@ -363,16 +370,16 @@ rcl_write_lang_sh() {
     # Preserve non-locale lines (comments, unrecognised exports, etc.)
     if [ -f "$file" ]; then
       while IFS= read -r line; do
-        local stripped="${line#"${line%%[![:space:]]*}"}"  # lstrip
+        stripped="${line#"${line%%[![:space:]]*}"}"  # lstrip
         # Drop old "Written by localectl" header
         [[ "$stripped" == *"Written by localectl"* ]] && continue
         # Drop blank lines (we'll re-emit at end)
         [ -z "$stripped" ] && continue
         # Drop known locale exports (rewritten below in canonical order)
         if [[ "$stripped" == export\ * ]]; then
-          local rest="${stripped#export }"
+          rest="${stripped#export }"
           rest="${rest#"${rest%%[![:space:]]*}"}"
-          local lkey="${rest%%=*}"
+          lkey="${rest%%=*}"
           locale_var_is_known "$lkey" && continue
         fi
         printf '%s\n' "$line"
