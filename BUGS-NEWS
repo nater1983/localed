@@ -1,7 +1,7 @@
 BUGS-NEWS
 =========
 
-Known issues and notable behaviour for localed 0.1.9.
+Known issues and notable behaviour for localed 0.1.10.
 
 BUGS
 ----
@@ -73,6 +73,32 @@ FIXED IN 0.1.9
 * rcl_write_rc_keymap_toggle() had no return statement on the write path,
   making the gboolean result seen by the caller undefined behaviour.
   (Fixed: return ok added before closing brace.)
+
+FIXED IN 0.1.10
+---------------
+
+* rcl_read_rc_keymap() returned the keymap name with surrounding double-quotes
+  (e.g. `"us"` instead of `us`) after fix 8 (0.1.9) quoted the loadkeys
+  argument in the generated rc.keymap script.  The VConsoleKeymap D-Bus
+  property was therefore wrong after any write, breaking clients that compare
+  the property value against known keymap names.
+  (Fixed: quote-stripping added to the C reader and to the localectl awk
+  extractor.)
+
+* do_set_locale() in rcl-locale.c aliased locale[0] to a bare pointer before
+  freeing and replacing it, creating a potential dangling-pointer hazard if
+  the function were ever refactored.
+  (Fixed: intermediate alias removed; locale[0] freed directly via an explicit
+  expanded variable.)
+
+* The terminal log handler in main.c called localtime() which is not
+  thread-safe, as it returns a pointer to a static buffer.
+  (Fixed: replaced with localtime_r() using a stack-allocated struct tm.)
+
+* rcl_write_lang_sh() in localectl declared local variables (stripped, rest,
+  lkey) inside a while-read loop body, shadowing outer-scope variables.
+  (Fixed: local qualifiers removed; variables are now plain function-scoped
+  assignments.)
 
 REPORTING BUGS
 --------------
