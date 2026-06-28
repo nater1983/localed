@@ -251,3 +251,37 @@ root. They match the full command set of systemd 257's `localectl`.
   in `lang.sh` are preserved verbatim on the basis that `lang.sh` is a
   root-owned system file. Any caller that sources user-supplied content into
   `lang.sh` before invoking this function is responsible for sanitising it.
+
+## [0.1.10] - 2026-06-28
+
+### Fixed
+
+- **Keymap read-back broken after quoting fix** (`rcl_read_rc_keymap` in C
+  and `localectl`): fix 8 (0.1.9) quoted the keymap in the generated
+  `rc.keymap` script (`/usr/bin/loadkeys "us"`), but the reader extracted
+  the last whitespace-delimited token verbatim, returning `"us"` with quotes
+  instead of `us`. `VConsoleKeymap` D-Bus property values were therefore
+  wrong after any write, breaking clients such as GNOME Control Center that
+  compare the property against known keymap names. Fixed in `rcl_read_rc_keymap()`
+  (C) by stripping surrounding double-quotes after extraction; fixed in
+  `localectl` by running `gsub(/^"|"$/, "", tok)` in the awk script.
+
+- **Fragile `locale[0]` alias in `do_set_locale`**: the bare-locale shorthand
+  path (`SetLocale(["en_US.UTF-8"])`) stored a `bare` alias to `locale[0]`,
+  then replaced `locale[0]` with the expanded form and freed `bare`. Correct
+  today but would produce a dangling pointer if an early-return path were
+  added after the `g_free`. Replaced with an explicit `expanded` variable;
+  `locale[0]` is now freed directly without an intermediate alias.
+
+- **`localtime()` not thread-safe in log handler** (`main.c`): the
+  colourised terminal log handler called `localtime(&t)` which returns a
+  pointer to a static buffer — not safe if GLib ever invokes the handler
+  from a thread-pool callback. Replaced with `localtime_r(&t, &tm_buf)`
+  using a stack-allocated `struct tm`.
+
+- **Redundant `local` declarations inside `while` loop** (`localectl`
+  `rcl_write_lang_sh`): `local stripped`, `local rest`, and `local lkey`
+  were declared inside the `while IFS= read -r line` loop body, shadowing
+  same-named variables in the outer function scope. Removed the `local`
+  qualifiers; the variables are now plain assignments scoped to the
+  enclosing function as intended.
