@@ -510,7 +510,22 @@ rcl_read_rc_keymap( const gchar *path )
         while( end > tok && ( *(end-1) == ' ' || *(end-1) == '\t' || *(end-1) == '\n' ) )
           end--;
         if( end > tok )
+        {
           result = g_strndup( tok, (gsize)(end - tok) );
+
+          /* The writer quotes the keymap: /usr/bin/loadkeys "us"
+           * Strip surrounding double-quotes so the stored value is bare. */
+          if( result[0] == '"' )
+          {
+            gsize rlen = strlen( result );
+            if( rlen >= 2 && result[rlen-1] == '"' )
+            {
+              gchar *unquoted = g_strndup( result + 1, rlen - 2 );
+              g_free( result );
+              result = unquoted;
+            }
+          }
+        }
       }
     }
   }
@@ -1130,16 +1145,16 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
    */
   if( locale[0] != NULL && locale[1] == NULL && strchr(locale[0], '=') == NULL )
   {
-    gchar *bare = locale[0];
-    if( !rcl_locale_value_is_safe( bare ) )
+    if( !rcl_locale_value_is_safe( locale[0] ) )
     {
       g_dbus_method_invocation_return_error( invocation,
         G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-        "Invalid locale specification: '%s'", bare );
+        "Invalid locale specification: '%s'", locale[0] );
       return;
     }
-    locale[0] = g_strdup_printf( "LANG=%s", bare );
-    g_free( bare );
+    gchar *expanded = g_strdup_printf( "LANG=%s", locale[0] );
+    g_free( locale[0] );
+    locale[0] = expanded;
   }
 
   /* Validate every entry first; reject the whole call on the first bad one,
