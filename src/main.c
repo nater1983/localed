@@ -271,8 +271,9 @@ rcl_main_log_handler_cb(const gchar    *log_domain,
      */
     gchar timebuf[32];
     time_t t;
+    struct tm tm_buf;
     time(&t);
-    strftime(timebuf, sizeof(timebuf), "%H:%M:%S", localtime(&t));
+    strftime(timebuf, sizeof(timebuf), "%H:%M:%S", localtime_r(&t, &tm_buf));
     const char *color = (log_level & (G_LOG_LEVEL_ERROR    |
                                       G_LOG_LEVEL_CRITICAL |
                                       G_LOG_LEVEL_WARNING))
