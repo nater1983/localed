@@ -800,6 +800,18 @@ rcl_read_lang_sh( const gchar *path )
       val = unquoted;
     }
 
+    /* Validate the value against the same safe-charset used by SetLocale.
+     * Values that fail (e.g. from manual edits to lang.sh) are silently
+     * skipped so a corrupt file cannot inject unsafe strings into the
+     * Locale D-Bus property. */
+    if( val[0] != '\0' && !rcl_locale_value_is_safe( val ) )
+    {
+      g_warning( "rcl_read_lang_sh: skipping unsafe value for %s", key );
+      g_free( val );
+      g_free( key );
+      continue;
+    }
+
     g_hash_table_replace( table, key, val );
   }
 
@@ -1157,12 +1169,31 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
     locale[0] = expanded;
   }
 
+  /* Reject oversized arrays before doing any per-entry work.
+   * The maximum useful number of entries equals the number of known locale
+   * variables; anything larger is either a client bug or a DoS attempt.
+   * G_N_ELEMENTS includes the NULL sentinel, so subtract 1 for the count. */
+  {
+    guint n_entries = 0;
+    while( locale[n_entries] != NULL )
+      n_entries++;
+    if( n_entries > G_N_ELEMENTS(locale_variable_names) - 1 )
+    {
+      g_dbus_method_invocation_return_error( invocation,
+        G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+        "Too many locale entries (max %u)",
+        (guint)(G_N_ELEMENTS(locale_variable_names) - 1) );
+      return;
+    }
+  }
+
   /* Validate every entry first; reject the whole call on the first bad one,
      same semantics as systemd-localed. */
   for( i = 0; locale[i] != NULL; i++ )
   {
     gchar *eq = strchr( locale[i], '=' );
-    gchar *key, *val;
+    g_autofree gchar *key = NULL;
+    const gchar *val;
 
     if( !eq )
     {
@@ -1180,7 +1211,6 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
       g_dbus_method_invocation_return_error( invocation,
         G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
         "Unknown locale variable '%s'", key );
-      g_free( key );
       return;
     }
 
@@ -1189,11 +1219,8 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
       g_dbus_method_invocation_return_error( invocation,
         G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
         "Invalid value for %s", key );
-      g_free( key );
       return;
     }
-
-    g_free( key );
   }
 
   /* Build the known_keys/new_values pair arrays. An entry not present in
@@ -1739,6 +1766,17 @@ static void
 rcl_locale_daemon_finalize( GObject *object )
 {
   RclLocaleDaemonPrivate *priv = RCL_LOCALE_DAEMON(object)->priv;
+
+  /* Guard against finalization without an explicit rcl_daemon_shutdown() call
+   * (e.g. on a startup error path).  Unregistering an already-unregistered
+   * object is a no-op, and g_clear_object on a NULL pointer is safe. */
+  if( priv->connection && priv->registration_id > 0 )
+  {
+    g_dbus_connection_unregister_object( priv->connection,
+                                         priv->registration_id );
+    priv->registration_id = 0;
+  }
+  g_clear_object( &priv->connection );
 
   g_clear_object( &priv->authority );
 
