@@ -391,8 +391,13 @@ rcl_write_lang_sh() {
       if [[ -v updates["$v"] ]]; then
         new_val="${updates[$v]}"
       else
-        # Preserve existing value for vars not being updated
+        # Preserve existing value for vars not being updated.
+        # Validate it against the same safe-charset used by set-locale so a
+        # manually-edited lang.sh cannot propagate unsafe values on the next write.
         cur_val=$(rcl_lang_sh_get "$file" "$v")
+        if [ -n "$cur_val" ] && ! locale_value_is_safe "$cur_val"; then
+          continue
+        fi
         new_val="$cur_val"
       fi
       [ -n "$new_val" ] && printf 'export %s="%s"\n' "$v" "$new_val"
@@ -616,7 +621,7 @@ cmd_list_keymaps() {
     | xargs -I{} basename {} \
     | sed -e 's/\.map\.gz$//' -e 's/\.map$//' \
     | sort -u \
-    | if [ -n "$filter" ]; then grep -i "$filter"; else cat; fi \
+    | if [ -n "$filter" ]; then grep -iF "$filter"; else cat; fi \
     | _run_pager
 }
 
@@ -634,7 +639,7 @@ cmd_list_locales() {
   fi
 
   if [ -n "$filter" ]; then
-    locale -a 2>/dev/null | grep -i "$filter"
+    locale -a 2>/dev/null | grep -iF "$filter"
   else
     locale -a 2>/dev/null
   fi | _run_pager
