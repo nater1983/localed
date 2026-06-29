@@ -113,11 +113,10 @@ rcl_read_rc_keymap_toggle() {
 }
 
 keyboard_value_is_safe() {
-  # Reject control characters, double-quotes, and backslashes.
-  # Mirrors rcl_keyboard_value_is_safe() in rcl-locale.c.
-  [[ "$1" =~ $'\001'-$'\037' ]] && return 1
-  [[ "$1" == *'"'* || "$1" == *'\\'* ]] && return 1
-  return 0
+  # Strict allowlist matching rcl_keyboard_value_is_safe() in rcl-locale.c:
+  # alphanumeric plus the punctuation that appears in real keymap and XKB
+  # identifiers.  Shell metacharacters are implicitly denied.
+  [[ "$1" =~ ^[A-Za-z0-9._,:+:-]+$ ]]
 }
 
 # Write (or overwrite) a Slackware rc.keymap script.
