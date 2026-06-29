@@ -390,6 +390,29 @@ read_x11_keyboard_conf( const gchar *path,
   g_free( *out_options ); *out_options = extract_xkb_option( contents, "XkbOptions" );
 
   g_free( contents );
+
+  /* Validate values read from disk against the same allowlist used by
+   * SetX11Keyboard.  A manually-edited 00-keyboard.conf with characters
+   * outside [A-Za-z0-9\-_.,+:] is reset to empty rather than served as
+   * a D-Bus property, keeping the property consistent with what SetX11Keyboard
+   * would accept. */
+#define SANITISE_XKB(field, name)                                         \
+  do {                                                                    \
+    if( (*field)[0] != '\0' && !rcl_keyboard_value_is_safe( *field ) )   \
+    {                                                                     \
+      g_warning( "read_x11_keyboard_conf: unsafe value for %s, ignoring", \
+                 name );                                                  \
+      g_free( *field );                                                   \
+      *field = g_strdup( "" );                                            \
+    }                                                                     \
+  } while(0)
+
+  SANITISE_XKB( out_layout,  "XkbLayout" );
+  SANITISE_XKB( out_model,   "XkbModel" );
+  SANITISE_XKB( out_variant, "XkbVariant" );
+  SANITISE_XKB( out_options, "XkbOptions" );
+
+#undef SANITISE_XKB
 }
 
 static gboolean
@@ -856,8 +879,13 @@ rcl_write_lang_sh( const gchar         *path,
   }
   g_free( dir );
 
-  /* Build the updated value map from the incoming arrays */
-  new_vals = g_hash_table_new( g_str_hash, g_str_equal );
+  /* Build the updated value map from the incoming arrays.
+   * Ownership contract: keys and values are borrowed pointers into the
+   * caller's static/stack arrays (locale_variable_names[], language_fallback_map[],
+   * and the locale GStrv).  NULL destructors are intentional — g_hash_table_unref
+   * must NOT free them.  Any future caller passing heap-allocated strings must
+   * either switch to g_hash_table_new_full with g_free destructors or dup first. */
+  new_vals = g_hash_table_new_full( g_str_hash, g_str_equal, NULL, NULL );
   for( i = 0; known_keys[i] != NULL; i++ )
     g_hash_table_replace( new_vals,
                           (gpointer) known_keys[i],
