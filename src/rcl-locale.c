@@ -333,6 +333,9 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
    (real XKB layout/model/variant/options strings are well under 64 chars). */
 #define MAX_XKB_VALUE_LEN  256
 
+/* Forward declaration — defined in the "Input validation" section below. */
+static gboolean rcl_keyboard_value_is_safe( const gchar *value );
+
 static gchar *
 extract_xkb_option( const gchar *contents, const gchar *option_name )
 {
