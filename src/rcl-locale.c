@@ -685,7 +685,7 @@ rcl_write_rc_keymap_toggle( const gchar *path,
        * lang.sh and rc.keymap permissions; g_file_set_contents creates the
        * temp file 0600 which would leave the sidecar unreadable by non-root
        * readers if created from scratch. */
-      g_chmod( tmp_path, 0644 );
+      g_chmod( tmp_path, 0755 );
 
       if( g_rename( tmp_path, path ) != 0 )
       {
@@ -1008,7 +1008,7 @@ rcl_write_lang_sh( const gchar         *path,
      * g_file_set_contents() creates the temp file 0600; chmod it to 0644
      * before the rename so the final file is always accessible, even when
      * localed creates it from scratch (first boot or file deleted). */
-    g_chmod( tmp_path, 0644 );
+    g_chmod( tmp_path, 0755 );
 
     if( g_rename( tmp_path, path ) != 0 )
     {
