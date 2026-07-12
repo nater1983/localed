@@ -333,9 +333,6 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
    (real XKB layout/model/variant/options strings are well under 64 chars). */
 #define MAX_XKB_VALUE_LEN  256
 
-/* Forward declaration — defined in the "Input validation" section below. */
-static gboolean rcl_keyboard_value_is_safe( const gchar *value );
-
 static gchar *
 extract_xkb_option( const gchar *contents, const gchar *option_name )
 {
@@ -618,7 +615,7 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
 }
 
 /* Read the toggle keymap from the sidecar file.
- * Returns a newly-allocated string (empty if absent). */
+ * Returns a newly-allocated string (empty if absent or invalid). */
 static gchar *
 rcl_read_rc_keymap_toggle( const gchar *path )
 {
@@ -631,6 +628,19 @@ rcl_read_rc_keymap_toggle( const gchar *path )
   result = g_strstrip( contents );  /* in-place, returns same pointer */
   result = g_strdup( result );
   g_free( contents );
+
+  /* Validate against the same allowlist used by SetVConsoleKeyboard and all
+   * other keyboard string fields.  A manually-edited sidecar with characters
+   * outside [A-Za-z0-9\-_.,+:] is reset to empty rather than served as a
+   * D-Bus property, consistent with the SANITISE_XKB pattern used for X11
+   * fields and the safe-charset check in rcl_read_rc_keymap(). */
+  if( result[0] != '\0' && !rcl_keyboard_value_is_safe( result ) )
+  {
+    g_warning( "rcl_read_rc_keymap_toggle: unsafe value in %s, ignoring", path );
+    g_free( result );
+    result = g_strdup( "" );
+  }
+
   return result;
 }
 
@@ -658,12 +668,21 @@ rcl_write_rc_keymap_toggle( const gchar *path,
     gchar    *tmp_path = g_strdup_printf( "%s.tmp", path );
     gboolean  ok       = g_file_set_contents( tmp_path, line, -1, error );
 
-    if( ok && g_rename( tmp_path, path ) != 0 )
+    if( ok )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
-      g_unlink( tmp_path );
-      ok = FALSE;
+      /* Make the sidecar world-readable (0644) so it is consistent with
+       * lang.sh and rc.keymap permissions; g_file_set_contents creates the
+       * temp file 0600 which would leave the sidecar unreadable by non-root
+       * readers if created from scratch. */
+      g_chmod( tmp_path, 0644 );
+
+      if( g_rename( tmp_path, path ) != 0 )
+      {
+        g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                     "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
+        g_unlink( tmp_path );
+        ok = FALSE;
+      }
     }
 
     g_free( tmp_path );
@@ -972,12 +991,21 @@ rcl_write_lang_sh( const gchar         *path,
   tmp_path = g_strdup_printf( "%s.tmp", path );
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
-  if( ok && g_rename( tmp_path, path ) != 0 )
+  if( ok )
   {
-    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
-    g_unlink( tmp_path );
-    ok = FALSE;
+    /* lang.sh must be world-readable so login shells can source it.
+     * g_file_set_contents() creates the temp file 0600; chmod it to 0644
+     * before the rename so the final file is always accessible, even when
+     * localed creates it from scratch (first boot or file deleted). */
+    g_chmod( tmp_path, 0644 );
+
+    if( g_rename( tmp_path, path ) != 0 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
+      g_unlink( tmp_path );
+      ok = FALSE;
+    }
   }
 
   g_free( tmp_path );
