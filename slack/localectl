@@ -45,32 +45,6 @@ locale_value_is_safe() {
   [[ "$1" =~ ^[A-Za-z0-9_.@:,-]+$ ]]
 }
 
-# Read a KEY=value (or KEY="value") from a file; print the value.
-kv_read() {
-  local file="$1" key="$2"
-  [ -f "$file" ] || return
-  grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'
-}
-
-# Atomically write or remove a KEY="value" entry in a KEY=value file.
-# Passing an empty value removes the key entirely.
-kv_set() {
-  local file="$1" key="$2" value="$3"
-  local tmp
-
-  touch "$file" 2>/dev/null || die "cannot write $file"
-
-  tmp=$(mktemp "${file}.XXXXXX") || die "cannot create temp file"
-
-  grep -v "^${key}=" "$file" > "$tmp" 2>/dev/null || true
-
-  if [ -n "$value" ]; then
-    echo "${key}=\"${value}\"" >> "$tmp"
-  fi
-
-  mv "$tmp" "$file" || { rm -f "$tmp"; die "cannot update $file"; }
-}
-
 # ---------------------------------------------------------------------------
 # Pager support
 # ---------------------------------------------------------------------------
