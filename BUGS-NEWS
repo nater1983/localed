@@ -103,52 +103,25 @@ FIXED IN 0.1.10
 FIXED IN 0.1.11
 ---------------
 
-* keyboard_value_is_safe() in localectl still used the old blocklist (deny
-  quotes, backslashes, control chars) after the C daemon was tightened to a
-  strict allowlist in 0.1.9, leaving shell metacharacters accepted by the
-  bash script.
-  (Fixed: replaced with allowlist regex ^[A-Za-z0-9._,:+:-]+$ matching C.)
+* rcl_read_rc_keymap_toggle() returned the sidecar file content verbatim
+  with no allowlist check, unlike VConsoleKeymap, X11Layout, X11Model,
+  X11Variant, and X11Options which all validate on read.  A local user able
+  to write /etc/rc.d/rc.keymap.toggle could inject arbitrary content into
+  the VConsoleKeymapToggle D-Bus property.
+  (Fixed: rcl_keyboard_value_is_safe() applied after whitespace-stripping;
+  values outside [A-Za-z0-9\-_.,+:] are silently reset to empty string.)
 
-* do_set_locale() imposed no upper bound on the incoming locale array length,
-  allowing an authorised client to force O(N*14) validation work per call.
-  (Fixed: entry count checked before the loop; arrays over 14 entries
-  rejected with G_DBUS_ERROR_INVALID_ARGS.)
+* rcl_write_lang_sh() and rcl_write_rc_keymap_toggle() wrote their temp files
+  with mode 0600 (the g_file_set_contents() default) and did not chmod before
+  the rename.  A from-scratch write of lang.sh produced a file unreadable by
+  login shells, silently breaking locale for all non-root users.
+  (Fixed: g_chmod(tmp_path, 0644) added before g_rename() in both writers.)
 
-* rcl_read_lang_sh() stored values read from lang.sh in the Locale D-Bus
-  property without validating them against the safe charset, so a manually-
-  edited file could expose unsafe strings on the bus.
-  (Fixed: rcl_locale_value_is_safe() called on each value; failures skipped
-  with a g_warning.)
-
-* rcl_locale_daemon_finalize() did not clear priv->connection or zero
-  priv->registration_id, leaking a GDBusConnection reference if the object
-  was ever dropped without an explicit rcl_daemon_shutdown() call.
-  (Fixed: same unregister-and-clear block added to finalize, guarded by the
-  connection and registration_id checks.)
-
-* do_set_locale() used manual g_free(key) on two early-return branches,
-  fragile under future refactoring.
-  (Fixed: g_autofree gchar *key used instead; all g_free(key) calls removed.)
-
-* rcl_write_lang_sh() used g_hash_table_new() with no destructors and no
-  comment explaining the borrowed-pointer ownership model.
-  (Fixed: switched to g_hash_table_new_full(..., NULL, NULL) with an
-  explicit ownership contract comment.)
-
-* list-keymaps and list-locales passed user-supplied filter arguments
-  directly to grep -i, allowing ERE metacharacters and option injection.
-  (Fixed: changed to grep -iF in both commands.)
-
-* rcl_write_lang_sh() in localectl re-emitted preserved cur_val entries
-  without validating them, propagating unsafe values from a manually-edited
-  lang.sh on the next write.
-  (Fixed: locale_value_is_safe() called on cur_val; unsafe values dropped.)
-
-* read_x11_keyboard_conf() did not validate the character set of XKB values
-  extracted from 00-keyboard.conf, so unsafe values could be served as D-Bus
-  properties.
-  (Fixed: SANITISE_XKB macro applies rcl_keyboard_value_is_safe() to all
-  four fields; unsafe values reset to empty string with g_warning.)
+* kv_read() and kv_set() were defined in localectl but never called.  kv_set()
+  passed the caller-supplied key directly to grep as a pattern, making it
+  vulnerable to regex injection if invoked with unvalidated input.
+  (Fixed: both functions removed; rcl_lang_sh_get() and rcl_write_lang_sh()
+  cover the same roles with proper validation.)
 
 REPORTING BUGS
 --------------
