@@ -450,12 +450,23 @@ write_x11_keyboard_conf( const gchar *path,
   tmp_path = g_strdup_printf( "%s.tmp", path );
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
-  if( ok && g_rename( tmp_path, path ) != 0 )
+  if( ok )
   {
-    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
-    g_unlink( tmp_path );
-    ok = FALSE;
+    /* 00-keyboard.conf must be world-readable so Xorg (which may run as a
+     * dedicated user on hardened setups) can read it.  g_file_set_contents()
+     * creates the temp file 0600; chmod it to 0644 before the rename so the
+     * final file is always accessible, even when localed creates it from
+     * scratch.  Mirrors the g_chmod() calls in rcl_write_lang_sh() and
+     * rcl_write_rc_keymap_toggle(). */
+    g_chmod( tmp_path, 0644 );
+
+    if( g_rename( tmp_path, path ) != 0 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
+      g_unlink( tmp_path );
+      ok = FALSE;
+    }
   }
 
   g_free( tmp_path );
@@ -1514,9 +1525,20 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
 
   if( !polkit_authorization_result_get_is_authorized( result ) )
   {
-    g_dbus_method_invocation_return_error( ctx->invocation,
-      G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED,
-      "Not authorised to perform the requested action" );
+    /* Distinguish "authentication required but not yet provided" from a hard
+     * denial.  When is_challenge is TRUE the caller passed interactive=FALSE
+     * but the policy requires interaction; the correct D-Bus error tells the
+     * client to retry with interactive=TRUE (e.g. to raise an agent dialog).
+     * Without this check both cases collapse to AUTH_FAILED, preventing GUI
+     * clients from retrying with a password prompt. */
+    if( polkit_authorization_result_get_is_challenge( result ) )
+      g_dbus_method_invocation_return_error( ctx->invocation,
+        G_DBUS_ERROR, G_DBUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED,
+        "Authentication is required to perform the requested action" );
+    else
+      g_dbus_method_invocation_return_error( ctx->invocation,
+        G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED,
+        "Not authorised to perform the requested action" );
     g_object_unref( result );
     auth_ctx_free( ctx );
     return;
