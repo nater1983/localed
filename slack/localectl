@@ -390,9 +390,9 @@ rcl_write_lang_sh() {
     done
   } > "$tmp"
 
-  # mktemp creates files 0600; chmod to 0644 so lang.sh is world-readable
+  # mktemp creates files 0600; chmod to 0755 so lang.sh is world-readable
   # and can be sourced by login shells for non-root users.
-  chmod 0644 "$tmp"
+  chmod 0755 "$tmp"
   mv "$tmp" "$file" || { rm -f "$tmp"; die "cannot update $file"; }
 }
 
