@@ -80,10 +80,19 @@ rcl_read_rc_keymap() {
 }
 
 # Read the toggle keymap from the sidecar file.
+# Validates content against the same allowlist as keyboard_value_is_safe() so
+# that terminal escape sequences or other unsafe content in a manually-edited
+# sidecar cannot reach localectl status output.  Returns empty on invalid input,
+# matching rcl_read_rc_keymap_toggle() in rcl-locale.c (fixed 0.1.11).
 rcl_read_rc_keymap_toggle() {
   local file="$1"
   [ -f "$file" ] || return
-  head -1 "$file" 2>/dev/null | tr -d '\n'
+  local val
+  val=$(head -1 "$file" 2>/dev/null | tr -d '\n')
+  [ -z "$val" ] && return
+  if keyboard_value_is_safe "$val"; then
+    printf '%s' "$val"
+  fi
 }
 
 keyboard_value_is_safe() {
@@ -140,6 +149,9 @@ rcl_write_rc_keymap_toggle() {
   local tmp
   tmp=$(mktemp "${file}.XXXXXX") || die "cannot create temp file"
   printf '%s\n' "$toggle" > "$tmp"
+  # mktemp creates files 0600; chmod to 0644 so the sidecar is world-readable,
+  # consistent with lang.sh and rc.keymap permissions.
+  chmod 0644 "$tmp"
   mv "$tmp" "$file" || { rm -f "$tmp"; die "cannot update $file"; }
 }
 
@@ -378,6 +390,9 @@ rcl_write_lang_sh() {
     done
   } > "$tmp"
 
+  # mktemp creates files 0600; chmod to 0644 so lang.sh is world-readable
+  # and can be sourced by login shells for non-root users.
+  chmod 0644 "$tmp"
   mv "$tmp" "$file" || { rm -f "$tmp"; die "cannot update $file"; }
 }
 
@@ -499,7 +514,10 @@ XKB_BASE_LST="/usr/share/X11/xkb/rules/base.lst"
 # Internal helper: extract a named section from base.lst.
 # Usage: _xkb_section SECTIONNAME [FILTER]
 # Prints the code (first field) of every entry in the section, optionally
-# filtered case-insensitively.
+# filtered case-insensitively using grep -iF (fixed-string, not ERE) so a
+# user-supplied filter string cannot cause awk to abort on malformed regex
+# metacharacters.  Matches list-keymaps and list-locales which already use
+# grep -iF for the same reason.
 _xkb_section() {
   local section="$1" filter="${2:-}"
 
@@ -507,17 +525,16 @@ _xkb_section() {
     die "$XKB_BASE_LST not found (is xkeyboard-config installed?)"
   fi
 
-  awk -v section="$section" -v filter="$filter" '
+  awk -v section="$section" '
     /^! /      { in_section = ($2 == section); next }
     /^[[:space:]]*$/ { next }
     in_section {
       code = $1
-      if (code == "") next
-      if (filter == "" || tolower(code) ~ tolower(filter) \
-                       || tolower($0)   ~ tolower(filter))
-        print code
+      if (code != "") print code
     }
-  ' "$XKB_BASE_LST" | sort -u
+  ' "$XKB_BASE_LST" \
+    | sort -u \
+    | if [ -n "$filter" ]; then grep -iF "$filter"; else cat; fi
 }
 
 cmd_list_x11_keymap_models() {
@@ -537,8 +554,9 @@ cmd_list_x11_keymap_variants() {
 
   # When a layout is given, restrict to variants whose description begins
   # with "LAYOUT:" (the format used in base.lst).  The filter arg (if any)
-  # is then applied on top of that.
-  awk -v layout="$layout" -v filter="$filter" '
+  # is applied as a fixed-string grep -iF post-filter, matching the pattern
+  # used by _xkb_section, list-keymaps, and list-locales.
+  awk -v layout="$layout" '
     /^! /      { in_section = ($2 == "variant"); next }
     /^[[:space:]]*$/ { next }
     in_section {
@@ -548,11 +566,12 @@ cmd_list_x11_keymap_variants() {
       sub(/^[[:space:]]+/, "", desc)
       if (code == "") next
       if (layout != "" && index(desc, layout ":") != 1) next
-      if (filter != "" && tolower(code) !~ tolower(filter) \
-                       && tolower(desc) !~ tolower(filter)) next
       print code
     }
-  ' "$XKB_BASE_LST" | sort -u | _run_pager
+  ' "$XKB_BASE_LST" \
+    | sort -u \
+    | if [ -n "$filter" ]; then grep -iF "$filter"; else cat; fi \
+    | _run_pager
 }
 
 cmd_list_x11_keymap_options() {
@@ -564,17 +583,18 @@ cmd_list_x11_keymap_options() {
 
   # Options are "group:name" tokens; print the full token (both the group
   # header line and the individual options), matching upstream localectl.
-  awk -v filter="$filter" '
+  # Filter is applied as grep -iF (fixed-string) after extraction so a
+  # malformed user-supplied string cannot cause awk to abort on a bad ERE.
+  awk '
     /^! /      { in_section = ($2 == "option"); next }
     /^[[:space:]]*$/ { next }
     in_section {
       code = $1
-      if (code == "") next
-      if (filter == "" || tolower(code) ~ tolower(filter) \
-                       || tolower($0)   ~ tolower(filter))
-        print code
+      if (code != "") print code
     }
-  ' "$XKB_BASE_LST" | sort -u
+  ' "$XKB_BASE_LST" \
+    | sort -u \
+    | if [ -n "$filter" ]; then grep -iF "$filter"; else cat; fi
 }
 
 # ---------------------------------------------------------------------------
