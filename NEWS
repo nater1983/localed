@@ -286,69 +286,33 @@ root. They match the full command set of systemd 257's `localectl`.
   qualifiers; the variables are now plain assignments scoped to the
   enclosing function as intended.
 
-## [0.1.11] - 2026-06-28
+## [0.1.11] - 2026-07-11
 
-### Fixed
+### Security
 
-- **`keyboard_value_is_safe()` in `localectl` out of sync with C daemon**:
-  the bash validator still used the old blocklist (reject `"`, `\`, and
-  control chars) while `rcl_keyboard_value_is_safe()` in C was tightened to
-  a strict allowlist in 0.1.9. Shell metacharacters (`$`, `` ` ``, `!`,
-  `(`, `)`, `;`, `|`, `&`, `>`, `<`, `*`, `?`, space, etc.) were still
-  accepted by the bash script. Replaced with an allowlist regex
-  `^[A-Za-z0-9._,:+:-]+$` matching the C implementation exactly.
+- **`rcl_read_rc_keymap_toggle()` returned sidecar content without validation**
+  (`src/rcl-locale.c`): the toggle sidecar file was read, whitespace-stripped,
+  and returned verbatim with no allowlist check, unlike every other keyboard
+  string field.  A local user who could write
+  `/etc/rc.d/rc.keymap.toggle` was able to inject arbitrary content into the
+  `VConsoleKeymapToggle` D-Bus property.  Fixed by applying
+  `rcl_keyboard_value_is_safe()` after stripping; values outside
+  `[A-Za-z0-9\-_.,+:]` are reset to `""` with a `g_warning`, matching the
+  `SANITISE_XKB` pattern used for X11 fields and the safe-charset check in
+  `rcl_read_rc_keymap()`.
 
-- **`do_set_locale` locale array had no upper-bound check**: the validation
-  loop iterated the incoming `locale` GStrv with no limit. An authorised
-  client could send an array with thousands of entries, forcing O(N×14)
-  `strncmp` calls before PolKit even influenced the response. Added a
-  pre-validation entry count check; arrays exceeding the number of known
-  locale variables (14) are rejected immediately with
-  `G_DBUS_ERROR_INVALID_ARGS`.
+- **`rcl_write_lang_sh()` and `rcl_write_rc_keymap_toggle()` created files
+  mode 0600** (`src/rcl-locale.c`): `g_file_set_contents()` creates its temp
+  file with mode 0600.  When localed wrote `lang.sh` or the toggle sidecar
+  from scratch (first boot or file deleted), the resulting file was readable
+  only by root, silently breaking locale for all login shells.  Fixed by
+  calling `g_chmod(tmp_path, 0644)` between `g_file_set_contents()` and
+  `g_rename()` in both writers, mirroring the existing `g_chmod(tmp_path, 0755)`
+  call in `rcl_write_rc_keymap()`.
 
-- **Locale values read from `lang.sh` not validated against safe charset**:
-  `rcl_read_lang_sh()` stored values from disk directly into the `Locale`
-  D-Bus property without checking them against `rcl_locale_value_is_safe()`.
-  A manually-edited `lang.sh` with characters outside `[A-Za-z0-9_.@:,-]`
-  could expose unsafe strings as D-Bus property values. Values that fail
-  validation are now silently skipped with a `g_warning`.
-
-- **`rcl_locale_daemon_finalize` did not clear `connection` or
-  `registration_id`**: if the GObject were finalized without an explicit
-  `rcl_daemon_shutdown()` call (e.g. on a startup error path), the
-  `GDBusConnection` reference would leak. Added the same unregister-and-clear
-  block to `finalize` that `rcl_daemon_shutdown` already performed, guarded
-  by `if (connection && registration_id > 0)`.
-
-- **`do_set_locale` key allocation fragile under refactor**: manual
-  `g_free(key)` calls on two early-return branches were replaced with
-  `g_autofree gchar *key`, making the allocation leak-proof on all current
-  and future return paths without any explicit `g_free`.
-
-- **`rcl_write_lang_sh` hash table ownership contract undocumented**:
-  switched from `g_hash_table_new()` to `g_hash_table_new_full(..., NULL, NULL)`
-  and added a comment explicitly documenting that keys and values are
-  borrowed pointers and must not be freed by the destructor. Prevents silent
-  double-free if a future caller passes heap-allocated strings.
-
-- **`list-keymaps` and `list-locales` grep filter not fixed-string**:
-  both commands piped user-supplied filter arguments to `grep -i`, allowing
-  POSIX ERE metacharacters and `--option`-style injection. Changed to
-  `grep -iF` (fixed-string) in both commands.
-
-- **Preserved `cur_val` in `localectl rcl_write_lang_sh` not validated**:
-  when `set-locale` updated a subset of locale variables, values preserved
-  from the existing `lang.sh` for untouched variables were re-emitted
-  without validation. A manually-edited `lang.sh` entry with unsafe
-  characters would be silently propagated on the next write. Preserved
-  values are now checked with `locale_value_is_safe`; unsafe values are
-  dropped rather than re-emitted.
-
-- **XKB values read from `00-keyboard.conf` not charset-validated**:
-  `read_x11_keyboard_conf()` passed all four XKB field values through
-  `extract_xkb_option()` (which caps length) but did not validate the
-  character set. A manually-edited config with characters outside
-  `[A-Za-z0-9\-_.,+:]` would be served as D-Bus property values.
-  Added a `SANITISE_XKB` macro that calls `rcl_keyboard_value_is_safe()`
-  on each field after extraction, resetting unsafe values to empty string
-  with a `g_warning`.
+- **Dead `kv_read()` / `kv_set()` functions removed** (`slack/localectl`):
+  both functions were defined but never called.  `kv_set()` used
+  `grep -v "^${key}="` with an unsanitised `$key`, making it vulnerable to
+  regex injection if it were ever invoked with caller-controlled input.
+  Removed; `rcl_lang_sh_get()` and `rcl_write_lang_sh()` cover the same
+  roles with proper validation.
