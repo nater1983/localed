@@ -685,7 +685,7 @@ rcl_write_rc_keymap_toggle( const gchar *path,
        * lang.sh and rc.keymap permissions; g_file_set_contents creates the
        * temp file 0600 which would leave the sidecar unreadable by non-root
        * readers if created from scratch. */
-      g_chmod( tmp_path, 0755 );
+      g_chmod( tmp_path, 0644 );
 
       if( g_rename( tmp_path, path ) != 0 )
       {
