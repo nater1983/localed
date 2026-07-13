@@ -565,6 +565,19 @@ rcl_read_rc_keymap( const gchar *path )
   }
 
   g_strfreev( lines );
+
+  /* Validate the parsed keymap against the same allowlist used by
+   * SetVConsoleKeyboard and rcl_read_rc_keymap_toggle().  A manually-edited
+   * rc.keymap with a loadkeys argument containing characters outside
+   * [A-Za-z0-9\-_.,+:] (path traversal, shell metacharacters, spaces) is
+   * reset to empty rather than served as the VConsoleKeymap D-Bus property. */
+  if( result && result[0] != '\0' && !rcl_keyboard_value_is_safe( result ) )
+  {
+    g_warning( "rcl_read_rc_keymap: unsafe keymap value in %s, ignoring", path );
+    g_free( result );
+    result = NULL;
+  }
+
   return result ? result : g_strdup( "" );
 }
 
@@ -1004,10 +1017,11 @@ rcl_write_lang_sh( const gchar         *path,
 
   if( ok )
   {
-    /* lang.sh must be world-readable so login shells can source it.
-     * g_file_set_contents() creates the temp file 0600; chmod it to 0644
-     * before the rename so the final file is always accessible, even when
-     * localed creates it from scratch (first boot or file deleted). */
+    /* lang.sh must be world-executable (0755) so login shells can source it.
+     * /etc/profile sources files in /etc/profile.d/ via '.', which requires
+     * execute permission.  g_file_set_contents() creates the temp file 0600;
+     * chmod it to 0755 before the rename so the final file is always
+     * accessible, even when localed creates it from scratch. */
     g_chmod( tmp_path, 0755 );
 
     if( g_rename( tmp_path, path ) != 0 )
