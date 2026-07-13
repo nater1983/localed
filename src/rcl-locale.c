@@ -111,6 +111,9 @@ G_DEFINE_TYPE( RclDaemon, rcl_daemon, G_TYPE_OBJECT )
 static void rcl_daemon_class_init( RclDaemonClass *klass ) {}
 static void rcl_daemon_init( RclDaemon *self ) {}
 
+static gboolean
+rcl_keyboard_value_is_safe(const gchar *value);
+
 /* --------------------------------------------------------------------------
    Known locale variables, in the canonical order systemd-localed and
    `localectl` expect when printing/comparing the Locale array.
@@ -1545,10 +1548,11 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
      * client to retry with interactive=TRUE (e.g. to raise an agent dialog).
      * Without this check both cases collapse to AUTH_FAILED, preventing GUI
      * clients from retrying with a password prompt. */
-    if( polkit_authorization_result_get_is_challenge( result ) )
-      g_dbus_method_invocation_return_error( ctx->invocation,
-        G_DBUS_ERROR, G_DBUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED,
-        "Authentication is required to perform the requested action" );
+  if( polkit_authorization_result_get_is_challenge( result ) )
+      g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired",
+      "Authentication is required to perform the requested action" );
     else
       g_dbus_method_invocation_return_error( ctx->invocation,
         G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED,
