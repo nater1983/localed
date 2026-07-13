@@ -49,13 +49,16 @@ locale_value_is_safe() {
 # Pager support
 # ---------------------------------------------------------------------------
 
-# Pipe stdout through $PAGER (default: less) unless --no-pager was given or
-# stdout is not a terminal.  Usage: some_command | _run_pager
+# Pipe stdout through less unless --no-pager was given or stdout is not a
+# terminal.  Usage: some_command | _run_pager
+# $PAGER is intentionally ignored: honouring it allows arbitrary command
+# execution when localectl is run via sudo without env_reset.  Use
+# --no-pager and pipe to your preferred pager explicitly if needed.
 _run_pager() {
   if [ "$NO_PAGER" -eq 1 ] || [ ! -t 1 ]; then
     cat
   else
-    "${PAGER:-less}" -FRX
+    less -FRX
   fi
 }
 
@@ -454,6 +457,9 @@ HEREDOC
     echo 'EndSection'
   } > "$tmp"
 
+  # mktemp creates files 0600; chmod to 0644 so 00-keyboard.conf is
+  # world-readable (Xorg may run as a dedicated user on hardened setups).
+  chmod 0644 "$tmp"
   mv "$tmp" "$X11_KEYBOARD_FILE" || { rm -f "$tmp"; die "cannot update $X11_KEYBOARD_FILE"; }
 }
 
