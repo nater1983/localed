@@ -1,7 +1,7 @@
 project(
   'localed',
   'c',
-  version         : '0.1.13.1',
+  version         : '0.1.13.2',
   license         : 'GPL-2.0-or-later',
   meson_version   : '>= 0.58.0',
   default_options : [
@@ -23,7 +23,6 @@ extra_c_args = cc.get_supported_arguments([
 add_project_arguments(extra_c_args, language : 'c')
 
 prefix     = get_option('prefix')
-sbindir    = get_option('sbindir')
 sysconfdir = get_option('sysconfdir')
 datadir    = get_option('datadir')
 localedir  = join_paths(prefix, get_option('localedir'))
@@ -31,9 +30,6 @@ localedir  = join_paths(prefix, get_option('localedir'))
 if not sysconfdir.startswith('/')
   sysconfdir = join_paths(prefix, sysconfdir)
 endif
-
-abs_datadir = join_paths(prefix, datadir)
-abs_sbindir = join_paths(prefix, sbindir)
 
 glib_req   = '>= 2.56'
 polkit_req = '>= 0.113'
@@ -64,8 +60,6 @@ conf.set_quoted('VERSION',         meson.project_version())
 conf.set_quoted('GETTEXT_PACKAGE', gettext_package)
 conf.set_quoted('LOCALEDIR',       localedir)
 conf.set_quoted('SYSCONFDIR',      sysconfdir)
-conf.set_quoted('DATADIR',         abs_datadir)
-conf.set_quoted('SBINDIR',         abs_sbindir)
 
 # Distro-specific tunables (meson_options.txt).
 # PRIVILEGED_GROUP: group considered "admin" by polkit rules.
@@ -99,9 +93,8 @@ subdir('man')
 
 summary({
   'prefix'     : prefix,
-  'sbindir'    : abs_sbindir,
   'sysconfdir' : sysconfdir,
-  'datadir'    : abs_datadir,
+  'datadir'    : datadir,
   'localedir'  : localedir,
 }, section : 'Directories')
 
