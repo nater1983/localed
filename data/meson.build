@@ -25,14 +25,10 @@ _polkit_opt = get_option('polkit_policy_dir')
 if _polkit_opt != ''
   polkit_policy_dir = _polkit_opt
 else
-  if polkit_found
-    polkit_policy_dir = polkit.get_variable(
-      pkgconfig        : 'actiondir',
-      pkgconfig_define : ['datadir', join_paths(prefix, datadir)],
-    )
-  else
-    polkit_policy_dir = join_paths(prefix, datadir, 'polkit-1', 'actions')
-  endif
+  polkit_policy_dir = polkit.get_variable(
+    pkgconfig        : 'actiondir',
+    pkgconfig_define : ['datadir', join_paths(prefix, datadir)],
+  )
 endif
 
 dbus_service_conf = configuration_data()
@@ -51,12 +47,10 @@ install_data(
   install_dir : dbus_conf_dir,
 )
 
-if polkit_found
-  install_data(
-    'org.freedesktop.locale1.policy',
-    install_dir : polkit_policy_dir,
-  )
-endif
+install_data(
+  'org.freedesktop.locale1.policy',
+  install_dir : polkit_policy_dir,
+)
 
 rules_conf = configuration_data()
 rules_conf.set('PRIVILEGED_GROUP', get_option('privileged-group'))

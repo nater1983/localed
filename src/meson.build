@@ -7,11 +7,8 @@ localed_deps = [
   glib_dep,
   gio_dep,
   gio_unix,
+  polkit,
 ]
-
-if polkit_found
-  localed_deps += polkit
-endif
 
 localed_inc = [
   config_h_inc,

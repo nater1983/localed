@@ -1,11 +1,4 @@
 option(
-  'polkit',
-  type        : 'feature',
-  value       : 'auto',
-  description : 'Use polkit for authorising Set* D-Bus method calls',
-)
-
-option(
   'dbus_system_service_dir',
   type        : 'string',
   value       : '',

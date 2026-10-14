@@ -37,13 +37,9 @@ polkit_req = '>= 0.113'
 glib_dep = dependency('glib-2.0',         version : glib_req)
 gio_dep  = dependency('gio-2.0',          version : glib_req)
 gio_unix = dependency('gio-unix-2.0',     version : glib_req)
-polkit   = dependency('polkit-gobject-1', version : polkit_req,
-             required : get_option('polkit'))
-
-polkit_found = polkit.found()
-if polkit_found
-  add_project_arguments('-DHAVE_POLKIT=1', language : 'c')
-endif
+# polkit is mandatory: it is the only authorisation path for the Set* D-Bus
+# methods, and the daemon sources include <polkit/polkit.h> unconditionally.
+polkit   = dependency('polkit-gobject-1', version : polkit_req)
 
 i18n = import('i18n')
 
@@ -99,6 +95,6 @@ summary({
 }, section : 'Directories')
 
 summary({
-  'polkit' : polkit_found,
+  'polkit' : polkit.version(),
   'GLib'   : glib_dep.version(),
 }, section : 'Dependencies')

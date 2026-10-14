@@ -39,9 +39,6 @@ Common configure options:
 # Install under /usr instead of /usr/local
 meson setup build --prefix=/usr
 
-# Disable polkit (for testing only – not for production)
-meson setup build -Dpolkit=disabled
-
 # Override the D-Bus service directory explicitly
 meson setup build -Ddbus_system_service_dir=/usr/share/dbus-1/system-services
 
