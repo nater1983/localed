@@ -367,30 +367,6 @@ rcl_main_uid_in_privileged_group(guint64 uid)
  * Polkit for system-wide locale changes.
  */
 static void
-rcl_main_accounts_set_locale_done(GObject *source,
-                                  GAsyncResult *result,
-                                  gpointer user_data)
-{
-  RclState *state = user_data;
-  GError *error = NULL;
-  GVariant *reply = g_dbus_connection_call_finish(
-      G_DBUS_CONNECTION(source), result, &error);
-
-  if (!reply)
-  {
-    g_warning("AccountsService locale bridge: SetLocale failed: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
-    return;
-  }
-
-  LOG(state, "applied AccountsService language change through locale1");
-  g_variant_unref(reply);
-}
-
-/* ───────────────────────────────────────────── */
-
-static void
 rcl_main_accounts_properties_changed(GDBusConnection *connection,
                                     const gchar *sender_name,
                                     const gchar *object_path,
@@ -407,11 +383,8 @@ rcl_main_accounts_properties_changed(GDBusConnection *connection,
   const gchar *language = NULL;
   const gchar *uid_text;
   gchar *end = NULL;
-  gchar *locale_assignment = NULL;
   guint64 uid;
   GError *error = NULL;
-  GVariantBuilder locale;
-  GVariant *reply = NULL;
 
   if (!g_str_has_prefix(object_path, "/org/freedesktop/Accounts/User") ||
       g_strcmp0(interface_name, "org.freedesktop.DBus.Properties") != 0 ||
@@ -453,23 +426,17 @@ rcl_main_accounts_properties_changed(GDBusConnection *connection,
     goto out;
   }
 
-  locale_assignment = g_strdup_printf("LANG=%s", language);
-  g_variant_builder_init(&locale, G_VARIANT_TYPE("as"));
-  g_variant_builder_add(&locale, "s", locale_assignment);
-  /*
-   * This call targets our own D-Bus name. It must be asynchronous: a
-   * synchronous call here would block the main loop that dispatches SetLocale
-   * back to this daemon, deadlocking the bridge.
-   */
-  g_dbus_connection_call(
-      state->system_bus, LOCALE_SERVICE_NAME, "/org/freedesktop/locale1",
-      "org.freedesktop.locale1", "SetLocale",
-      g_variant_new("(@asb)", g_variant_builder_end(&locale), FALSE),
-      NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL,
-      rcl_main_accounts_set_locale_done, state);
+  if (!rcl_locale_daemon_set_language_from_accounts(
+          RCL_LOCALE_DAEMON(state->daemon), language, &error))
+  {
+    g_warning("AccountsService locale bridge: could not apply language: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+  }
+  else
+    LOG(state, "applied AccountsService language change directly");
 
 out:
-  g_free(locale_assignment);
   g_clear_pointer(&language_value, g_variant_unref);
   g_clear_pointer(&changed, g_variant_unref);
   g_clear_pointer(&invalidated, g_variant_unref);
