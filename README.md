@@ -109,10 +109,11 @@ busctl call org.freedesktop.locale1 \
 | File | Property |
 |---|---|
 | `/etc/profile.d/lang.sh` | `Locale` (array of KEY=value) |
-| `/etc/rc.d/rc.keymap` | `VConsoleKeymap`, `VConsoleKeymapToggle` |
+| `/etc/rc.d/rc.keymap` | `VConsoleKeymap` |
+| `/etc/rc.d/rc.keymap.toggle` | `VConsoleKeymapToggle` |
 | `/etc/X11/xorg.conf.d/00-keyboard.conf` | `X11Layout`, `X11Model`, `X11Variant`, `X11Options` |
 
-All three files are watched with inotify; `localed` re-reads them and emits
+All four files are watched with inotify; `localed` re-reads them and emits
 `PropertiesChanged` automatically whenever they are modified by any tool.
 
 ## Keyboard conversion
