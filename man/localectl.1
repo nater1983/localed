@@ -11,28 +11,26 @@ localectl \- control the system locale and keyboard layout
 is a Bash client used to query and change the system locale and
 keyboard layout configuration.
 .PP
-Unlike a typical D-Bus client,
 .B localectl
-writes directly to
-.I /etc/locale.conf
-and
-.I /etc/vconsole.conf
-(and, for X11 keyboard settings,
-.IR /etc/X11/xorg.conf.d/00-keyboard.conf ).
-The
-.B localed
-daemon watches these files with
-.BR inotify (7)
-and automatically updates its
+communicates with the
 .B org.freedesktop.locale1
-D-Bus properties and emits
-.B PropertiesChanged
-signals whenever they are modified, whether by
+system D-Bus service to query and change locale and keyboard settings.
+Configuration changes are sent to
+.B localed
+using the
+.B SetLocale,
+.B SetVConsoleKeyboard,
+and
+.B SetX11Keyboard
+methods. The daemon validates and persists the settings, performs
+PolKit authorization, and emits property-change signals.
+.PP
+Changing settings does not require running
 .B localectl
-or any other tool. This means
-.B localectl
-itself never talks to D-Bus or PolKit; it relies on ordinary file
-permissions, and most subcommands require root.
+as root when the calling user is authorized by the installed PolKit
+policy. The
+.B --no-convert
+option disables conversion between console and X11 keyboard settings.
 .SH COMMANDS
 .TP
 .B status
@@ -85,20 +83,14 @@ must be one of
 .BR LC_MEASUREMENT ,
 or
 .BR LC_IDENTIFICATION .
-Each assignment is written to
-.IR /etc/locale.conf .
+Each assignment is sent to the daemon over D-Bus and persisted using the Slackware locale configuration.
 Passing an empty value (e.g.
 .BR LC_TIME= )
 removes that key from the file.
 .TP
 .BI set-keymap " KEYMAP [KEYMAP_TOGGLE]"
 Set the virtual console keymap (and optionally the toggle keymap).
-Written to
-.I /etc/vconsole.conf
-as
-.B KEYMAP
-and
-.BR KEYMAP_TOGGLE .
+Sent to the daemon over D-Bus and persisted in the Slackware console-keymap configuration.
 .TP
 .BI set-x11-keymap " LAYOUT [MODEL [VARIANT [OPTIONS]]]"
 Set the X11 keyboard layout.
@@ -111,8 +103,7 @@ having to repeat all the others.
 Pass an explicit empty string
 .RB ( \(dq\(dq )
 to clear a field.
-Written to
-.IR /etc/X11/xorg.conf.d/00-keyboard.conf .
+Sent to the daemon over D-Bus and persisted in the X11 keyboard configuration.
 .SH OPTIONS
 .TP
 .BR \-\-no\-convert
@@ -238,9 +229,7 @@ such as
 .SH FILES
 .TP
 .I /etc/locale.conf
-System locale settings. Rewritten atomically (temporary file plus
-rename) on every write. Created automatically on first root invocation
-if missing.
+System locale settings managed by localed.
 .TP
 .I /etc/rc.d/rc.keymap
 Slackware console keyboard script. Regenerated atomically on every
@@ -252,8 +241,7 @@ Sidecar file for the toggle keymap. Created when a toggle keymap is
 set; removed when the toggle is cleared.
 .TP
 .I /etc/X11/xorg.conf.d/00-keyboard.conf
-Xorg InputClass keyboard configuration. Rewritten atomically on every
-write. The parent directory is created automatically if missing.
+Xorg InputClass keyboard configuration managed by localed.
 .SH SEE ALSO
 .BR localed (8),
 .BR locale.conf (5),
