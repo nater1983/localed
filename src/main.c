@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include <gio/gio.h>
+#include <polkit/polkit.h>
 #include <glib.h>
 #include <glib-unix.h>
 #include <glib-object.h>
@@ -70,6 +71,8 @@ typedef struct RclState
   guint       reconnect_id;
   gboolean    exiting;
   guint       sync_id;
+  GDBusConnection *system_bus;
+  guint       accounts_subscription_id;
 } RclState;
 
 /* ───────────────────────────────────────────── */
@@ -88,6 +91,11 @@ rcl_state_free(RclState *state)
     g_source_remove(state->reconnect_id);
     state->reconnect_id = 0;
   }
+
+  if (state->accounts_subscription_id && state->system_bus)
+    g_dbus_connection_signal_unsubscribe(state->system_bus,
+                                         state->accounts_subscription_id);
+  g_clear_object(&state->system_bus);
 
   if (state->watch_id)
   {
@@ -310,6 +318,125 @@ rcl_main_log_handler_cb(const gchar    *log_domain,
 
 /* ───────────────────────────────────────────── */
 
+/*
+ * GNOME Control Center currently writes the selected language to
+ * AccountsService instead of calling locale1.SetLocale. Bridge that change
+ * to localed only when the affected Unix user is already authorised by
+ * Polkit for system-wide locale changes.
+ */
+static void
+rcl_main_accounts_properties_changed(GDBusConnection *connection,
+                                    const gchar *sender_name,
+                                    const gchar *object_path,
+                                    const gchar *interface_name,
+                                    const gchar *signal_name,
+                                    GVariant *parameters,
+                                    gpointer user_data)
+{
+  RclState *state = user_data;
+  const gchar *changed_interface = NULL;
+  GVariant *changed = NULL;
+  GVariant *invalidated = NULL;
+  GVariant *language_value = NULL;
+  const gchar *language = NULL;
+  const gchar *uid_text;
+  gchar *end = NULL;
+  gchar *locale_assignment = NULL;
+  guint64 uid;
+  PolkitAuthority *authority = NULL;
+  PolkitSubject *subject = NULL;
+  PolkitAuthorizationResult *auth_result = NULL;
+  GError *error = NULL;
+  GVariantBuilder locale;
+  GVariant *reply = NULL;
+
+  if (g_strcmp0(sender_name, "org.freedesktop.Accounts") != 0 ||
+      !g_str_has_prefix(object_path, "/org/freedesktop/Accounts/User") ||
+      g_strcmp0(interface_name, "org.freedesktop.DBus.Properties") != 0 ||
+      g_strcmp0(signal_name, "PropertiesChanged") != 0)
+    return;
+
+  uid_text = object_path + strlen("/org/freedesktop/Accounts/User");
+  if (!uid_text[0])
+    return;
+  uid = g_ascii_strtoull(uid_text, &end, 10);
+  if (!end || *end != '\0' || uid > G_MAXINT)
+    return;
+
+  g_variant_get(parameters, "(&s@a{sv}@as)",
+                &changed_interface, &changed, &invalidated);
+  if (g_strcmp0(changed_interface, "org.freedesktop.Accounts.User") != 0)
+    goto out;
+
+  language_value = g_variant_lookup_value(changed, "Language",
+                                           G_VARIANT_TYPE_STRING);
+  if (!language_value)
+    goto out;
+
+  language = g_variant_get_string(language_value, NULL);
+  if (!language[0] || !g_utf8_validate(language, -1, NULL))
+    goto out;
+
+  authority = polkit_authority_get_sync(NULL, &error);
+  if (!authority)
+  {
+    g_warning("AccountsService locale bridge: cannot connect to Polkit: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+    goto out;
+  }
+
+  subject = polkit_unix_user_new((gint)uid);
+  auth_result = polkit_authority_check_authorization_sync(
+      authority, subject, RCL_LOCALE_POLKIT_SET_LOCALE, NULL,
+      POLKIT_CHECK_AUTHORIZATION_FLAGS_NONE, NULL, &error);
+  if (!auth_result)
+  {
+    g_warning("AccountsService locale bridge: Polkit check failed: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+    goto out;
+  }
+
+  if (!polkit_authorization_result_get_is_authorized(auth_result))
+  {
+    LOG(state, "ignoring AccountsService language change for uid %" G_GUINT64_FORMAT
+        ": user is not authorised for system locale changes", uid);
+    goto out;
+  }
+
+  locale_assignment = g_strdup_printf("LANG=%s", language);
+  g_variant_builder_init(&locale, G_VARIANT_TYPE("as"));
+  g_variant_builder_add(&locale, "s", locale_assignment);
+  reply = g_dbus_connection_call_sync(
+      state->system_bus, LOCALE_SERVICE_NAME, "/org/freedesktop/locale1",
+      "org.freedesktop.locale1", "SetLocale",
+      g_variant_new("(@asb)", g_variant_builder_end(&locale), FALSE),
+      NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
+  if (!reply)
+  {
+    g_warning("AccountsService locale bridge: SetLocale failed: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+  }
+  else
+  {
+    LOG(state, "applied AccountsService language '%s' as system locale", language);
+    g_variant_unref(reply);
+  }
+
+out:
+  g_free(locale_assignment);
+  g_clear_pointer(&language_value, g_variant_unref);
+  g_clear_pointer(&changed, g_variant_unref);
+  g_clear_pointer(&invalidated, g_variant_unref);
+  g_clear_object(&auth_result);
+  g_clear_object(&subject);
+  g_clear_object(&authority);
+}
+
+/* ───────────────────────────────────────────── */
+
 #define SYNC_DEBOUNCE_MS 100
 
 static gboolean
@@ -502,6 +629,27 @@ gint main(gint argc, gchar **argv)
   else
   {
     g_warning("could not watch %s: %s", RCL_X11_KEYBOARD_FILE, error->message);
+    g_clear_error(&error);
+  }
+
+  /*
+   * Watch AccountsService language updates. The affected UID is checked
+   * against the locale1 Polkit action before a system-wide change is made.
+   */
+  state->system_bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
+  if (state->system_bus)
+  {
+    state->accounts_subscription_id =
+      g_dbus_connection_signal_subscribe(
+        state->system_bus, "org.freedesktop.Accounts",
+        "org.freedesktop.DBus.Properties", "PropertiesChanged", NULL, NULL,
+        G_DBUS_SIGNAL_FLAGS_NONE, rcl_main_accounts_properties_changed,
+        state, NULL);
+  }
+  else
+  {
+    g_warning("could not subscribe to AccountsService language changes: %s",
+              error ? error->message : "unknown error");
     g_clear_error(&error);
   }
 
