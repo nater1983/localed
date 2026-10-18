@@ -11,7 +11,7 @@ option(
   type        : 'string',
   value       : '',
   description : 'Directory for D-Bus system bus configuration files '
-              + '(default: <sysconfdir>/dbus-1/system.d)',
+              + '(default: <datadir>/dbus-1/system.d; /etc is for local overrides)',
 )
 
 option(
