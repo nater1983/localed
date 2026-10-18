@@ -281,6 +281,10 @@ _gdbus_value() {
   printf '%s\\n' "$1" | tr -d "\\\"'<>[](),"
 }
 
+_status_line() {
+  printf "%16s: %s\\n" "$1" "$2"
+}
+
 cmd_status() {
   require_gdbus
   local locale keymap toggle layout model variant options raw
