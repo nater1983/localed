@@ -18,7 +18,7 @@ dbus_conf_dir_opt = get_option('dbus_system_conf_dir')
 if dbus_conf_dir_opt != ''
   dbus_conf_dir = dbus_conf_dir_opt
 else
-  dbus_conf_dir = join_paths(prefix, datadir, 'dbus-1', 'system.d')
+  dbus_conf_dir = join_paths(sysconfdir, 'dbus-1', 'system.d')
 endif
 
 _polkit_opt = get_option('polkit_policy_dir')
@@ -32,7 +32,7 @@ else
 endif
 
 dbus_service_conf = configuration_data()
-dbus_service_conf.set('SBINDIR', join_paths(prefix, get_option('libexecdir')))
+dbus_service_conf.set('LIBEXECDIR', join_paths(prefix, get_option('libexecdir')))
 
 configure_file(
   input         : 'org.freedesktop.locale1.service.in',
@@ -45,6 +45,12 @@ configure_file(
 install_data(
   'org.freedesktop.locale1.conf',
   install_dir : dbus_conf_dir,
+)
+
+# Install the public interface description for D-Bus introspection/tooling.
+install_data(
+  'org.freedesktop.locale1.xml',
+  install_dir : join_paths(prefix, datadir, 'dbus-1', 'interfaces'),
 )
 
 install_data(
