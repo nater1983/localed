@@ -254,17 +254,12 @@ rcl_main_sigterm_cb(gpointer user_data)
 
 /* ───────────────────────────────────────────── */
 
-static gboolean log_debug_enabled = FALSE;
-
 static void
 rcl_main_log_handler_cb(const gchar    *log_domain,
                         GLogLevelFlags  log_level,
                         const gchar    *message,
                         gpointer        user_data)
 {
-  if ((log_level & G_LOG_LEVEL_MASK) == G_LOG_LEVEL_DEBUG && !log_debug_enabled)
-    return;
-
   if (isatty(STDERR_FILENO))
   {
     /*
@@ -421,7 +416,6 @@ gint main(gint argc, gchar **argv)
   state->verbose = verbose;
   state->replace = replace;
 
-  log_debug_enabled = debug;
   rcl_daemon_set_debug(state->daemon, debug);
 
   /*
@@ -437,7 +431,7 @@ gint main(gint argc, gchar **argv)
    * Install the log handler unconditionally for all domains and levels,
    * including fatal flags.  The handler itself decides whether to write
    * to syslog or to the terminal based on isatty(STDERR_FILENO).
-   * G_LOG_LEVEL_DEBUG messages are dropped in the handler unless --debug.
+   * G_LOG_LEVEL_DEBUG messages are passed to syslog, as in hostnamed.
    */
   g_log_set_handler(NULL,
                     G_LOG_LEVEL_MASK |
