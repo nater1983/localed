@@ -650,7 +650,6 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
                    "create temporary file for %s: %s", path, g_strerror(errno) );
       g_free( tmp_path );
       g_string_free( out, TRUE );
-      g_hash_table_unref( new_vals );
       return FALSE;
     }
     close( fd );
