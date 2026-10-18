@@ -278,11 +278,11 @@ _gdbus_get() {
 # allowlist, so the simple quote removal below cannot expose shell syntax.
 _gdbus_value() {
   # gdbus wraps property values in GVariant punctuation.
-  printf '%s\\n' "$1" | tr -d "\\\"'<>[](),"
+  printf '%s\n' "$1" | tr -d "\\\"'<>[](),"
 }
 
 _status_line() {
-  printf "%16s: %s\\n" "$1" "$2"
+  printf "%16s: %s\n" "$1" "$2"
 }
 
 cmd_status() {
