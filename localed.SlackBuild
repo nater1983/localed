@@ -80,11 +80,7 @@ meson setup \
   DESTDIR=$PKG $NINJA install || exit 1
 cd ..
 
-# Slackware bash client (analogous to localectl). localed picks up the
-# file changes via inotify and refreshes its D-Bus properties.
-mkdir -p $PKG/usr/bin
-cat slack/localectl > $PKG/usr/bin/localectl
-chmod 755 $PKG/usr/bin/localectl
+# localectl is installed by meson (install_data).
 
 find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
