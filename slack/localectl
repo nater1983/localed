@@ -711,40 +711,49 @@ DBUS_DEST="org.freedesktop.locale1"
 DBUS_PATH="/org/freedesktop/locale1"
 DBUS_IFACE="org.freedesktop.locale1"
 
-require_busctl() {
-  command -v busctl >/dev/null 2>&1 || die "busctl not found; install a package providing busctl to use localectl D-Bus operations"
+require_gdbus() {
+  command -v gdbus >/dev/null 2>&1 || die "gdbus not found (install GLib's gdbus utility)"
 }
 
-_busctl_get() {
-  busctl --system get-property "$DBUS_DEST" "$DBUS_PATH" "$DBUS_IFACE" "$1" 2>/dev/null
+_gdbus_call() {
+  gdbus call --system --dest "$DBUS_DEST" --object-path "$DBUS_PATH" \
+    --method "$DBUS_IFACE.$1" "${@:2}"
 }
 
-_busctl_call() {
-  busctl --system call "$DBUS_DEST" "$DBUS_PATH" "$DBUS_IFACE" "$@"
+_gdbus_get() {
+  gdbus call --system --dest "$DBUS_DEST" --object-path "$DBUS_PATH" \
+    --method org.freedesktop.DBus.Properties.Get "$DBUS_IFACE" "$1" 2>/dev/null
+}
+
+# Unwrap the GVariant value returned by Properties.Get. Locale values are
+# restricted to a safe character set, and keyboard identifiers use an
+# allowlist, so the simple quote removal below cannot expose shell syntax.
+_gdbus_value() {
+  printf '%s\n' "$1" | sed -E 's/^\(<?//; s/>?,\)$//; s/^<//; s/>$//; s/^\[//; s/\]$//; s/"//g; s/'"'"'//g'
 }
 
 cmd_status() {
-  require_busctl
+  require_gdbus
   local locale keymap toggle layout model variant options raw
-  raw=$(_busctl_get Locale) || die "cannot read locale1 properties; is localed running?"
-  locale=$(printf '%s\n' "$raw" | sed -E 's/^as [0-9]+//; s/"//g')
+  raw=$(_gdbus_get Locale) || die "cannot read locale1 properties; is localed running?"
+  locale=$(_gdbus_value "$raw")
   _status_line "System Locale" "${locale:-n/a}"
 
-  raw=$(_busctl_get VConsoleKeymap) || die "cannot read VConsoleKeymap"
-  keymap=$(printf '%s\n' "$raw" | sed -E 's/^s //; s/^"//; s/"$//')
-  raw=$(_busctl_get VConsoleKeymapToggle) || die "cannot read VConsoleKeymapToggle"
-  toggle=$(printf '%s\n' "$raw" | sed -E 's/^s //; s/^"//; s/"$//')
+  raw=$(_gdbus_get VConsoleKeymap) || die "cannot read VConsoleKeymap"
+  keymap=$(_gdbus_value "$raw")
+  raw=$(_gdbus_get VConsoleKeymapToggle) || die "cannot read VConsoleKeymapToggle"
+  toggle=$(_gdbus_value "$raw")
   _status_line "VC Keymap" "${keymap:-(unset)}"
   [ -n "$toggle" ] && _status_line "VC Keymap Tgl" "$toggle"
 
-  raw=$(_busctl_get X11Layout) || die "cannot read X11Layout"
-  layout=$(printf '%s\n' "$raw" | sed -E 's/^s //; s/^"//; s/"$//')
-  raw=$(_busctl_get X11Model) || die "cannot read X11Model"
-  model=$(printf '%s\n' "$raw" | sed -E 's/^s //; s/^"//; s/"$//')
-  raw=$(_busctl_get X11Variant) || die "cannot read X11Variant"
-  variant=$(printf '%s\n' "$raw" | sed -E 's/^s //; s/^"//; s/"$//')
-  raw=$(_busctl_get X11Options) || die "cannot read X11Options"
-  options=$(printf '%s\n' "$raw" | sed -E 's/^s //; s/^"//; s/"$//')
+  raw=$(_gdbus_get X11Layout) || die "cannot read X11Layout"
+  layout=$(_gdbus_value "$raw")
+  raw=$(_gdbus_get X11Model) || die "cannot read X11Model"
+  model=$(_gdbus_value "$raw")
+  raw=$(_gdbus_get X11Variant) || die "cannot read X11Variant"
+  variant=$(_gdbus_value "$raw")
+  raw=$(_gdbus_get X11Options) || die "cannot read X11Options"
+  options=$(_gdbus_value "$raw")
   _status_line "X11 Layout" "${layout:-(unset)}"
   if [ -n "$layout" ]; then
     _status_line "X11 Model" "${model:--}"
@@ -754,7 +763,7 @@ cmd_status() {
 }
 
 cmd_set_locale() {
-  require_busctl
+  require_gdbus
   [ "$#" -gt 0 ] || die "set-locale requires at least one KEY=value argument"
   local pair key value
   for pair in "$@"; do
@@ -767,38 +776,38 @@ cmd_set_locale() {
     fi
   done
   # The trailing true permits a Polkit authentication agent to prompt.
-  _busctl_call SetLocale asb "$#" "$@" true >/dev/null \
+  _gdbus_call SetLocale "['$(printf "%s', " "$@" | sed 's/, $//')]" true >/dev/null \
     || die "SetLocale failed (authorization may have been denied)"
 }
 
 cmd_set_keymap() {
-  require_busctl
+  require_gdbus
   local no_convert=false
   if [ "${1:-}" = "--no-convert" ]; then no_convert=true; shift; fi
   [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die "usage: localectl set-keymap [--no-convert] KEYMAP [TOGGLE]"
   local keymap="$1" toggle="${2:-}"
   keyboard_value_is_safe "$keymap" || die "invalid keymap '$keymap'"
   [ -z "$toggle" ] || keyboard_value_is_safe "$toggle" || die "invalid keymap toggle '$toggle'"
-  _busctl_call SetVConsoleKeyboard ssbb "$keymap" "$toggle" "$([ "$no_convert" = false ] && echo true || echo false)" true >/dev/null \
+  _gdbus_call SetVConsoleKeyboard "$keymap" "$toggle" "$([ "$no_convert" = false ] && echo true || echo false)" true >/dev/null \
     || die "SetVConsoleKeyboard failed (authorization may have been denied)"
 }
 
 cmd_set_x11_keymap() {
-  require_busctl
+  require_gdbus
   local no_convert=false
   if [ "${1:-}" = "--no-convert" ]; then no_convert=true; shift; fi
   [ "$#" -ge 1 ] && [ "$#" -le 4 ] || die "usage: localectl set-x11-keymap [--no-convert] LAYOUT [MODEL [VARIANT [OPTIONS]]]"
   local layout="$1" model="" variant="" options=""
   # Preserve omitted fields by reading the current D-Bus properties. Explicit
   # empty arguments intentionally clear a field.
-  if [ "$#" -ge 2 ]; then model="$2"; else model=$(_busctl_get X11Model | sed -E 's/^s //; s/^"//; s/"$//') || die "cannot read X11Model"; fi
-  if [ "$#" -ge 3 ]; then variant="$3"; else variant=$(_busctl_get X11Variant | sed -E 's/^s //; s/^"//; s/"$//') || die "cannot read X11Variant"; fi
-  if [ "$#" -ge 4 ]; then options="$4"; else options=$(_busctl_get X11Options | sed -E 's/^s //; s/^"//; s/"$//') || die "cannot read X11Options"; fi
+  if [ "$#" -ge 2 ]; then model="$2"; else model=$(_gdbus_get X11Model | sed -E 's/^\(<//; s/>?,\)$//; s/^"//; s/"$//; s/^\x27//; s/\x27$//') || die "cannot read X11Model"; fi
+  if [ "$#" -ge 3 ]; then variant="$3"; else variant=$(_gdbus_get X11Variant | sed -E 's/^\(<//; s/>?,\)$//; s/^"//; s/"$//; s/^\x27//; s/\x27$//') || die "cannot read X11Variant"; fi
+  if [ "$#" -ge 4 ]; then options="$4"; else options=$(_gdbus_get X11Options | sed -E 's/^\(<//; s/>?,\)$//; s/^"//; s/"$//; s/^\x27//; s/\x27$//') || die "cannot read X11Options"; fi
   local field
   for field in "$layout" "$model" "$variant" "$options"; do
     [ -z "$field" ] || keyboard_value_is_safe "$field" || die "invalid X11 keyboard value '$field'"
   done
-  _busctl_call SetX11Keyboard ssssbb "$layout" "$model" "$variant" "$options" "$([ "$no_convert" = false ] && echo true || echo false)" true >/dev/null \
+  _gdbus_call SetX11Keyboard "$layout" "$model" "$variant" "$options" "$([ "$no_convert" = false ] && echo true || echo false)" true >/dev/null \
     || die "SetX11Keyboard failed (authorization may have been denied)"
 }
 
