@@ -23,6 +23,8 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <grp.h>
+#include <pwd.h>
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
@@ -318,6 +320,43 @@ rcl_main_log_handler_cb(const gchar    *log_domain,
 
 /* ───────────────────────────────────────────── */
 
+static gboolean
+rcl_main_uid_in_privileged_group(guint64 uid)
+{
+  struct passwd *pw;
+  struct group *gr;
+  gid_t *groups = NULL;
+  int ngroups = 0;
+  gboolean found = FALSE;
+
+  pw = getpwuid((uid_t)uid);
+  gr = getgrnam(PRIVILEGED_GROUP);
+  if (!pw || !gr)
+    return FALSE;
+
+  (void)getgrouplist(pw->pw_name, pw->pw_gid, NULL, &ngroups);
+  if (ngroups <= 0)
+    ngroups = 16;
+  groups = g_new(gid_t, ngroups);
+
+  if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) >= 0)
+  {
+    for (int i = 0; i < ngroups; i++)
+    {
+      if (groups[i] == gr->gr_gid)
+      {
+        found = TRUE;
+        break;
+      }
+    }
+  }
+
+  g_free(groups);
+  return found;
+}
+
+/* ───────────────────────────────────────────── */
+
 /*
  * GNOME Control Center currently writes the selected language to
  * AccountsService instead of calling locale1.SetLocale. Bridge that change
@@ -343,9 +382,6 @@ rcl_main_accounts_properties_changed(GDBusConnection *connection,
   gchar *end = NULL;
   gchar *locale_assignment = NULL;
   guint64 uid;
-  PolkitAuthority *authority = NULL;
-  PolkitSubject *subject = NULL;
-  PolkitAuthorizationResult *auth_result = NULL;
   GError *error = NULL;
   GVariantBuilder locale;
   GVariant *reply = NULL;
@@ -376,31 +412,17 @@ rcl_main_accounts_properties_changed(GDBusConnection *connection,
   if (!language[0] || !g_utf8_validate(language, -1, NULL))
     goto out;
 
-  authority = polkit_authority_get_sync(NULL, &error);
-  if (!authority)
-  {
-    g_warning("AccountsService locale bridge: cannot connect to Polkit: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
-    goto out;
-  }
-
-  subject = polkit_unix_user_new((gint)uid);
-  auth_result = polkit_authority_check_authorization_sync(
-      authority, subject, RCL_LOCALE_POLKIT_SET_LOCALE, NULL,
-      POLKIT_CHECK_AUTHORIZATION_FLAGS_NONE, NULL, &error);
-  if (!auth_result)
-  {
-    g_warning("AccountsService locale bridge: Polkit check failed: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
-    goto out;
-  }
-
-  if (!polkit_authorization_result_get_is_authorized(auth_result))
+  /*
+   * PropertiesChanged does not carry the original caller's D-Bus credentials.
+   * Do not authorize AccountsService as a proxy for that caller. Restrict this
+   * asynchronous bridge to the configured privileged group; other users must
+   * call locale1.SetLocale directly so Polkit can authorize the real caller.
+   */
+  if (!rcl_main_uid_in_privileged_group(uid))
   {
     LOG(state, "ignoring AccountsService language change for uid %" G_GUINT64_FORMAT
-        ": user is not authorised for system locale changes", uid);
+        ": user is not in privileged group '%s'",
+        uid, PRIVILEGED_GROUP);
     goto out;
   }
 
@@ -429,9 +451,6 @@ out:
   g_clear_pointer(&language_value, g_variant_unref);
   g_clear_pointer(&changed, g_variant_unref);
   g_clear_pointer(&invalidated, g_variant_unref);
-  g_clear_object(&auth_result);
-  g_clear_object(&subject);
-  g_clear_object(&authority);
 }
 
 /* ───────────────────────────────────────────── */
