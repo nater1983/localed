@@ -340,36 +340,43 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
 static gchar *
 extract_xkb_option( const gchar *contents, const gchar *option_name )
 {
-  gchar *needle = g_strdup_printf( "\"%s\"", option_name );
-  gchar *pos = strstr( contents, needle );
-  gchar *result = NULL;
+  gchar **lines = g_strsplit( contents, "\n", -1 );
+  gchar  *result = NULL;
+  guint   i;
 
-  g_free( needle );
-
-  if( pos )
+  /* Only match Option "Name" "value" lines, ignoring comments and unrelated
+     text that happens to mention the option name. */
+  for( i = 0; lines[i] != NULL && result == NULL; i++ )
   {
-    /* Skip past the option name's closing quote, then find the next
-       quoted string, which holds the value. */
-    gchar *value_start = strchr( pos + 1, '"' );
-    if( value_start )
-    {
-      value_start = strchr( value_start + 1, '"' ); /* opening quote of value */
-      if( value_start )
-      {
-        gchar *value_end = strchr( value_start + 1, '"' );
-        if( value_end )
-        {
-          gsize len = (gsize)(value_end - value_start - 1);
-          if( len <= MAX_XKB_VALUE_LEN )
-            result = g_strndup( value_start + 1, len );
-          else
-            g_warning( "extract_xkb_option: value for '%s' exceeds %d bytes, ignoring",
-                       option_name, MAX_XKB_VALUE_LEN );
-        }
-      }
-    }
+    gchar *line = g_strstrip( lines[i] );
+    gchar *q1, *q2, *q3, *q4;
+    gsize  nlen;
+
+    if( g_str_has_prefix( line, "#" ) ||
+        strncmp( line, "Option", 6 ) != 0 ||
+        ( line[6] != ' ' && line[6] != '\t' ) )
+      continue;
+
+    q1 = strchr( line + 6, '"' );
+    q2 = q1 ? strchr( q1 + 1, '"' ) : NULL;
+    q3 = q2 ? strchr( q2 + 1, '"' ) : NULL;
+    q4 = q3 ? strchr( q3 + 1, '"' ) : NULL;
+    if( !q1 || !q2 || !q3 || !q4 )
+      continue;
+
+    nlen = (gsize)( q2 - q1 - 1 );
+    if( nlen != strlen( option_name ) ||
+        strncmp( q1 + 1, option_name, nlen ) != 0 )
+      continue;
+
+    if( (gsize)( q4 - q3 - 1 ) <= MAX_XKB_VALUE_LEN )
+      result = g_strndup( q3 + 1, (gsize)( q4 - q3 - 1 ) );
+    else
+      g_warning( "extract_xkb_option: value for '%s' exceeds %d bytes, ignoring",
+                 option_name, MAX_XKB_VALUE_LEN );
   }
 
+  g_strfreev( lines );
   return result ? result : g_strdup( "" );
 }
 
@@ -792,7 +799,7 @@ rcl_locale_value_is_safe( const gchar *value )
 {
   const gchar *p;
 
-  if( !value )
+  if( !value || strlen( value ) > MAX_XKB_VALUE_LEN )
     return FALSE;
 
   for( p = value; *p; p++ )
@@ -823,7 +830,8 @@ rcl_keyboard_value_is_safe( const gchar *value )
 {
   const gchar *p;
 
-  if( !value )
+  /* Match the reader's cap so accepted values read back unchanged. */
+  if( !value || strlen( value ) > MAX_XKB_VALUE_LEN )
     return FALSE;
 
   for( p = value; *p; p++ )
@@ -1394,9 +1402,10 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
     }
   }
 
-  /* Build the known_keys/new_values pair arrays. An entry not present in
-     the incoming array is left untouched in the file (SetLocale is allowed
-     to update a subset, e.g. just LANG). */
+  /* Build the known_keys/new_values pair arrays. SetLocale replaces the
+     whole locale set (systemd semantics): rcl_write_lang_sh() drops every
+     known locale export from the file and re-emits only these, so any
+     variable not supplied in the call is removed. */
   for( i = 0; locale_variable_names[i] != NULL; i++ )
   {
     guint j;
