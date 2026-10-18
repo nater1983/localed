@@ -712,7 +712,7 @@ DBUS_PATH="/org/freedesktop/locale1"
 DBUS_IFACE="org.freedesktop.locale1"
 
 require_busctl() {
-  command -v busctl >/dev/null 2>&1 || die "busctl not found (install systemd-free busctl-compatible tools or use gdbus)"
+  command -v busctl >/dev/null 2>&1 || die "busctl not found; install a package providing busctl to use localectl D-Bus operations"
 }
 
 _busctl_get() {
