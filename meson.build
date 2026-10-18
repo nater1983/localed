@@ -95,18 +95,6 @@ subdir('po')
 subdir('man')
 
 summary({
-  'prefix'     : prefix,
-  'sysconfdir' : sysconfdir,
-  'datadir'    : datadir,
-  'localedir'  : localedir,
-}, section : 'Directories')
-
-summary({
-  'polkit' : polkit.version(),
-  'GLib'   : glib_dep.version(),
-}, section : 'Dependencies')
-
-summary({
   'locale script' : get_option('lang_sh'),
   'console keymap': get_option('rc_keymap'),
   'X11 keyboard'  : get_option('x11_keyboard_conf'),
