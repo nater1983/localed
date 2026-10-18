@@ -84,6 +84,13 @@ config_h_inc = include_directories('.')
 
 subdir('src')
 subdir('data')
+# Install the Slackware localectl client for normal Meson installs too.
+install_data(
+  'slack/localectl',
+  install_dir : get_option('bindir'),
+  install_mode : 'rwxr-xr-x',
+)
+
 subdir('po')
 subdir('man')
 
@@ -98,3 +105,10 @@ summary({
   'polkit' : polkit.version(),
   'GLib'   : glib_dep.version(),
 }, section : 'Dependencies')
+
+summary({
+  'locale script' : get_option('lang_sh'),
+  'console keymap': get_option('rc_keymap'),
+  'X11 keyboard'  : get_option('x11_keyboard_conf'),
+  'privileged group': get_option('privileged-group'),
+}, section : 'Configuration')
