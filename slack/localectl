@@ -777,7 +777,7 @@ cmd_set_locale() {
     fi
   done
   # The trailing true permits a Polkit authentication agent to prompt.
-  _gdbus_call SetLocale "['$(printf "%s', " "$@" | sed 's/, $//')]" true >/dev/null \
+  _gdbus_call SetLocale "[$(printf "'%s', " "$@" | sed 's/, $//')]" true >/dev/null \
     || die "SetLocale failed (authorization may have been denied)"
 }
 
