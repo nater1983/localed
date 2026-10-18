@@ -38,6 +38,13 @@
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
 
+/*
+ * Reconnect delay after losing the D-Bus name (milliseconds).
+ * Long enough that a dbus-daemon restart has time to settle, short enough
+ * that the service is not visibly absent.
+ */
+#define RECONNECT_DELAY_MS     2500
+
 /* ───────────────────────────────────────────── */
 
 typedef struct RclState
@@ -53,12 +60,14 @@ typedef struct RclState
    * Ownership state.
    *
    * watch_id   – handle returned by g_bus_own_name(); 0 when not owning.
-   * has_name   – TRUE once name_acquired has fired.
-   * exiting    – set TRUE by signal handlers so name_lost does not log noise.
-   * sync_id    – pending debounce timer for file-change resync; 0 if none.
+   * has_name     – TRUE once name_acquired has fired.
+   * reconnect_id – pending reconnect timer; 0 if none.
+   * exiting      – set TRUE by signal handlers so name_lost does not reschedule.
+   * sync_id      – pending debounce timer for file-change resync; 0 if none.
    */
   guint       watch_id;
   gboolean    has_name;
+  guint       reconnect_id;
   gboolean    exiting;
   guint       sync_id;
 } RclState;
@@ -72,6 +81,12 @@ rcl_state_free(RclState *state)
   {
     g_source_remove(state->sync_id);
     state->sync_id = 0;
+  }
+
+  if (state->reconnect_id)
+  {
+    g_source_remove(state->reconnect_id);
+    state->reconnect_id = 0;
   }
 
   if (state->watch_id)
@@ -106,6 +121,35 @@ rcl_state_new(void)
   } while (0)
 
 /* ───────────────────────────────────────────── */
+
+static void rcl_acquire_name(RclState *state);   /* forward */
+
+/*
+ * Retry name acquisition after a transient D-Bus disconnect. Clear the old
+ * daemon registration first so startup does not retain the previous
+ * connection or introspection data.
+ */
+static gboolean
+rcl_main_reconnect_cb(gpointer user_data)
+{
+  RclState *state = user_data;
+
+  state->reconnect_id = 0;
+
+  LOG(state, "attempting to re-acquire D-Bus name");
+
+  if (state->watch_id)
+  {
+    g_bus_unown_name(state->watch_id);
+    state->watch_id = 0;
+  }
+
+  rcl_daemon_shutdown(state->daemon);
+  state->has_name = FALSE;
+  rcl_acquire_name(state);
+
+  return G_SOURCE_REMOVE;
+}
 
 /* ───────────────────────────────────────────── */
 
@@ -147,11 +191,9 @@ rcl_main_name_acquired(GDBusConnection *connection,
 /*
  * rcl_main_name_lost:
  *
- * Startup failure (has_name FALSE): another instance owns the name and
- * --replace was not given. Runtime loss (has_name TRUE): dbus-daemon
- * restarted or we were replaced. Either way, exit; the D-Bus service file
- * re-activates us on the next call. Re-running startup on a live object
- * would leak the old connection/introspection and re-register the object.
+ * If the name was never acquired, another instance is likely running and
+ * startup fails. If it was lost after successful startup, retry after a
+ * short delay unless this instance is exiting or was explicitly replaced.
  */
 static void
 rcl_main_name_lost(GDBusConnection *connection,
@@ -160,15 +202,32 @@ rcl_main_name_lost(GDBusConnection *connection,
 {
   RclState *state = user_data;
 
+  g_warning("D-Bus name lost: %s", name);
+
   if (state->exiting)
     return;
 
   if (!state->has_name)
+  {
     g_warning("could not acquire %s – is another instance running?", name);
-  else
-    g_warning("lost %s, exiting", name);
+    g_main_loop_quit(state->loop);
+    return;
+  }
 
-  g_main_loop_quit(state->loop);
+  if (state->replace)
+  {
+    LOG(state, "replaced by another instance, exiting");
+    g_main_loop_quit(state->loop);
+    return;
+  }
+
+  if (!state->reconnect_id)
+  {
+    g_warning("scheduling reconnect in %d ms", RECONNECT_DELAY_MS);
+    state->reconnect_id = g_timeout_add(RECONNECT_DELAY_MS,
+                                        rcl_main_reconnect_cb,
+                                        state);
+  }
 }
 
 /* ───────────────────────────────────────────── */
@@ -286,7 +345,7 @@ rcl_main_inotify_cb(gpointer user_data)
  * rcl_acquire_name:
  *
  * Registers a g_bus_own_name() watch and stores the watch_id in state.
- * Called once from main().
+ * Called initially from main() and again after a transient D-Bus loss.
  *
  * G_BUS_NAME_OWNER_FLAGS_ALLOW_REPLACEMENT is always set so that a
  * subsequent invocation with --replace can take over cleanly.
