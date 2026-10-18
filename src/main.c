@@ -350,8 +350,7 @@ rcl_main_accounts_properties_changed(GDBusConnection *connection,
   GVariantBuilder locale;
   GVariant *reply = NULL;
 
-  if (g_strcmp0(sender_name, "org.freedesktop.Accounts") != 0 ||
-      !g_str_has_prefix(object_path, "/org/freedesktop/Accounts/User") ||
+  if (!g_str_has_prefix(object_path, "/org/freedesktop/Accounts/User") ||
       g_strcmp0(interface_name, "org.freedesktop.DBus.Properties") != 0 ||
       g_strcmp0(signal_name, "PropertiesChanged") != 0)
     return;
