@@ -325,8 +325,8 @@ rcl_main_uid_in_privileged_group(guint64 uid)
 {
   struct passwd *pw;
   struct group *gr;
-  gid_t *groups = NULL;
-  int ngroups = 0;
+  gid_t *groups;
+  int ngroups = 16;
   gboolean found = FALSE;
 
   pw = getpwuid((uid_t)uid);
@@ -334,20 +334,23 @@ rcl_main_uid_in_privileged_group(guint64 uid)
   if (!pw || !gr)
     return FALSE;
 
-  (void)getgrouplist(pw->pw_name, pw->pw_gid, NULL, &ngroups);
-  if (ngroups <= 0)
-    ngroups = 16;
   groups = g_new(gid_t, ngroups);
-
-  if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) >= 0)
+  if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
   {
-    for (int i = 0; i < ngroups; i++)
+    groups = g_renew(gid_t, groups, ngroups);
+    if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
     {
-      if (groups[i] == gr->gr_gid)
-      {
-        found = TRUE;
-        break;
-      }
+      g_free(groups);
+      return FALSE;
+    }
+  }
+
+  for (int i = 0; i < ngroups; i++)
+  {
+    if (groups[i] == gr->gr_gid)
+    {
+      found = TRUE;
+      break;
     }
   }
 
