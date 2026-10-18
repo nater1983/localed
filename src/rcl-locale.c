@@ -1499,6 +1499,44 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
+/*
+ * Apply a GNOME AccountsService language update without making a recursive
+ * D-Bus call to our own locale1 service. The bridge in main.c has already
+ * checked the affected user's membership in PRIVILEGED_GROUP.
+ *
+ * Match SetLocale semantics: replace the system locale assignments with LANG,
+ * and apply the same LANGUAGE fallback when the selected value has a mapping.
+ */
+gboolean
+rcl_locale_daemon_set_language_from_accounts( RclLocaleDaemon *daemon,
+                                              const gchar *language,
+                                              GError **error )
+{
+  const gchar *known_keys[3] = { "LANG", NULL, NULL };
+  const gchar *new_values[3] = { language, NULL, NULL };
+  const gchar *fallback;
+
+  if (!language || !rcl_locale_value_is_safe(language))
+  {
+    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                        "Invalid locale value from AccountsService");
+    return FALSE;
+  }
+
+  fallback = rcl_find_language_fallback(language);
+  if (fallback)
+  {
+    known_keys[1] = "LANGUAGE";
+    new_values[1] = fallback;
+  }
+
+  if (!rcl_write_lang_sh(RCL_LANG_SH_FILE, known_keys, new_values, error))
+    return FALSE;
+
+  rcl_daemon_sync_dbus_properties(daemon);
+  return TRUE;
+}
+
 static void
 do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
                           const gchar *keymap, const gchar *keymap_toggle,
