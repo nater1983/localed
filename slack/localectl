@@ -729,7 +729,8 @@ _gdbus_get() {
 # restricted to a safe character set, and keyboard identifiers use an
 # allowlist, so the simple quote removal below cannot expose shell syntax.
 _gdbus_value() {
-  printf '%s\n' "$1" | sed -E 's/^\(<?//; s/>?,\)$//; s/^<//; s/>$//; s/^\[//; s/\]$//; s/"//g; s/'"'"'//g'
+  # gdbus wraps property values in GVariant punctuation.
+  printf '%s\\n' "$1" | tr -d "\\\"'<>[](),"
 }
 
 cmd_status() {
