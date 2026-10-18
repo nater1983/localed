@@ -22,6 +22,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <gio/gio.h>
 #include <glib.h>
@@ -450,7 +451,19 @@ write_x11_keyboard_conf( const gchar *path,
   g_string_append_printf( out, "    Option \"XkbOptions\" \"%s\"\n", options ? options : "" );
   g_string_append( out, "EndSection\n" );
 
-  tmp_path = g_strdup_printf( "%s.tmp", path );
+  tmp_path = g_strdup_printf( "%s.XXXXXX", path );
+  {
+    int fd = g_mkstemp( tmp_path );
+    if( fd == -1 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "create temporary file for %s: %s", path, g_strerror(errno) );
+      g_free( tmp_path );
+      g_string_free( out, TRUE );
+      return FALSE;
+    }
+    close( fd );
+  }
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
   if( ok )
@@ -619,7 +632,20 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
 
   g_string_append( out, "fi\n" );
 
-  tmp_path = g_strdup_printf( "%s.tmp", path );
+  tmp_path = g_strdup_printf( "%s.XXXXXX", path );
+  {
+    int fd = g_mkstemp( tmp_path );
+    if( fd == -1 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "create temporary file for %s: %s", path, g_strerror(errno) );
+      g_free( tmp_path );
+      g_string_free( out, TRUE );
+      g_hash_table_unref( new_vals );
+      return FALSE;
+    }
+    close( fd );
+  }
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
   if( ok )
@@ -692,8 +718,19 @@ rcl_write_rc_keymap_toggle( const gchar *path,
 
   {
     gchar    *line     = g_strdup_printf( "%s\n", keymap_toggle );
-    gchar    *tmp_path = g_strdup_printf( "%s.tmp", path );
-    gboolean  ok       = g_file_set_contents( tmp_path, line, -1, error );
+    gchar    *tmp_path = g_strdup_printf( "%s.XXXXXX", path );
+    int       fd       = g_mkstemp( tmp_path );
+    gboolean  ok;
+
+    if( fd == -1 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "create temporary file for %s: %s", path, g_strerror(errno) );
+      g_free( tmp_path );
+      return FALSE;
+    }
+    close( fd );
+    ok = g_file_set_contents( tmp_path, line, -1, error );
 
     if( ok )
     {
@@ -1015,7 +1052,19 @@ rcl_write_lang_sh( const gchar         *path,
 
   g_hash_table_unref( new_vals );
 
-  tmp_path = g_strdup_printf( "%s.tmp", path );
+  tmp_path = g_strdup_printf( "%s.XXXXXX", path );
+  {
+    int fd = g_mkstemp( tmp_path );
+    if( fd == -1 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "create temporary file for %s: %s", path, g_strerror(errno) );
+      g_free( tmp_path );
+      g_string_free( out, TRUE );
+      return FALSE;
+    }
+    close( fd );
+  }
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
   if( ok )
