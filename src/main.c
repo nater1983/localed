@@ -24,6 +24,7 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <gio/gio.h>
@@ -36,13 +37,6 @@
 #include "rcl-locale.h"
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
-
-/*
- * Reconnect delay after losing the D-Bus name (milliseconds).
- * Long enough that a dbus-daemon restart has time to settle, short enough
- * that the service is not visibly absent.
- */
-#define RECONNECT_DELAY_MS     2500
 
 /* ───────────────────────────────────────────── */
 
@@ -59,14 +53,14 @@ typedef struct RclState
    * Ownership state.
    *
    * watch_id   – handle returned by g_bus_own_name(); 0 when not owning.
-   * has_name   – TRUE once name_acquired has fired at least once.
-   * reconnect_id – GSource id of a pending reconnect timer; 0 if none.
-   * exiting    – set TRUE by signal handlers so name_lost does not reschedule.
+   * has_name   – TRUE once name_acquired has fired.
+   * exiting    – set TRUE by signal handlers so name_lost does not log noise.
+   * sync_id    – pending debounce timer for file-change resync; 0 if none.
    */
   guint       watch_id;
   gboolean    has_name;
-  guint       reconnect_id;
   gboolean    exiting;
+  guint       sync_id;
 } RclState;
 
 /* ───────────────────────────────────────────── */
@@ -74,10 +68,10 @@ typedef struct RclState
 static void
 rcl_state_free(RclState *state)
 {
-  if (state->reconnect_id)
+  if (state->sync_id)
   {
-    g_source_remove(state->reconnect_id);
-    state->reconnect_id = 0;
+    g_source_remove(state->sync_id);
+    state->sync_id = 0;
   }
 
   if (state->watch_id)
@@ -106,39 +100,12 @@ rcl_state_new(void)
 /* ───────────────────────────────────────────── */
 
 #define LOG(state, fmt, ...) \
-  if ((state)->debug || (state)->verbose) \
-    g_debug("[localed] " fmt, ##__VA_ARGS__)
+  do { \
+    if ((state)->debug || (state)->verbose) \
+      g_message("[localed] " fmt, ##__VA_ARGS__); \
+  } while (0)
 
 /* ───────────────────────────────────────────── */
-
-static void rcl_acquire_name(RclState *state);   /* forward */
-
-/*
- * rcl_main_reconnect_cb:
- *
- * Called by a one-shot GTimeout after RECONNECT_DELAY_MS.  Drops the old
- * g_bus_own_name() watch (which is in a failed state) and calls
- * rcl_acquire_name() to start a fresh ownership attempt.
- */
-static gboolean
-rcl_main_reconnect_cb(gpointer user_data)
-{
-  RclState *state = user_data;
-
-  state->reconnect_id = 0;   /* source is self-removing (returns FALSE) */
-
-  LOG(state, "attempting to re-acquire D-Bus name");
-
-  if (state->watch_id)
-  {
-    g_bus_unown_name(state->watch_id);
-    state->watch_id = 0;
-  }
-
-  rcl_acquire_name(state);
-
-  return G_SOURCE_REMOVE;
-}
 
 /* ───────────────────────────────────────────── */
 
@@ -180,19 +147,11 @@ rcl_main_name_acquired(GDBusConnection *connection,
 /*
  * rcl_main_name_lost:
  *
- * Fired in two distinct situations:
- *
- *   1. Startup failure – the name could not be obtained at all (e.g. another
- *      instance is running and --replace was not given).  has_name is FALSE.
- *      We exit cleanly rather than looping forever.
- *
- *   2. Runtime loss – we held the name and lost it (dbus-daemon restart, a
- *      --replace takeover, etc.).  has_name is TRUE.  We schedule a reconnect
- *      after RECONNECT_DELAY_MS so transient dbus-daemon restarts are
- *      survived without the service going permanently dark.
- *
- * In both cases, if --replace was active and we already owned the name once,
- * losing it a second time means another instance forcibly took over; exit.
+ * Startup failure (has_name FALSE): another instance owns the name and
+ * --replace was not given. Runtime loss (has_name TRUE): dbus-daemon
+ * restarted or we were replaced. Either way, exit; the D-Bus service file
+ * re-activates us on the next call. Re-running startup on a live object
+ * would leak the old connection/introspection and re-register the object.
  */
 static void
 rcl_main_name_lost(GDBusConnection *connection,
@@ -201,35 +160,15 @@ rcl_main_name_lost(GDBusConnection *connection,
 {
   RclState *state = user_data;
 
-  g_warning("D-Bus name lost: %s", name);
-
   if (state->exiting)
     return;
 
-  /* Case 1: never acquired – another instance is running */
   if (!state->has_name)
-  {
     g_warning("could not acquire %s – is another instance running?", name);
-    g_main_loop_quit(state->loop);
-    return;
-  }
+  else
+    g_warning("lost %s, exiting", name);
 
-  /* Case 2: forcibly replaced by another --replace instance */
-  if (state->replace)
-  {
-    LOG(state, "replaced by another instance, exiting");
-    g_main_loop_quit(state->loop);
-    return;
-  }
-
-  /* Case 3: transient loss (dbus-daemon restart etc.) – schedule reconnect */
-  if (!state->reconnect_id)
-  {
-    g_warning("scheduling reconnect in %d ms", RECONNECT_DELAY_MS);
-    state->reconnect_id = g_timeout_add(RECONNECT_DELAY_MS,
-                                        rcl_main_reconnect_cb,
-                                        state);
-  }
+  g_main_loop_quit(state->loop);
 }
 
 /* ───────────────────────────────────────────── */
@@ -256,12 +195,17 @@ rcl_main_sigterm_cb(gpointer user_data)
 
 /* ───────────────────────────────────────────── */
 
+static gboolean log_debug_enabled = FALSE;
+
 static void
 rcl_main_log_handler_cb(const gchar    *log_domain,
                         GLogLevelFlags  log_level,
                         const gchar    *message,
                         gpointer        user_data)
 {
+  if ((log_level & G_LOG_LEVEL_MASK) == G_LOG_LEVEL_DEBUG && !log_debug_enabled)
+    return;
+
   if (isatty(STDERR_FILENO))
   {
     /*
@@ -312,17 +256,28 @@ rcl_main_log_handler_cb(const gchar    *log_domain,
 
 /* ───────────────────────────────────────────── */
 
+#define SYNC_DEBOUNCE_MS 100
+
 static gboolean
+rcl_main_sync_timeout_cb(gpointer user_data)
+{
+  RclState *state = user_data;
+
+  state->sync_id = 0;
+  LOG(state, "file change detected → syncing DBus properties");
+  rcl_daemon_sync_dbus_properties(RCL_LOCALE_DAEMON(state->daemon));
+  return G_SOURCE_REMOVE;
+}
+
+/* Coalesce bursts of file events (and our own writes) into one resync. */
+static void
 rcl_main_inotify_cb(gpointer user_data)
 {
   RclState *state = user_data;
-  RclLocaleDaemon *object = RCL_LOCALE_DAEMON(state->daemon);
 
-  LOG(state, "file change detected → syncing DBus properties");
-
-  rcl_daemon_sync_dbus_properties(object);
-
-  return G_SOURCE_CONTINUE;
+  if (!state->sync_id)
+    state->sync_id = g_timeout_add(SYNC_DEBOUNCE_MS,
+                                   rcl_main_sync_timeout_cb, state);
 }
 
 /* ───────────────────────────────────────────── */
@@ -331,8 +286,7 @@ rcl_main_inotify_cb(gpointer user_data)
  * rcl_acquire_name:
  *
  * Registers a g_bus_own_name() watch and stores the watch_id in state.
- * Called once from main() and again from rcl_main_reconnect_cb() on
- * transient loss.
+ * Called once from main().
  *
  * G_BUS_NAME_OWNER_FLAGS_ALLOW_REPLACEMENT is always set so that a
  * subsequent invocation with --replace can take over cleanly.
@@ -370,9 +324,11 @@ gint main(gint argc, gchar **argv)
 
   GFile        *locale_file;
   GFile        *rc_keymap_file;
+  GFile        *toggle_file;
   GFile        *x11_keyboard_file;
   GFileMonitor *locale_mon;
   GFileMonitor *rc_keymap_mon;
+  GFileMonitor *toggle_mon;
   GFileMonitor *x11_keyboard_mon;
 
   const GOptionEntry options[] =
@@ -406,6 +362,7 @@ gint main(gint argc, gchar **argv)
   state->verbose = verbose;
   state->replace = replace;
 
+  log_debug_enabled = debug;
   rcl_daemon_set_debug(state->daemon, debug);
 
   /*
@@ -421,8 +378,7 @@ gint main(gint argc, gchar **argv)
    * Install the log handler unconditionally for all domains and levels,
    * including fatal flags.  The handler itself decides whether to write
    * to syslog or to the terminal based on isatty(STDERR_FILENO).
-   * When --debug is not set, GLib will still suppress G_LOG_LEVEL_DEBUG
-   * messages before they reach the handler unless G_MESSAGES_DEBUG is set.
+   * G_LOG_LEVEL_DEBUG messages are dropped in the handler unless --debug.
    */
   g_log_set_handler(NULL,
                     G_LOG_LEVEL_MASK |
@@ -430,12 +386,6 @@ gint main(gint argc, gchar **argv)
                     G_LOG_FLAG_RECURSION,
                     rcl_main_log_handler_cb,
                     NULL);
-
-  if (debug)
-  {
-    /* Make GLib pass G_LOG_LEVEL_DEBUG through to our handler */
-    g_log_set_fatal_mask(NULL, G_LOG_LEVEL_ERROR);
-  }
 
   /* signals */
   g_unix_signal_add(SIGINT,  rcl_main_sigint_cb,  state);
@@ -476,6 +426,19 @@ gint main(gint argc, gchar **argv)
     g_clear_error(&error);
   }
 
+  toggle_file = g_file_new_for_path(RCL_RC_KEYMAP_TOGGLE_FILE);
+  toggle_mon  = g_file_monitor_file(toggle_file,
+                                    G_FILE_MONITOR_WATCH_MOVES,
+                                    NULL, &error);
+  if (toggle_mon)
+    g_signal_connect_swapped(toggle_mon, "changed",
+                             G_CALLBACK(rcl_main_inotify_cb), state);
+  else
+  {
+    g_warning("could not watch %s: %s", RCL_RC_KEYMAP_TOGGLE_FILE, error->message);
+    g_clear_error(&error);
+  }
+
   x11_keyboard_file = g_file_new_for_path(RCL_X11_KEYBOARD_FILE);
   x11_keyboard_mon  = g_file_monitor_file(x11_keyboard_file,
                                           G_FILE_MONITOR_WATCH_MOVES,
@@ -500,12 +463,14 @@ gint main(gint argc, gchar **argv)
 
   g_clear_object(&locale_mon);
   g_clear_object(&rc_keymap_mon);
+  g_clear_object(&toggle_mon);
   g_clear_object(&x11_keyboard_mon);
   g_clear_object(&locale_file);
   g_clear_object(&rc_keymap_file);
+  g_clear_object(&toggle_file);
   g_clear_object(&x11_keyboard_file);
 
-  /* rcl_state_free cancels any pending reconnect timer and unowns the name */
+  /* rcl_state_free cancels any pending resync timer and unowns the name */
   rcl_state_free(state);
 
   closelog();
