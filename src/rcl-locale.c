@@ -474,9 +474,15 @@ write_x11_keyboard_conf( const gchar *path,
      * final file is always accessible, even when localed creates it from
      * scratch.  Mirrors the g_chmod() calls in rcl_write_lang_sh() and
      * rcl_write_rc_keymap_toggle(). */
-    g_chmod( tmp_path, 0644 );
+    if( g_chmod( tmp_path, 0644 ) != 0 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
+      g_unlink( tmp_path );
+      ok = FALSE;
+    }
 
-    if( g_rename( tmp_path, path ) != 0 )
+    if( ok && g_rename( tmp_path, path ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
@@ -651,9 +657,15 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
   if( ok )
   {
     /* Make the script executable */
-    g_chmod( tmp_path, 0755 );
+    if( g_chmod( tmp_path, 0755 ) != 0 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
+      g_unlink( tmp_path );
+      ok = FALSE;
+    }
 
-    if( g_rename( tmp_path, path ) != 0 )
+    if( ok && g_rename( tmp_path, path ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
@@ -738,9 +750,15 @@ rcl_write_rc_keymap_toggle( const gchar *path,
        * lang.sh and rc.keymap permissions; g_file_set_contents creates the
        * temp file 0600 which would leave the sidecar unreadable by non-root
        * readers if created from scratch. */
-      g_chmod( tmp_path, 0644 );
+      if( g_chmod( tmp_path, 0644 ) != 0 )
+      {
+        g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                     "chmod(%s): %s", tmp_path, g_strerror(errno) );
+        g_unlink( tmp_path );
+        ok = FALSE;
+      }
 
-      if( g_rename( tmp_path, path ) != 0 )
+      if( ok && g_rename( tmp_path, path ) != 0 )
       {
         g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                      "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
@@ -1074,9 +1092,15 @@ rcl_write_lang_sh( const gchar         *path,
      * execute permission.  g_file_set_contents() creates the temp file 0600;
      * chmod it to 0755 before the rename so the final file is always
      * accessible, even when localed creates it from scratch. */
-    g_chmod( tmp_path, 0755 );
+    if( g_chmod( tmp_path, 0755 ) != 0 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
+      g_unlink( tmp_path );
+      ok = FALSE;
+    }
 
-    if( g_rename( tmp_path, path ) != 0 )
+    if( ok && g_rename( tmp_path, path ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
