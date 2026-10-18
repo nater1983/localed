@@ -491,6 +491,9 @@ write_x11_keyboard_conf( const gchar *path,
     }
   }
 
+  if( !ok )
+    g_unlink( tmp_path );
+
   g_free( tmp_path );
   g_string_free( out, TRUE );
   return ok;
@@ -674,6 +677,9 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
     }
   }
 
+  if( !ok )
+    g_unlink( tmp_path );
+
   g_free( tmp_path );
   g_string_free( out, TRUE );
   return ok;
@@ -766,6 +772,9 @@ rcl_write_rc_keymap_toggle( const gchar *path,
         ok = FALSE;
       }
     }
+
+    if( !ok )
+      g_unlink( tmp_path );
 
     g_free( tmp_path );
     g_free( line );
@@ -1108,6 +1117,9 @@ rcl_write_lang_sh( const gchar         *path,
       ok = FALSE;
     }
   }
+
+  if( !ok )
+    g_unlink( tmp_path );
 
   g_free( tmp_path );
   g_string_free( out, TRUE );
