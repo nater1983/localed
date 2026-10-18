@@ -18,7 +18,9 @@ dbus_conf_dir_opt = get_option('dbus_system_conf_dir')
 if dbus_conf_dir_opt != ''
   dbus_conf_dir = dbus_conf_dir_opt
 else
-  dbus_conf_dir = join_paths(sysconfdir, 'dbus-1', 'system.d')
+  # Install vendor policy with the package under /usr/share; /etc is reserved
+  # for administrator-managed overrides.
+  dbus_conf_dir = join_paths(prefix, datadir, 'dbus-1', 'system.d')
 endif
 
 _polkit_opt = get_option('polkit_policy_dir')
