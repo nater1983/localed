@@ -127,6 +127,8 @@ GType rcl_locale_daemon_get_type ( void ) G_GNUC_CONST;
  * the initial property values.
  */
 void rcl_daemon_sync_dbus_properties ( RclLocaleDaemon *daemon );
+gboolean rcl_locale_daemon_set_language_from_accounts (
+    RclLocaleDaemon *daemon, const gchar *language, GError **error );
 
 /*---------------------------------------------------------------------------
   Polkit action IDs used when authorising Set* method calls.
