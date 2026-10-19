@@ -1133,6 +1133,97 @@ rcl_write_lang_sh( const gchar         *path,
   return ok;
 }
 
+/* Write the C-shell counterpart of Slackware's system locale settings.
+ * lang.csh intentionally retains Slackware's LC_COLLATE=C default; lang.sh
+ * does not force LC_COLLATE, so Bourne-shell users follow LANG unless an
+ * explicit LC_COLLATE was selected. */
+static gboolean
+rcl_write_lang_csh( const gchar         *path,
+                    const gchar *const  *known_keys,
+                    const gchar *const  *new_values,
+                    GError             **error )
+{
+  GHashTable *values;
+  GString *out;
+  gchar *dir, *tmp_path;
+  gboolean ok = FALSE;
+  guint i;
+  const gchar *lang, *collate;
+
+  dir = g_path_get_dirname(path);
+  if( g_mkdir_with_parents(dir, 0755) != 0 && errno != EEXIST )
+  {
+    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                "mkdir -p %s: %s", dir, g_strerror(errno));
+    g_free(dir);
+    return FALSE;
+  }
+  g_free(dir);
+
+  values = g_hash_table_new(g_str_hash, g_str_equal);
+  for( i = 0; known_keys[i] != NULL; i++ )
+    g_hash_table_replace(values, (gpointer)known_keys[i],
+                         (gpointer)(new_values[i] ? new_values[i] : ""));
+
+  out = g_string_new("#!/bin/csh\n");
+  g_string_append(out, "# Written by localed - see localed(8)\n");
+  g_string_append(out, "# Set the system locale.\n");
+
+  lang = g_hash_table_lookup(values, "LANG");
+  if( lang && lang[0] )
+    g_string_append_printf(out, "setenv LANG %s\n", lang);
+
+  for( i = 1; locale_variable_names[i] != NULL; i++ )
+  {
+    const gchar *key = locale_variable_names[i];
+    const gchar *value = g_hash_table_lookup(values, key);
+    if( value && value[0] && g_strcmp0(key, "LC_COLLATE") != 0 )
+      g_string_append_printf(out, "setenv %s %s\n", key, value);
+  }
+
+  collate = g_hash_table_lookup(values, "LC_COLLATE");
+  if( !collate || !collate[0] )
+    collate = "C";
+  g_string_append_printf(out, "setenv LC_COLLATE %s\n", collate);
+  g_string_append(out, "# End of /etc/profile.d/lang.csh\n");
+
+  g_hash_table_unref(values);
+
+  tmp_path = g_strdup_printf("%s.XXXXXX", path);
+  {
+    int fd = g_mkstemp(tmp_path);
+    if( fd == -1 )
+    {
+      g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                  "create temporary file for %s: %s", path, g_strerror(errno));
+      g_free(tmp_path);
+      g_string_free(out, TRUE);
+      return FALSE;
+    }
+    close(fd);
+  }
+
+  ok = g_file_set_contents(tmp_path, out->str, (gssize)out->len, error);
+  if( ok && g_chmod(tmp_path, 0755) != 0 )
+  {
+    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                "chmod(%s): %s", tmp_path, g_strerror(errno));
+    ok = FALSE;
+  }
+  if( ok && g_rename(tmp_path, path) != 0 )
+  {
+    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                "rename(%s, %s): %s", tmp_path, path, g_strerror(errno));
+    ok = FALSE;
+  }
+  if( !ok )
+    g_unlink(tmp_path);
+
+  g_free(tmp_path);
+  g_string_free(out, TRUE);
+  return ok;
+}
+
 /* Build the canonical "KEY=value" GStrv for the Locale property from
    whatever known LANG/LANGUAGE/LC_xxx keys are present in RCL_LANG_SH_FILE. */
 static gchar **
@@ -1488,7 +1579,8 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
     }
   }
 
-  if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &error ) )
+  if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &error ) ||
+      !rcl_write_lang_csh( RCL_LANG_CSH_FILE, known_keys, new_values, &error ) )
   {
     g_dbus_method_invocation_return_gerror( invocation, error );
     g_error_free( error );
@@ -1530,7 +1622,8 @@ rcl_locale_daemon_set_language_from_accounts( RclLocaleDaemon *daemon,
     new_values[1] = fallback;
   }
 
-  if (!rcl_write_lang_sh(RCL_LANG_SH_FILE, known_keys, new_values, error))
+  if (!rcl_write_lang_sh(RCL_LANG_SH_FILE, known_keys, new_values, error) ||
+      !rcl_write_lang_csh(RCL_LANG_CSH_FILE, known_keys, new_values, error))
     return FALSE;
 
   rcl_daemon_sync_dbus_properties(daemon);
