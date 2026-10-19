@@ -149,6 +149,10 @@ gboolean rcl_locale_daemon_set_language_from_accounts (
 #define RCL_LANG_SH_FILE       "/etc/profile.d/lang.sh"
 #endif
 
+#ifndef RCL_LANG_CSH_FILE
+#define RCL_LANG_CSH_FILE      "/etc/profile.d/lang.csh"
+#endif
+
 #ifndef RCL_RC_KEYMAP_FILE
 #define RCL_RC_KEYMAP_FILE         "/etc/rc.d/rc.keymap"
 #endif
