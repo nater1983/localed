@@ -1,0 +1,45 @@
+# Changelog
+
+Changes for the `localed` Slackware implementation of
+`org.freedesktop.locale1`.
+
+## [0.2.1] - 2026-10-21
+
+### Changed
+- Write locale settings to both `/etc/profile.d/lang.sh` and
+  `/etc/profile.d/lang.csh` so Bourne-compatible and C-shell logins use the
+  configured locale.
+
+### Maintenance
+- Remove the obsolete `BUGS-NEWS` file; its contents predate the 0.2.0 branch.
+
+## [0.2.0] - Unreleased
+
+### Fixed
+- Exit when the daemon loses ownership of the D-Bus name. D-Bus activation can
+  start a fresh instance; the running object is no longer restarted in place.
+- Reject locale and keyboard values longer than 256 bytes, matching the
+  readers' limits so accepted values can be read back unchanged.
+- Parse X11 keyboard options only from actual `Option "Name" "value"` lines;
+  comments and unrelated text mentioning an option are ignored.
+- Make the logging macro safe in conditional contexts and make debug filtering
+  explicit.
+- Watch `/etc/rc.d/rc.keymap.toggle` as well as the locale, console-keymap,
+  and X11 keyboard files.
+- Debounce bursts of file-change events before synchronizing D-Bus properties.
+- Clarify that `SetLocale` replaces the complete locale set.
+
+### Changed
+- Restrict the default D-Bus policy to Introspectable, Properties, and the
+  `org.freedesktop.locale1` interface; remove the blanket destination allow
+  and unused ObjectManager/receive-sender rules.
+- Remove the obsolete direct-file read/write implementation from
+  `slack/localectl`. The client uses the D-Bus service for status and changes.
+- Stop installing `localectl` a second time in the SlackBuild; Meson owns
+  its installation.
+- Keep the release notes focused on current 0.2.0 behavior; older fixed-bug
+  inventories are maintained in version control rather than repeated here.
+
+## Reporting bugs
+
+Report reproducible issues at https://github.com/nater1983/localed/issues.
