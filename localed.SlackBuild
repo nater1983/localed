@@ -91,7 +91,7 @@ for i in $( find $PKG/usr/man -type l ) ; do
 done
 
 mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README.md AUTHORS NEWS COPYING $PKG/usr/doc/$PRGNAM-$VERSION 2>/dev/null || true
+cp -a README.md AUTHORS ChangeLog.md COPYING $PKG/usr/doc/$PRGNAM-$VERSION 2>/dev/null || true
 cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-"$VERSION"/$PRGNAM.SlackBuild
 
 mkdir -p $PKG/install
