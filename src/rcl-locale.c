@@ -160,6 +160,10 @@ rcl_file_snapshot_take( RclFileSnapshot *snapshot,
 static gboolean
 rcl_file_snapshot_restore( const RclFileSnapshot *snapshot, GError **error )
 {
+  gchar *temporary_path;
+  int fd;
+  gboolean ok;
+
   if( !snapshot->existed )
   {
     if( g_unlink( snapshot->path ) != 0 && errno != ENOENT )
@@ -172,20 +176,39 @@ rcl_file_snapshot_restore( const RclFileSnapshot *snapshot, GError **error )
     return TRUE;
   }
 
-  if( !g_file_set_contents( snapshot->path, snapshot->contents,
-                            (gssize)snapshot->length, error ) )
+  temporary_path = g_strdup_printf( "%s.XXXXXX", snapshot->path );
+  fd = g_mkstemp( temporary_path );
+  if( fd == -1 )
   {
-    g_prefix_error( error, "restore %s: ", snapshot->path );
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "create rollback file for %s: %s",
+                 snapshot->path, g_strerror(errno) );
+    g_free( temporary_path );
     return FALSE;
   }
-  if( g_chmod( snapshot->path, snapshot->mode ) != 0 )
+  close( fd );
+
+  ok = g_file_set_contents( temporary_path, snapshot->contents,
+                            (gssize)snapshot->length, error );
+  if( ok && g_chmod( temporary_path, snapshot->mode ) != 0 )
   {
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                  "restore permissions on %s: %s",
                  snapshot->path, g_strerror(errno) );
-    return FALSE;
+    ok = FALSE;
   }
-  return TRUE;
+  if( ok && g_rename( temporary_path, snapshot->path ) != 0 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "restore %s: rename failed: %s",
+                 snapshot->path, g_strerror(errno) );
+    ok = FALSE;
+  }
+
+  if( !ok )
+    g_unlink( temporary_path );
+  g_free( temporary_path );
+  return ok;
 }
 
 static void
