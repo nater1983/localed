@@ -75,6 +75,9 @@ typedef struct RclState
   guint       sync_id;
   GDBusConnection *system_bus;
   guint       accounts_subscription_id;
+  guint       accounts_watch_id;
+  gulong      accounts_closed_id;
+  guint       accounts_reconnect_id;
 } RclState;
 
 /* ───────────────────────────────────────────── */
@@ -94,9 +97,30 @@ rcl_state_free(RclState *state)
     state->reconnect_id = 0;
   }
 
+  if (state->accounts_reconnect_id)
+  {
+    g_source_remove(state->accounts_reconnect_id);
+    state->accounts_reconnect_id = 0;
+  }
+
+  if (state->accounts_watch_id)
+  {
+    g_bus_unwatch_name(state->accounts_watch_id);
+    state->accounts_watch_id = 0;
+  }
+
   if (state->accounts_subscription_id && state->system_bus)
+  {
     g_dbus_connection_signal_unsubscribe(state->system_bus,
                                          state->accounts_subscription_id);
+    state->accounts_subscription_id = 0;
+  }
+
+  if (state->system_bus && state->accounts_closed_id)
+  {
+    g_signal_handler_disconnect(state->system_bus, state->accounts_closed_id);
+    state->accounts_closed_id = 0;
+  }
   g_clear_object(&state->system_bus);
 
   if (state->watch_id)
@@ -444,6 +468,122 @@ out:
 
 /* ───────────────────────────────────────────── */
 
+/* The name watch handles AccountsService appearing late and restarting. */
+static void
+rcl_main_accounts_name_appeared(GDBusConnection *connection,
+                                const gchar *name,
+                                const gchar *owner,
+                                gpointer user_data)
+{
+  RclState *state = user_data;
+
+  if (state->accounts_subscription_id)
+    return;
+
+  state->accounts_subscription_id =
+    g_dbus_connection_signal_subscribe(
+      connection, "org.freedesktop.Accounts",
+      "org.freedesktop.DBus.Properties", "PropertiesChanged", NULL, NULL,
+      G_DBUS_SIGNAL_FLAGS_NONE, rcl_main_accounts_properties_changed,
+      state, NULL);
+
+  LOG(state, "AccountsService appeared; language monitoring enabled");
+}
+
+static void
+rcl_main_accounts_name_vanished(GDBusConnection *connection,
+                                const gchar *name,
+                                gpointer user_data)
+{
+  RclState *state = user_data;
+
+  if (state->accounts_subscription_id)
+  {
+    g_dbus_connection_signal_unsubscribe(connection,
+                                         state->accounts_subscription_id);
+    state->accounts_subscription_id = 0;
+  }
+
+  LOG(state, "AccountsService disappeared; language monitoring paused");
+}
+
+static gboolean rcl_main_accounts_connect(RclState *state);
+
+static gboolean
+rcl_main_accounts_reconnect_cb(gpointer user_data)
+{
+  RclState *state = user_data;
+
+  state->accounts_reconnect_id = 0;
+  rcl_main_accounts_connect(state);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+rcl_main_accounts_bus_closed(GDBusConnection *connection,
+                             gboolean remote_peer_vanished,
+                             GError *error,
+                             gpointer user_data)
+{
+  RclState *state = user_data;
+
+  if (connection != state->system_bus)
+    return;
+
+  g_warning("system D-Bus connection for AccountsService closed: %s",
+            error ? error->message : "connection closed");
+
+  if (state->accounts_watch_id)
+  {
+    g_bus_unwatch_name(state->accounts_watch_id);
+    state->accounts_watch_id = 0;
+  }
+  state->accounts_subscription_id = 0;
+  state->accounts_closed_id = 0;
+  g_clear_object(&state->system_bus);
+
+  if (!state->exiting && !state->accounts_reconnect_id)
+    state->accounts_reconnect_id =
+      g_timeout_add(RECONNECT_DELAY_MS, rcl_main_accounts_reconnect_cb, state);
+}
+
+static gboolean
+rcl_main_accounts_connect(RclState *state)
+{
+  GError *error = NULL;
+
+  if (state->exiting || state->system_bus)
+    return state->system_bus != NULL;
+
+  state->system_bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
+  if (!state->system_bus)
+  {
+    g_warning("could not connect to system D-Bus for AccountsService: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+    if (!state->accounts_reconnect_id)
+      state->accounts_reconnect_id =
+        g_timeout_add(RECONNECT_DELAY_MS, rcl_main_accounts_reconnect_cb, state);
+    return FALSE;
+  }
+
+  state->accounts_closed_id =
+    g_signal_connect(state->system_bus, "closed",
+                     G_CALLBACK(rcl_main_accounts_bus_closed), state);
+  state->accounts_watch_id =
+    g_bus_watch_name_on_connection(
+      state->system_bus, "org.freedesktop.Accounts",
+      G_BUS_NAME_WATCHER_FLAGS_NONE,
+      rcl_main_accounts_name_appeared,
+      rcl_main_accounts_name_vanished,
+      state, NULL);
+
+  LOG(state, "watching for AccountsService on the system bus");
+  return TRUE;
+}
+
+/* ───────────────────────────────────────────── */
+
 #define SYNC_DEBOUNCE_MS 100
 
 static gboolean
@@ -640,25 +780,10 @@ gint main(gint argc, gchar **argv)
   }
 
   /*
-   * Watch AccountsService language updates. The affected UID is checked
-   * against the locale1 Polkit action before a system-wide change is made.
+   * Watch AccountsService language updates. The name watch handles service
+   * startup/restarts; the closed handler reconnects after a system-bus restart.
    */
-  state->system_bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
-  if (state->system_bus)
-  {
-    state->accounts_subscription_id =
-      g_dbus_connection_signal_subscribe(
-        state->system_bus, "org.freedesktop.Accounts",
-        "org.freedesktop.DBus.Properties", "PropertiesChanged", NULL, NULL,
-        G_DBUS_SIGNAL_FLAGS_NONE, rcl_main_accounts_properties_changed,
-        state, NULL);
-  }
-  else
-  {
-    g_warning("could not subscribe to AccountsService language changes: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
-  }
+  rcl_main_accounts_connect(state);
 
   /* Acquire the D-Bus name for the first time */
   rcl_acquire_name(state);
