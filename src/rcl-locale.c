@@ -200,6 +200,7 @@ rcl_report_rollback_failure( GError **error, GError *rollback_error )
     g_clear_error( error );
     g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
     g_free( message );
+    g_error_free( rollback_error );
   }
   else if( error )
     g_propagate_error( error, rollback_error );
@@ -1703,6 +1704,7 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
 
   if( !rcl_write_locale_files( known_keys, new_values, &error ) )
   {
+    rcl_daemon_sync_dbus_properties( daemon );
     g_dbus_method_invocation_return_gerror( invocation, error );
     g_error_free( error );
     return;
@@ -1744,7 +1746,10 @@ rcl_locale_daemon_set_language_from_accounts( RclLocaleDaemon *daemon,
   }
 
   if (!rcl_write_locale_files(known_keys, new_values, error))
+  {
+    rcl_daemon_sync_dbus_properties(daemon);
     return FALSE;
+  }
 
   rcl_daemon_sync_dbus_properties(daemon);
   return TRUE;
@@ -1783,6 +1788,7 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
                                          x11_variant, priv->x11_options,
                                          &error ) )
       {
+        rcl_daemon_sync_dbus_properties( daemon );
         g_dbus_method_invocation_return_gerror( invocation, error );
         g_clear_error( &error );
         g_free( x11_layout );
@@ -1805,6 +1811,7 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
   }
   else if( !rcl_write_vconsole_files( keymap, keymap_toggle, &error ) )
   {
+    rcl_daemon_sync_dbus_properties( daemon );
     g_dbus_method_invocation_return_gerror( invocation, error );
     g_clear_error( &error );
     return;
