@@ -28,7 +28,8 @@ PolKit authorization, and emits property-change signals.
 Changing settings does not require running
 .B localectl
 as root when the calling user is authorized by the installed PolKit
-policy. The
+policy. Otherwise, the D-Bus method may trigger an authentication prompt
+when an agent is available. The
 .B --no-convert
 option disables conversion between console and X11 keyboard settings.
 .SH COMMANDS
@@ -219,16 +220,20 @@ Returns 0 on success and 1 on error (for example, an unknown locale
 variable, an invalid value, a missing argument, or insufficient
 permissions).
 .SH AUTHORIZATION
-All subcommands other than
-.B status
-require root. There is no PolKit prompt or D-Bus round trip in
-.B localectl
-itself; the daemon's PolKit policy governs only direct D-Bus callers
-such as
-.BR gnome-control-center (1).
+The set commands communicate with
+.B localed
+through the system D-Bus and pass
+.I interactive=true
+so PolKit may display an authentication prompt when needed. Authorization
+is determined by the daemon's PolKit policy and rules. The status command
+also reads the D-Bus properties. The list commands only enumerate locally
+installed data and do not require elevated privileges.
 .SH FILES
 .TP
-.I /etc/locale.conf
+.I /etc/profile.d/lang.sh
+Slackware locale shell script managed through the locale1 D-Bus service.
+.TP
+.I /etc/profile.d/lang.sh
 System locale settings managed by localed.
 .TP
 .I /etc/rc.d/rc.keymap
@@ -244,8 +249,9 @@ set; removed when the toggle is cleared.
 Xorg InputClass keyboard configuration managed by localed.
 .SH SEE ALSO
 .BR localed (8),
-.BR locale.conf (5),
-.BR vconsole.conf (5),
+.BR polkit (8),
+.BR gdbus (1),
+.BR localed (8),
 .BR inotify (7)
 .SH AUTHOR
 Written by Nathaniel Russell.
