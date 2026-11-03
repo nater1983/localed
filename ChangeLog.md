@@ -2,7 +2,7 @@
 
 All notable changes to `localed` are documented in this file.
 
-## [0.2.2] - Unreleased
+## [0.2.2] - 2026-11-02
 
 ### Fixed
 - Make locale updates transactional across `lang.sh` and `lang.csh`, and
