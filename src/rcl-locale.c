@@ -22,6 +22,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <gio/gio.h>
@@ -99,6 +100,112 @@ struct _RclLocaleDaemonPrivate
   gchar   *x11_variant;
   gchar   *x11_options;
 };
+
+/* A snapshot lets multi-file settings updates restore the previous state
+ * if a later file in the same operation cannot be committed. */
+typedef struct
+{
+  gchar   *path;
+  gchar   *contents;
+  gsize    length;
+  mode_t   mode;
+  gboolean existed;
+} RclFileSnapshot;
+
+static void
+rcl_file_snapshot_clear( RclFileSnapshot *snapshot )
+{
+  g_free( snapshot->path );
+  g_free( snapshot->contents );
+  memset( snapshot, 0, sizeof(*snapshot) );
+}
+
+static gboolean
+rcl_file_snapshot_take( RclFileSnapshot *snapshot,
+                        const gchar *path, GError **error )
+{
+  GError *local_error = NULL;
+  GStatBuf st;
+
+  memset( snapshot, 0, sizeof(*snapshot) );
+  snapshot->path = g_strdup( path );
+  if( !g_file_get_contents( path, &snapshot->contents,
+                            &snapshot->length, &local_error ) )
+  {
+    if( g_error_matches( local_error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
+    {
+      g_clear_error( &local_error );
+      snapshot->existed = FALSE;
+      return TRUE;
+    }
+    g_prefix_error( &local_error, "snapshot %s: ", path );
+    g_propagate_error( error, local_error );
+    rcl_file_snapshot_clear( snapshot );
+    return FALSE;
+  }
+
+  if( g_stat( path, &st ) != 0 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "stat %s: %s", path, g_strerror(errno) );
+    rcl_file_snapshot_clear( snapshot );
+    return FALSE;
+  }
+  snapshot->mode = st.st_mode & 07777;
+  snapshot->existed = TRUE;
+  return TRUE;
+}
+
+static gboolean
+rcl_file_snapshot_restore( const RclFileSnapshot *snapshot, GError **error )
+{
+  if( !snapshot->existed )
+  {
+    if( g_unlink( snapshot->path ) != 0 && errno != ENOENT )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "remove %s during rollback: %s",
+                   snapshot->path, g_strerror(errno) );
+      return FALSE;
+    }
+    return TRUE;
+  }
+
+  if( !g_file_set_contents( snapshot->path, snapshot->contents,
+                            (gssize)snapshot->length, error ) )
+  {
+    g_prefix_error( error, "restore %s: ", snapshot->path );
+    return FALSE;
+  }
+  if( g_chmod( snapshot->path, snapshot->mode ) != 0 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "restore permissions on %s: %s",
+                 snapshot->path, g_strerror(errno) );
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static void
+rcl_report_rollback_failure( GError **error, GError *rollback_error )
+{
+  if( !rollback_error )
+    return;
+  if( error && *error )
+  {
+    gchar *message = g_strdup_printf( "%s (rollback also failed: %s)",
+                                      (*error)->message,
+                                      rollback_error->message );
+    g_clear_error( error );
+    g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
+    g_free( message );
+  }
+  else if( error )
+    g_propagate_error( error, rollback_error );
+  else
+    g_error_free( rollback_error );
+}
 
 /* --------------------------------------------------------------------------
    GObject boilerplate
@@ -1594,8 +1701,7 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
     }
   }
 
-  if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &error ) ||
-      !rcl_write_lang_csh( RCL_LANG_CSH_FILE, known_keys, new_values, &error ) )
+  if( !rcl_write_locale_files( known_keys, new_values, &error ) )
   {
     g_dbus_method_invocation_return_gerror( invocation, error );
     g_error_free( error );
@@ -1637,8 +1743,7 @@ rcl_locale_daemon_set_language_from_accounts( RclLocaleDaemon *daemon,
     new_values[1] = fallback;
   }
 
-  if (!rcl_write_lang_sh(RCL_LANG_SH_FILE, known_keys, new_values, error) ||
-      !rcl_write_lang_csh(RCL_LANG_CSH_FILE, known_keys, new_values, error))
+  if (!rcl_write_locale_files(known_keys, new_values, error))
     return FALSE;
 
   rcl_daemon_sync_dbus_properties(daemon);
@@ -1667,22 +1772,10 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
     return;
   }
 
-  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &error ) )
+  if( !rcl_write_vconsole_files( keymap, keymap_toggle, &error ) )
   {
-    g_dbus_method_invocation_return_gerror( invocation, error );
-    g_error_free( error );
-    return;
-  }
-
-  /* Persist toggle in sidecar (empty value removes the file) */
-  if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE, keymap_toggle, &error ) )
-  {
-    /* The primary keymap has already been written.  Report the sidecar
-     * failure to the caller rather than claiming the complete operation
-     * succeeded, and refresh properties to reflect the file that changed. */
     g_dbus_method_invocation_return_gerror( invocation, error );
     g_clear_error( &error );
-    rcl_daemon_sync_dbus_properties( daemon );
     return;
   }
 
@@ -1862,6 +1955,73 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
     NULL /* cancellable */, on_check_done, ctx );
 
   g_object_unref( subject );
+}
+
+/* Commit the two Slackware locale files as one logical operation.  Each
+ * individual rename is atomic; if the second write fails, restore the first
+ * file so callers do not observe a knowingly mixed locale configuration. */
+static gboolean
+rcl_write_locale_files( const gchar *const *known_keys,
+                        const gchar *const *new_values, GError **error )
+{
+  RclFileSnapshot sh = { 0 }, csh = { 0 };
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean ok = FALSE;
+
+  if( !rcl_file_snapshot_take( &sh, RCL_LANG_SH_FILE, error ) ||
+      !rcl_file_snapshot_take( &csh, RCL_LANG_CSH_FILE, error ) )
+    goto out;
+  if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &write_error ) )
+    goto fail;
+  if( !rcl_write_lang_csh( RCL_LANG_CSH_FILE, known_keys, new_values, &write_error ) )
+  {
+    if( !rcl_file_snapshot_restore( &sh, &rollback_error ) )
+      rcl_report_rollback_failure( &write_error, rollback_error );
+    goto fail;
+  }
+  ok = TRUE;
+  goto out;
+
+fail:
+  if( error ) g_propagate_error( error, write_error );
+  else g_clear_error( &write_error );
+out:
+  rcl_file_snapshot_clear( &sh );
+  rcl_file_snapshot_clear( &csh );
+  return ok;
+}
+
+/* Commit the console keymap and its toggle sidecar together. */
+static gboolean
+rcl_write_vconsole_files( const gchar *keymap, const gchar *keymap_toggle,
+                          GError **error )
+{
+  RclFileSnapshot keymap_snapshot = { 0 }, toggle_snapshot = { 0 };
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean ok = FALSE;
+
+  if( !rcl_file_snapshot_take( &keymap_snapshot, RCL_RC_KEYMAP_FILE, error ) ||
+      !rcl_file_snapshot_take( &toggle_snapshot, RCL_RC_KEYMAP_TOGGLE_FILE, error ) )
+    goto out;
+  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
+    goto fail;
+  if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE,
+                                   keymap_toggle, &write_error ) )
+  {
+    if( !rcl_file_snapshot_restore( &keymap_snapshot, &rollback_error ) )
+      rcl_report_rollback_failure( &write_error, rollback_error );
+    goto fail;
+  }
+  ok = TRUE;
+  goto out;
+
+fail:
+  if( error ) g_propagate_error( error, write_error );
+  else g_clear_error( &write_error );
+out:
+  rcl_file_snapshot_clear( &keymap_snapshot );
+  rcl_file_snapshot_clear( &toggle_snapshot );
+  return ok;
 }
 
 /* --------------------------------------------------------------------------
