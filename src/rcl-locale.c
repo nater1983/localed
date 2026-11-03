@@ -1127,7 +1127,24 @@ rcl_write_lang_sh( const gchar         *path,
    * surface beyond what already exists.  Any caller that sources user-
    * supplied content into lang.sh before calling this function violates
    * that assumption and must sanitise the content itself. */
-  if( g_file_get_contents( path, &contents, NULL, NULL ) )
+  {
+    GError *read_error = NULL;
+
+    if( !g_file_get_contents( path, &contents, NULL, &read_error ) )
+    {
+      if( !g_error_matches( read_error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
+      {
+        g_prefix_error( &read_error, "read existing locale file %s: ", path );
+        g_propagate_error( error, read_error );
+        g_string_free( out, TRUE );
+        g_hash_table_unref( new_vals );
+        return FALSE;
+      }
+      g_clear_error( &read_error );
+    }
+  }
+
+  if( contents != NULL )
   {
     lines = g_strsplit( contents, "\n", -1 );
     g_free( contents );
