@@ -54,7 +54,8 @@ test_existing_mode( Fixture *fixture, gconstpointer user_data )
                                                  fixture->destination,
                                                  0755, &error ) );
   g_assert_no_error( error );
-  g_assert_cmpint( g_stat( fixture->temporary, &st ), ==, 0 );
+  g_assert_cmpint( g_rename( fixture->temporary, fixture->destination ), ==, 0 );
+  g_assert_cmpint( g_stat( fixture->destination, &st ), ==, 0 );
   g_assert_cmpuint( st.st_mode & 07777, ==, expected );
 }
 
@@ -71,7 +72,8 @@ test_new_file_default_mode( Fixture *fixture, gconstpointer user_data )
                                                  fixture->destination,
                                                  expected, &error ) );
   g_assert_no_error( error );
-  g_assert_cmpint( g_stat( fixture->temporary, &st ), ==, 0 );
+  g_assert_cmpint( g_rename( fixture->temporary, fixture->destination ), ==, 0 );
+  g_assert_cmpint( g_stat( fixture->destination, &st ), ==, 0 );
   g_assert_cmpuint( st.st_mode & 07777, ==, expected );
 }
 
