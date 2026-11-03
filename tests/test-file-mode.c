@@ -92,7 +92,8 @@ test_stat_error_is_fatal( Fixture *fixture, gconstpointer user_data )
   g_assert_false( rcl_file_apply_mode_for_write( fixture->temporary,
                                                   invalid_destination,
                                                   0644, &error ) );
-  g_assert_error( error, G_IO_ERROR, g_io_error_from_errno( ENOTDIR ) );
+  g_assert_error( error, G_IO_ERROR,
+                  (gint) g_io_error_from_errno( ENOTDIR ) );
   g_clear_error( &error );
 
   g_unlink( fixture->temporary );
