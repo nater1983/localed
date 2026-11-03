@@ -83,6 +83,7 @@ configure_file(
 config_h_inc = include_directories('.')
 
 subdir('src')
+subdir('tests')
 subdir('data')
 # Install the Slackware localectl client for normal Meson installs too.
 install_data(
