@@ -8,10 +8,21 @@ All notable changes to `localed` are documented in this file.
 - Treat failures reading the existing `lang.sh` as errors instead of silently
   replacing the file without preserving its existing non-locale settings. A
   missing file remains a valid first-use case.
-- Return a D-Bus error when writing the console-keymap toggle sidecar fails,
-  rather than reporting that the complete keyboard update succeeded. Refresh
-  cached properties to reflect the console keymap file that was already
-  written.
+- Make locale updates transactional across `lang.sh` and `lang.csh`. If the
+  second write fails, restore the original Bourne-shell locale file.
+- Make console-keymap updates transactional across `rc.keymap` and its toggle
+  sidecar. If the sidecar update fails, restore the original console keymap.
+- Make requested X11/console keyboard conversions transactional. A failure
+  updating either side is returned to the D-Bus caller instead of being logged
+  and silently reported as success.
+- Refresh cached D-Bus properties after failed writes so they reflect the
+  actual on-disk state, including when rollback itself cannot be completed.
+- Include rollback failures in the returned error and release the associated
+  error objects.
+
+### Changed
+- Set the Meson project and SlackBuild default package version to `0.3.0` for
+  development on the `0.3.0` branch.
 
 ## [0.2.1] - 2026-10-21
 
