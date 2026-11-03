@@ -33,6 +33,7 @@
 #include <polkit/polkit.h>
 
 #include "rcl-locale.h"
+#include "rcl-file-utils.h"
 
 /* --------------------------------------------------------------------------
    The org.freedesktop.locale1 introspection XML.
@@ -544,7 +545,6 @@ write_x11_keyboard_conf( const gchar *path,
   gchar   *dir;
   gchar   *tmp_path;
   gboolean ok;
-  mode_t file_mode;
 
   dir = g_path_get_dirname( path );
   if( g_mkdir_with_parents( dir, 0755 ) != 0 && errno != EEXIST )
@@ -555,9 +555,6 @@ write_x11_keyboard_conf( const gchar *path,
     return FALSE;
   }
   g_free( dir );
-  if( !rcl_file_mode_for_write( path, 0644, &file_mode, error ) )
-    return FALSE;
-
   out = g_string_new( NULL );
   g_string_append( out, "# Written by localed - see localed(8)\n" );
   g_string_append( out, "Section \"InputClass\"\n" );
@@ -592,7 +589,7 @@ write_x11_keyboard_conf( const gchar *path,
      * final file is always accessible, even when localed creates it from
      * scratch.  Mirrors the g_chmod() calls in rcl_write_lang_sh() and
      * rcl_write_rc_keymap_toggle(). */
-    if( g_chmod( tmp_path, file_mode ) != 0 )
+    if( rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "chmod(%s): %s", tmp_path, g_strerror(errno) );
@@ -734,7 +731,6 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
   gchar   *tmp_path;
   gchar   *dir;
   gboolean ok;
-  mode_t file_mode;
 
   dir = g_path_get_dirname( path );
   if( g_mkdir_with_parents( dir, 0755 ) != 0 && errno != EEXIST )
@@ -745,9 +741,6 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
     return FALSE;
   }
   g_free( dir );
-  if( !rcl_file_mode_for_write( path, 0755, &file_mode, error ) )
-    return FALSE;
-
   out = g_string_new( NULL );
   g_string_append( out,
     "#!/bin/bash\n"
@@ -859,14 +852,6 @@ rcl_write_rc_keymap_toggle( const gchar *path,
     gchar    *tmp_path = g_strdup_printf( "%s.XXXXXX", path );
     int       fd;
     gboolean  ok;
-    mode_t    file_mode;
-
-    if( !rcl_file_mode_for_write( path, 0644, &file_mode, error ) )
-    {
-      g_free( tmp_path );
-      g_free( line );
-      return FALSE;
-    }
     fd = g_mkstemp( tmp_path );
 
     if( fd == -1 )
@@ -885,7 +870,7 @@ rcl_write_rc_keymap_toggle( const gchar *path,
        * lang.sh and rc.keymap permissions; g_file_set_contents creates the
        * temp file 0600 which would leave the sidecar unreadable by non-root
        * readers if created from scratch. */
-      if( g_chmod( tmp_path, file_mode ) != 0 )
+      if( rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) != 0 )
       {
         g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                      "chmod(%s): %s", tmp_path, g_strerror(errno) );
@@ -1085,30 +1070,6 @@ rcl_read_lang_sh( const gchar *path )
   return table;
 }
 
-/* Determine the mode for an atomic replacement. Preserve the mode of an
- * existing configuration file; use the historical mode only on first create.
- * Errors other than ENOENT must not silently weaken or change permissions. */
-static gboolean
-rcl_file_mode_for_write( const gchar *path, mode_t default_mode,
-                         mode_t *mode, GError **error )
-{
-  GStatBuf st;
-
-  if( g_stat( path, &st ) == 0 )
-  {
-    *mode = st.st_mode & 07777;
-    return TRUE;
-  }
-  if( errno == ENOENT )
-  {
-    *mode = default_mode;
-    return TRUE;
-  }
-  g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-               "stat %s: %s", path, g_strerror(errno) );
-  return FALSE;
-}
-
 /*
  * rcl_write_lang_sh:
  * Write updated locale variable assignments back to /etc/profile.d/lang.sh,
@@ -1136,7 +1097,6 @@ rcl_write_lang_sh( const gchar         *path,
   gchar         *tmp_path;
   gboolean       ok;
   gchar         *dir;
-  mode_t         file_mode;
 
   dir = g_path_get_dirname( path );
   if( g_mkdir_with_parents( dir, 0755 ) != 0 && errno != EEXIST )
@@ -1147,9 +1107,6 @@ rcl_write_lang_sh( const gchar         *path,
     return FALSE;
   }
   g_free( dir );
-  if( !rcl_file_mode_for_write( path, 0755, &file_mode, error ) )
-    return FALSE;
-
   /* Read the existing file before constructing the replacement.  A missing
    * file is expected on first use; permission and I/O errors are not.  Do
    * not silently replace a file that we were unable to read and preserve. */
@@ -1273,7 +1230,7 @@ rcl_write_lang_sh( const gchar         *path,
      * execute permission.  g_file_set_contents() creates the temp file 0600;
      * chmod it to 0755 before the rename so the final file is always
      * accessible, even when localed creates it from scratch. */
-    if( g_chmod( tmp_path, file_mode ) != 0 )
+    if( rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "chmod(%s): %s", tmp_path, g_strerror(errno) );
@@ -1314,7 +1271,6 @@ rcl_write_lang_csh( const gchar         *path,
   gboolean ok = FALSE;
   guint i;
   const gchar *lang, *collate;
-  mode_t file_mode;
 
   dir = g_path_get_dirname(path);
   if( g_mkdir_with_parents(dir, 0755) != 0 && errno != EEXIST )
@@ -1325,9 +1281,6 @@ rcl_write_lang_csh( const gchar         *path,
     return FALSE;
   }
   g_free(dir);
-  if( !rcl_file_mode_for_write( path, 0755, &file_mode, error ) )
-    return FALSE;
-
   values = g_hash_table_new(g_str_hash, g_str_equal);
   for( i = 0; known_keys[i] != NULL; i++ )
     g_hash_table_replace(values, (gpointer)known_keys[i],
@@ -1372,7 +1325,7 @@ rcl_write_lang_csh( const gchar         *path,
   }
 
   ok = g_file_set_contents(tmp_path, out->str, (gssize)out->len, error);
-  if( ok && g_chmod(tmp_path, file_mode) != 0 )
+  if( ok && rcl_file_apply_mode_for_write(tmp_path, path, 0755, error) != 0 )
   {
     g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
                 "chmod(%s): %s", tmp_path, g_strerror(errno));
