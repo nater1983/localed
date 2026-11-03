@@ -2,6 +2,17 @@
 
 All notable changes to `localed` are documented in this file.
 
+## [0.3.0] - Unreleased
+
+### Fixed
+- Treat failures reading the existing `lang.sh` as errors instead of silently
+  replacing the file without preserving its existing non-locale settings. A
+  missing file remains a valid first-use case.
+- Return a D-Bus error when writing the console-keymap toggle sidecar fails,
+  rather than reporting that the complete keyboard update succeeded. Refresh
+  cached properties to reflect the console keymap file that was already
+  written.
+
 ## [0.2.1] - 2026-10-21
 
 ### Changed
