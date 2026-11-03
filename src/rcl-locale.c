@@ -1803,6 +1803,7 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
       g_debug( "convert: no built-in X11 mapping for keymap '%s'", keymap );
       if( !rcl_write_vconsole_files( keymap, keymap_toggle, &error ) )
       {
+        rcl_daemon_sync_dbus_properties( daemon );
         g_dbus_method_invocation_return_gerror( invocation, error );
         g_clear_error( &error );
         return;
@@ -1849,6 +1850,7 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
       if( !rcl_write_x11_vconsole_files( layout, model, variant, options,
                                          vc_keymap, &error ) )
       {
+        rcl_daemon_sync_dbus_properties( daemon );
         g_dbus_method_invocation_return_gerror( invocation, error );
         g_clear_error( &error );
         g_free( vc_keymap );
@@ -1862,6 +1864,7 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
       if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
                                     layout, model, variant, options, &error ) )
       {
+        rcl_daemon_sync_dbus_properties( daemon );
         g_dbus_method_invocation_return_gerror( invocation, error );
         g_clear_error( &error );
         return;
@@ -1871,6 +1874,7 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   else if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
                                      layout, model, variant, options, &error ) )
   {
+    rcl_daemon_sync_dbus_properties( daemon );
     g_dbus_method_invocation_return_gerror( invocation, error );
     g_clear_error( &error );
     return;
