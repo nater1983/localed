@@ -4,6 +4,16 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Documentation
+- Correct the README and manual pages to describe Slackware's actual locale
+  and keyboard files instead of the systemd-specific `locale.conf` and
+  `vconsole.conf` paths.
+- Document that `localectl` uses the locale1 system D-Bus interface and
+  Polkit authorization, and clarify the optional AccountsService integration
+  and its authorization boundary.
+- Update build and test instructions, dependencies, and the source-tree
+  overview for the standalone AccountsService module and opt-in Meson tests.
+
 ### Changed
 - Move AccountsService monitoring and language synchronization into a
   dedicated `RclAccountsService` GObject. The module owns its system-bus
