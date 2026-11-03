@@ -23,8 +23,6 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/types.h>
-#include <grp.h>
-#include <pwd.h>
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
@@ -38,6 +36,7 @@
 #include <locale.h>
 
 #include "rcl-locale.h"
+#include "rcl-accounts-service.h"
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
 
@@ -73,9 +72,7 @@ typedef struct RclState
   guint       reconnect_id;
   gboolean    exiting;
   guint       sync_id;
-  GDBusConnection *system_bus;
-  guint       accounts_watch_id;
-  guint       accounts_subscription_id;
+  RclAccountsService *accounts_service;
 } RclState;
 
 /* ───────────────────────────────────────────── */
@@ -95,19 +92,7 @@ rcl_state_free(RclState *state)
     state->reconnect_id = 0;
   }
 
-  if (state->accounts_watch_id)
-  {
-    g_bus_unwatch_name(state->accounts_watch_id);
-    state->accounts_watch_id = 0;
-  }
-
-  if (state->accounts_subscription_id && state->system_bus)
-  {
-    g_dbus_connection_signal_unsubscribe(state->system_bus,
-                                         state->accounts_subscription_id);
-    state->accounts_subscription_id = 0;
-  }
-  g_clear_object(&state->system_bus);
+  g_clear_object(&state->accounts_service);
 
   if (state->watch_id)
   {
@@ -330,167 +315,6 @@ rcl_main_log_handler_cb(const gchar    *log_domain,
 
 /* ───────────────────────────────────────────── */
 
-static gboolean
-rcl_main_uid_in_privileged_group(guint64 uid)
-{
-  struct passwd *pw;
-  struct group *gr;
-  gid_t *groups;
-  int ngroups = 16;
-  gboolean found = FALSE;
-
-  pw = getpwuid((uid_t)uid);
-  gr = getgrnam(PRIVILEGED_GROUP);
-  if (!pw || !gr)
-    return FALSE;
-
-  groups = g_new(gid_t, ngroups);
-  if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
-  {
-    groups = g_renew(gid_t, groups, ngroups);
-    if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
-    {
-      g_free(groups);
-      return FALSE;
-    }
-  }
-
-  for (int i = 0; i < ngroups; i++)
-  {
-    if (groups[i] == gr->gr_gid)
-    {
-      found = TRUE;
-      break;
-    }
-  }
-
-  g_free(groups);
-  return found;
-}
-
-/* ───────────────────────────────────────────── */
-
-/*
- * GNOME Control Center stores a user's selected language in AccountsService.
- * AccountsService PropertiesChanged signals do not identify the original
- * caller, so this bridge cannot perform caller-based Polkit authorization.
- * It only propagates changes for accounts in PRIVILEGED_GROUP, matching the
- * configured localed Polkit rule. Other users retain per-user language
- * settings and must use locale1.SetLocale for an explicitly authorized
- * system-wide change.
- */
-static void
-rcl_main_accounts_properties_changed(GDBusConnection *connection,
-                                    const gchar *sender_name,
-                                    const gchar *object_path,
-                                    const gchar *interface_name,
-                                    const gchar *signal_name,
-                                    GVariant *parameters,
-                                    gpointer user_data)
-{
-  RclState *state = user_data;
-  const gchar *changed_interface = NULL;
-  GVariant *changed = NULL;
-  GVariant *invalidated = NULL;
-  GVariant *language_value = NULL;
-  const gchar *language = NULL;
-  const gchar *uid_text;
-  gchar *end = NULL;
-  guint64 uid;
-  GError *error = NULL;
-
-  if (!g_str_has_prefix(object_path, "/org/freedesktop/Accounts/User") ||
-      g_strcmp0(interface_name, "org.freedesktop.DBus.Properties") != 0 ||
-      g_strcmp0(signal_name, "PropertiesChanged") != 0)
-    return;
-
-  uid_text = object_path + strlen("/org/freedesktop/Accounts/User");
-  if (!uid_text[0])
-    return;
-  uid = g_ascii_strtoull(uid_text, &end, 10);
-  if (!end || *end != '\0' || uid > G_MAXINT)
-    return;
-
-  g_variant_get(parameters, "(&s@a{sv}@as)",
-                &changed_interface, &changed, &invalidated);
-  if (g_strcmp0(changed_interface, "org.freedesktop.Accounts.User") != 0)
-    goto out;
-
-  language_value = g_variant_lookup_value(changed, "Language",
-                                           G_VARIANT_TYPE_STRING);
-  if (!language_value)
-    goto out;
-
-  language = g_variant_get_string(language_value, NULL);
-  if (!language[0] || !g_utf8_validate(language, -1, NULL))
-    goto out;
-
-  /* The signal has no caller credentials. Apply the same group condition
-   * as the installed Polkit rule to the affected account; never treat the
-   * AccountsService service identity as the requesting user's identity. */
-  if (!rcl_main_uid_in_privileged_group(uid))
-  {
-    LOG(state, "ignoring AccountsService language change for uid %" G_GUINT64_FORMAT
-        ": user is not in privileged group '%s'",
-        uid, PRIVILEGED_GROUP);
-    goto out;
-  }
-
-  if (!rcl_locale_daemon_set_language_from_accounts(
-          RCL_LOCALE_DAEMON(state->daemon), language, &error))
-  {
-    g_warning("AccountsService locale bridge: could not apply language: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
-  }
-  else
-    LOG(state, "applied AccountsService language change directly");
-
-out:
-  g_clear_pointer(&language_value, g_variant_unref);
-  g_clear_pointer(&changed, g_variant_unref);
-  g_clear_pointer(&invalidated, g_variant_unref);
-}
-
-/* ───────────────────────────────────────────── */
-
-static void
-rcl_main_accounts_name_appeared(GDBusConnection *connection,
-                                const gchar *name,
-                                const gchar *name_owner,
-                                gpointer user_data)
-{
-  RclState *state = user_data;
-
-  if (state->accounts_subscription_id)
-    return;
-
-  state->accounts_subscription_id =
-    g_dbus_connection_signal_subscribe(
-      connection, name, "org.freedesktop.DBus.Properties",
-      "PropertiesChanged", NULL, NULL, G_DBUS_SIGNAL_FLAGS_NONE,
-      rcl_main_accounts_properties_changed, state, NULL);
-
-  LOG(state, "subscribed to AccountsService at %s", name_owner);
-}
-
-static void
-rcl_main_accounts_name_vanished(GDBusConnection *connection,
-                                const gchar *name,
-                                gpointer user_data)
-{
-  RclState *state = user_data;
-
-  if (state->accounts_subscription_id)
-  {
-    g_dbus_connection_signal_unsubscribe(connection,
-                                         state->accounts_subscription_id);
-    state->accounts_subscription_id = 0;
-  }
-
-  LOG(state, "AccountsService disappeared; waiting for it to return");
-}
-
 #define SYNC_DEBOUNCE_MS 100
 
 static gboolean
@@ -686,25 +510,12 @@ gint main(gint argc, gchar **argv)
     g_clear_error(&error);
   }
 
-  /*
-   * Track the AccountsService well-known name rather than subscribing only
-   * once. This also handles AccountsService starting after localed and
-   * restarting while localed remains running.
-   */
-  state->system_bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
-  if (state->system_bus)
+  /* AccountsService integration is managed independently from the daemon. */
+  state->accounts_service = rcl_accounts_service_new(
+      RCL_LOCALE_DAEMON(state->daemon));
+  if (!rcl_accounts_service_start(state->accounts_service, &error))
   {
-    state->accounts_watch_id =
-      g_bus_watch_name_on_connection(
-        state->system_bus, "org.freedesktop.Accounts",
-        G_BUS_NAME_WATCHER_FLAGS_NONE,
-        rcl_main_accounts_name_appeared,
-        rcl_main_accounts_name_vanished,
-        state, NULL);
-  }
-  else
-  {
-    g_warning("could not watch AccountsService on the system bus: %s",
+    g_warning("could not start AccountsService integration: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
   }
