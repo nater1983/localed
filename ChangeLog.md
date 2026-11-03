@@ -4,6 +4,12 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Changed
+- Move AccountsService monitoring and language synchronization into a
+  dedicated `RclAccountsService` GObject. The module owns its system-bus
+  connection, name watch, signal subscription, reconnection, and cleanup;
+  `main.c` now only starts and releases the integration.
+
 ### Fixed
 - Watch the AccountsService D-Bus name and subscribe to language-property
   changes when the service appears. Unsubscribe when it disappears so the
