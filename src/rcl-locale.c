@@ -870,10 +870,8 @@ rcl_write_rc_keymap_toggle( const gchar *path,
        * lang.sh and rc.keymap permissions; g_file_set_contents creates the
        * temp file 0600 which would leave the sidecar unreadable by non-root
        * readers if created from scratch. */
-      if( rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) != 0 )
+      if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
       {
-        g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                     "chmod(%s): %s", tmp_path, g_strerror(errno) );
         g_unlink( tmp_path );
         ok = FALSE;
       }
@@ -1230,10 +1228,8 @@ rcl_write_lang_sh( const gchar         *path,
      * execute permission.  g_file_set_contents() creates the temp file 0600;
      * chmod it to 0755 before the rename so the final file is always
      * accessible, even when localed creates it from scratch. */
-    if( rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) != 0 )
+    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
       g_unlink( tmp_path );
       ok = FALSE;
     }
@@ -1325,12 +1321,8 @@ rcl_write_lang_csh( const gchar         *path,
   }
 
   ok = g_file_set_contents(tmp_path, out->str, (gssize)out->len, error);
-  if( ok && rcl_file_apply_mode_for_write(tmp_path, path, 0755, error) != 0 )
-  {
-    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                "chmod(%s): %s", tmp_path, g_strerror(errno));
+  if( ok && !rcl_file_apply_mode_for_write(tmp_path, path, 0755, error) )
     ok = FALSE;
-  }
   if( ok && g_rename(tmp_path, path) != 0 )
   {
     g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
