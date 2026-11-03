@@ -74,6 +74,7 @@ typedef struct RclState
   gboolean    exiting;
   guint       sync_id;
   GDBusConnection *system_bus;
+  guint       accounts_watch_id;
   guint       accounts_subscription_id;
 } RclState;
 
@@ -94,9 +95,18 @@ rcl_state_free(RclState *state)
     state->reconnect_id = 0;
   }
 
+  if (state->accounts_watch_id)
+  {
+    g_bus_unwatch_name(state->accounts_watch_id);
+    state->accounts_watch_id = 0;
+  }
+
   if (state->accounts_subscription_id && state->system_bus)
+  {
     g_dbus_connection_signal_unsubscribe(state->system_bus,
                                          state->accounts_subscription_id);
+    state->accounts_subscription_id = 0;
+  }
   g_clear_object(&state->system_bus);
 
   if (state->watch_id)
@@ -361,10 +371,13 @@ rcl_main_uid_in_privileged_group(guint64 uid)
 /* ───────────────────────────────────────────── */
 
 /*
- * GNOME Control Center currently writes the selected language to
- * AccountsService instead of calling locale1.SetLocale. Bridge that change
- * to localed only when the affected Unix user is already authorised by
- * Polkit for system-wide locale changes.
+ * GNOME Control Center stores a user's selected language in AccountsService.
+ * AccountsService PropertiesChanged signals do not identify the original
+ * caller, so this bridge cannot perform caller-based Polkit authorization.
+ * It only propagates changes for accounts in PRIVILEGED_GROUP, matching the
+ * configured localed Polkit rule. Other users retain per-user language
+ * settings and must use locale1.SetLocale for an explicitly authorized
+ * system-wide change.
  */
 static void
 rcl_main_accounts_properties_changed(GDBusConnection *connection,
@@ -412,12 +425,9 @@ rcl_main_accounts_properties_changed(GDBusConnection *connection,
   if (!language[0] || !g_utf8_validate(language, -1, NULL))
     goto out;
 
-  /*
-   * PropertiesChanged does not carry the original caller's D-Bus credentials.
-   * Do not authorize AccountsService as a proxy for that caller. Restrict this
-   * asynchronous bridge to the configured privileged group; other users must
-   * call locale1.SetLocale directly so Polkit can authorize the real caller.
-   */
+  /* The signal has no caller credentials. Apply the same group condition
+   * as the installed Polkit rule to the affected account; never treat the
+   * AccountsService service identity as the requesting user's identity. */
   if (!rcl_main_uid_in_privileged_group(uid))
   {
     LOG(state, "ignoring AccountsService language change for uid %" G_GUINT64_FORMAT
@@ -443,6 +453,43 @@ out:
 }
 
 /* ───────────────────────────────────────────── */
+
+static void
+rcl_main_accounts_name_appeared(GDBusConnection *connection,
+                                const gchar *name,
+                                const gchar *name_owner,
+                                gpointer user_data)
+{
+  RclState *state = user_data;
+
+  if (state->accounts_subscription_id)
+    return;
+
+  state->accounts_subscription_id =
+    g_dbus_connection_signal_subscribe(
+      connection, name, "org.freedesktop.DBus.Properties",
+      "PropertiesChanged", NULL, NULL, G_DBUS_SIGNAL_FLAGS_NONE,
+      rcl_main_accounts_properties_changed, state, NULL);
+
+  LOG(state, "subscribed to AccountsService at %s", name_owner);
+}
+
+static void
+rcl_main_accounts_name_vanished(GDBusConnection *connection,
+                                const gchar *name,
+                                gpointer user_data)
+{
+  RclState *state = user_data;
+
+  if (state->accounts_subscription_id)
+  {
+    g_dbus_connection_signal_unsubscribe(connection,
+                                         state->accounts_subscription_id);
+    state->accounts_subscription_id = 0;
+  }
+
+  LOG(state, "AccountsService disappeared; waiting for it to return");
+}
 
 #define SYNC_DEBOUNCE_MS 100
 
@@ -640,22 +687,24 @@ gint main(gint argc, gchar **argv)
   }
 
   /*
-   * Watch AccountsService language updates. The affected UID is checked
-   * against the locale1 Polkit action before a system-wide change is made.
+   * Track the AccountsService well-known name rather than subscribing only
+   * once. This also handles AccountsService starting after localed and
+   * restarting while localed remains running.
    */
   state->system_bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
   if (state->system_bus)
   {
-    state->accounts_subscription_id =
-      g_dbus_connection_signal_subscribe(
+    state->accounts_watch_id =
+      g_bus_watch_name_on_connection(
         state->system_bus, "org.freedesktop.Accounts",
-        "org.freedesktop.DBus.Properties", "PropertiesChanged", NULL, NULL,
-        G_DBUS_SIGNAL_FLAGS_NONE, rcl_main_accounts_properties_changed,
+        G_BUS_NAME_WATCHER_FLAGS_NONE,
+        rcl_main_accounts_name_appeared,
+        rcl_main_accounts_name_vanished,
         state, NULL);
   }
   else
   {
-    g_warning("could not subscribe to AccountsService language changes: %s",
+    g_warning("could not watch AccountsService on the system bus: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
   }
