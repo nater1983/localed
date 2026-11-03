@@ -49,3 +49,11 @@ option(
   value       : 'wheel',
   description : 'Group allowed to change locale/keyboard without authentication',
 )
+
+option(
+  'tests',
+  type        : 'boolean',
+  value       : false,
+  description : 'Build and register the automated test suite',
+)
+
