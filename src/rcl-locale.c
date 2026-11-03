@@ -1532,6 +1532,26 @@ auth_ctx_free( AuthCtx *ctx )
   g_free( ctx );
 }
 
+static gboolean rcl_write_locale_files( const gchar *const *known_keys,
+                                         const gchar *const *new_values,
+                                         GError **error );
+static gboolean rcl_write_vconsole_files( const gchar *keymap,
+                                          const gchar *keymap_toggle,
+                                          GError **error );
+static gboolean rcl_write_x11_vconsole_files( const gchar *layout,
+                                              const gchar *model,
+                                              const gchar *variant,
+                                              const gchar *options,
+                                              const gchar *keymap,
+                                              GError **error );
+static gboolean rcl_write_vconsole_x11_files( const gchar *keymap,
+                                              const gchar *keymap_toggle,
+                                              const gchar *layout,
+                                              const gchar *model,
+                                              const gchar *variant,
+                                              const gchar *options,
+                                              GError **error );
+
 /* ---- operation handlers: run only after a successful authorisation ---- */
 
 static void
