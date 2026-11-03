@@ -5,6 +5,18 @@ All notable changes to `localed` are documented in this file.
 ## [0.3.0] - Unreleased
 
 ### Fixed
+- Watch the AccountsService D-Bus name and subscribe to language-property
+  changes when the service appears. Unsubscribe when it disappears so the
+  bridge recovers when AccountsService starts after localed or restarts.
+
+### Security
+- Clarify the AccountsService authorization boundary: property-change signals
+  do not identify the original caller, so the bridge cannot perform
+  caller-based Polkit authorization. Only propagate changes for accounts in
+  the configured privileged group, matching the installed localed Polkit
+  rule; other users must request system-wide changes through locale1.SetLocale.
+
+### Fixed
 - Treat failures reading the existing `lang.sh` as errors instead of silently
   replacing the file without preserving its existing non-locale settings. A
   missing file remains a valid first-use case.
