@@ -2,6 +2,24 @@
 
 All notable changes to `localed` are documented in this file.
 
+## [0.2.2] - Unreleased
+
+### Fixed
+- Make locale updates transactional across `lang.sh` and `lang.csh`, and
+  restore the previous file if the companion write fails.
+- Make console-keymap updates transactional across `rc.keymap` and its
+  toggle sidecar; make X11/console keyboard conversions fail atomically
+  instead of silently accepting a partial update.
+- Refresh cached D-Bus properties after failed writes and include rollback
+  failures in the reported error.
+- Preserve existing permission bits when atomically replacing locale and
+  keyboard configuration files, while retaining the established default
+  modes for newly created files.
+- Watch the AccountsService D-Bus name so language monitoring starts when the
+  service appears and recovers when it restarts. Reconnect the monitor after
+  the system D-Bus connection is closed, without moving the integration out
+  of `src/main.c`.
+
 ## [0.2.1] - 2026-10-21
 
 ### Changed
