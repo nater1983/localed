@@ -21,6 +21,12 @@ All notable changes to `localed` are documented in this file.
   error objects.
 
 ### Changed
+- Preserve existing permission bits when atomically replacing `lang.sh`,
+  `lang.csh`, `rc.keymap`, the keymap toggle sidecar, and the X11 keyboard
+  configuration. First-time files retain their established defaults; unexpected
+  destination-stat errors now fail the write instead of silently changing mode.
+- Add GLib regression tests for preserving existing modes, first-create defaults,
+  and failing safely when the destination cannot be inspected.
 - Set the Meson project and SlackBuild default package version to `0.3.0` for
   development on the `0.3.0` branch.
 
