@@ -555,7 +555,24 @@ rcl_main_accounts_connect(RclState *state)
   if (state->exiting || state->system_bus)
     return state->system_bus != NULL;
 
-  state->system_bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
+  /*
+   * Use a private connection rather than g_bus_get_sync(): the latter caches
+   * a shared connection, which may remain closed after the bus daemon restarts.
+   * A fresh address lookup and connection lets this monitor recover cleanly.
+   */
+  {
+    gchar *address = g_dbus_address_get_for_bus_sync(
+        G_BUS_TYPE_SYSTEM, NULL, &error);
+    if (address)
+    {
+      state->system_bus = g_dbus_connection_new_for_address_sync(
+          address,
+          G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
+          G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
+          NULL, NULL, &error);
+      g_free(address);
+    }
+  }
   if (!state->system_bus)
   {
     g_warning("could not connect to system D-Bus for AccountsService: %s",
@@ -566,6 +583,8 @@ rcl_main_accounts_connect(RclState *state)
         g_timeout_add(RECONNECT_DELAY_MS, rcl_main_accounts_reconnect_cb, state);
     return FALSE;
   }
+
+  g_dbus_connection_set_exit_on_close(state->system_bus, FALSE);
 
   state->accounts_closed_id =
     g_signal_connect(state->system_bus, "closed",
