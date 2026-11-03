@@ -1772,26 +1772,22 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
     return;
   }
 
-  if( !rcl_write_vconsole_files( keymap, keymap_toggle, &error ) )
-  {
-    g_dbus_method_invocation_return_gerror( invocation, error );
-    g_clear_error( &error );
-    return;
-  }
-
   if( convert && keymap[0] != '\0' )
   {
     gchar *x11_layout = NULL, *x11_variant = NULL;
     if( rcl_keymap_to_x11( keymap, &x11_layout, &x11_variant ) )
     {
-      GError *xerr = NULL;
       RclLocaleDaemonPrivate *priv = daemon->priv;
-      if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
-                                    x11_layout, priv->x11_model,
-                                    x11_variant, priv->x11_options, &xerr ) )
+      if( !rcl_write_vconsole_x11_files( keymap, keymap_toggle,
+                                         x11_layout, priv->x11_model,
+                                         x11_variant, priv->x11_options,
+                                         &error ) )
       {
-        g_warning( "convert: could not update X11 keyboard config: %s", xerr->message );
-        g_clear_error( &xerr );
+        g_dbus_method_invocation_return_gerror( invocation, error );
+        g_clear_error( &error );
+        g_free( x11_layout );
+        g_free( x11_variant );
+        return;
       }
       g_free( x11_layout );
       g_free( x11_variant );
@@ -1799,7 +1795,19 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
     else
     {
       g_debug( "convert: no built-in X11 mapping for keymap '%s'", keymap );
+      if( !rcl_write_vconsole_files( keymap, keymap_toggle, &error ) )
+      {
+        g_dbus_method_invocation_return_gerror( invocation, error );
+        g_clear_error( &error );
+        return;
+      }
     }
+  }
+  else if( !rcl_write_vconsole_files( keymap, keymap_toggle, &error ) )
+  {
+    g_dbus_method_invocation_return_gerror( invocation, error );
+    g_clear_error( &error );
+    return;
   }
 
   rcl_daemon_sync_dbus_properties( daemon );
@@ -1826,31 +1834,39 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
     return;
   }
 
-  if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
-                                layout, model, variant, options, &error ) )
-  {
-    g_dbus_method_invocation_return_gerror( invocation, error );
-    g_error_free( error );
-    return;
-  }
-
   if( convert && layout[0] != '\0' )
   {
     gchar *vc_keymap = NULL;
     if( rcl_x11_to_keymap( layout, &vc_keymap ) )
     {
-      GError *kerr = NULL;
-      if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, vc_keymap, &kerr ) )
+      if( !rcl_write_x11_vconsole_files( layout, model, variant, options,
+                                         vc_keymap, &error ) )
       {
-        g_warning( "convert: could not update rc.keymap: %s", kerr->message );
-        g_clear_error( &kerr );
+        g_dbus_method_invocation_return_gerror( invocation, error );
+        g_clear_error( &error );
+        g_free( vc_keymap );
+        return;
       }
       g_free( vc_keymap );
     }
     else
     {
       g_debug( "convert: no built-in console mapping for X11 layout '%s'", layout );
+      if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
+                                    layout, model, variant, options, &error ) )
+      {
+        g_dbus_method_invocation_return_gerror( invocation, error );
+        g_clear_error( &error );
+        return;
+      }
     }
+  }
+  else if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
+                                     layout, model, variant, options, &error ) )
+  {
+    g_dbus_method_invocation_return_gerror( invocation, error );
+    g_clear_error( &error );
+    return;
   }
 
   rcl_daemon_sync_dbus_properties( daemon );
@@ -2021,6 +2037,83 @@ fail:
 out:
   rcl_file_snapshot_clear( &keymap_snapshot );
   rcl_file_snapshot_clear( &toggle_snapshot );
+  return ok;
+}
+
+/* The optional X11/console conversion is part of the requested update.
+ * Snapshot both files so a failed second write does not leave the source
+ * setting changed while the converted setting remains stale. */
+static gboolean
+rcl_write_x11_vconsole_files( const gchar *layout, const gchar *model,
+                              const gchar *variant, const gchar *options,
+                              const gchar *keymap, GError **error )
+{
+  RclFileSnapshot x11 = { 0 }, vc = { 0 };
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean ok = FALSE;
+
+  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) ||
+      !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, error ) )
+    goto out;
+  if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
+                                variant, options, &write_error ) )
+    goto fail;
+  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
+  {
+    if( !rcl_file_snapshot_restore( &x11, &rollback_error ) )
+      rcl_report_rollback_failure( &write_error, rollback_error );
+    goto fail;
+  }
+  ok = TRUE;
+  goto out;
+fail:
+  if( error ) g_propagate_error( error, write_error );
+  else g_clear_error( &write_error );
+out:
+  rcl_file_snapshot_clear( &x11 );
+  rcl_file_snapshot_clear( &vc );
+  return ok;
+}
+
+static gboolean
+rcl_write_vconsole_x11_files( const gchar *keymap, const gchar *keymap_toggle,
+                              const gchar *layout, const gchar *model,
+                              const gchar *variant, const gchar *options,
+                              GError **error )
+{
+  RclFileSnapshot vc = { 0 }, toggle = { 0 }, x11 = { 0 };
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean keymap_written = FALSE, toggle_written = FALSE, ok = FALSE;
+
+  if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, error ) ||
+      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, error ) ||
+      !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) )
+    goto out;
+  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
+    goto fail;
+  keymap_written = TRUE;
+  if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE,
+                                   keymap_toggle, &write_error ) )
+    goto rollback;
+  toggle_written = TRUE;
+  if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
+                                variant, options, &write_error ) )
+    goto rollback;
+  ok = TRUE;
+  goto out;
+rollback:
+  if( toggle_written && !rcl_file_snapshot_restore( &toggle, &rollback_error ) )
+    rcl_report_rollback_failure( &write_error, rollback_error );
+  rollback_error = NULL;
+  if( keymap_written && !rcl_file_snapshot_restore( &vc, &rollback_error ) )
+    rcl_report_rollback_failure( &write_error, rollback_error );
+fail:
+  if( error ) g_propagate_error( error, write_error );
+  else g_clear_error( &write_error );
+out:
+  rcl_file_snapshot_clear( &vc );
+  rcl_file_snapshot_clear( &toggle );
+  rcl_file_snapshot_clear( &x11 );
   return ok;
 }
 
