@@ -79,21 +79,21 @@ and
 .BR LC_IDENTIFICATION .
 Only keys with non-empty values are included in the array; absent keys
 are not emitted as empty strings. Values are read from
-.I /etc/locale.conf
-(see
+.I /etc/profile.d/lang.sh
+using Slackware's shell-script format (see
 .BR FILES ).
 .TP
 .B VConsoleKeymap \fR(s)
 The primary virtual console keymap name, read from the
 .B KEYMAP
 key in
-.IR /etc/vconsole.conf .
+.IR /etc/rc.d/rc.keymap .
 .TP
 .B VConsoleKeymapToggle \fR(s)
 The secondary (toggle) console keymap, read from the
 .B KEYMAP_TOGGLE
 key in
-.IR /etc/vconsole.conf .
+.IR /etc/rc.d/rc.keymap .
 May be empty.
 .TP
 .B X11Layout \fR(s)
@@ -123,7 +123,7 @@ May be empty.
 .TP
 .B SetLocale(as locale, b interactive)
 Validates and writes the given locale assignments to
-.IR /etc/locale.conf .
+.IR /etc/profile.d/lang.sh .
 Each element of
 .I locale
 must be of the form
@@ -147,7 +147,7 @@ Writes
 and
 .I keymap_toggle
 to
-.IR /etc/vconsole.conf .
+.IR /etc/rc.d/rc.keymap .
 When
 .I convert
 is
@@ -174,7 +174,7 @@ and
 .I layout
 is non-empty, a matching console keymap is derived from the built-in
 conversion table and written to
-.IR /etc/vconsole.conf .
+.IR /etc/rc.d/rc.keymap .
 Requires the
 .B org.freedesktop.locale1.set-keyboard
 PolKit action.
@@ -218,14 +218,28 @@ meson option), so desktop session tools are not prompted for a password
 on every locale or keyboard change. Group membership changes only take
 effect for new login sessions.
 .PP
-These PolKit actions govern D-Bus callers only. The bundled
+These PolKit actions govern D-Bus callers, including the bundled
 .BR localectl (1)
-client bypasses D-Bus entirely and writes the underlying files
-directly; its own authorization is ordinary Unix file permissions,
-meaning it requires root for every write subcommand.
+client. Its set commands call the locale1 D-Bus methods with
+.I interactive=true
+so an authentication agent may prompt when required. Its status command
+reads D-Bus properties; its list commands enumerate locally installed
+locale and keyboard data and do not change system configuration.
+.SS AccountsService integration
+When the system-bus name
+.B org.freedesktop.Accounts
+is available,
+.B localed
+monitors account language-property changes and synchronizes the language
+for accounts belonging to the configured privileged group (default
+.BR wheel ). The integration is optional and follows AccountsService
+name appearance and disappearance. A PropertiesChanged signal does not
+identify its original caller, so this bridge cannot perform caller-based
+PolKit authorization. Other users must use the locale1 D-Bus methods,
+where PolKit evaluates the actual D-Bus caller.
 .SH FILES
 .TP
-.I /etc/locale.conf
+.I /etc/profile.d/lang.sh
 System locale settings, stored as
 .BR KEY=value
 assignments. Read for the
@@ -280,8 +294,6 @@ PolKit rule granting the configured privileged group unconditional
 access to both locale1 actions.
 .SH "SEE ALSO"
 .BR localectl (1),
-.BR locale.conf (5),
-.BR vconsole.conf (5),
 .BR polkit (8),
 .BR pkcheck (1),
 .BR inotify (7)
