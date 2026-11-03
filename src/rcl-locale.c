@@ -589,10 +589,8 @@ write_x11_keyboard_conf( const gchar *path,
      * final file is always accessible, even when localed creates it from
      * scratch.  Mirrors the g_chmod() calls in rcl_write_lang_sh() and
      * rcl_write_rc_keymap_toggle(). */
-    if( rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) != 0 )
+    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
       g_unlink( tmp_path );
       ok = FALSE;
     }
@@ -772,11 +770,9 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
 
   if( ok )
   {
-    /* Make the script executable */
-    if( g_chmod( tmp_path, file_mode) != 0 )
+    /* Preserve existing mode, defaulting to executable 0755. */
+    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
       g_unlink( tmp_path );
       ok = FALSE;
     }
