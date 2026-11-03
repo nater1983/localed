@@ -9,20 +9,23 @@ A lightweight implementation of the `org.freedesktop.locale1` D-Bus service
 |---|---|---|
 | GLib / GIO | `glib-2.0`, `gio-2.0`, `gio-unix-2.0` | 2.56 |
 | polkit | `polkit-gobject-1` | 0.113 |
-| D-Bus | `dbus-1` | any recent |
+| D-Bus daemon | `dbus-daemon` | runtime requirement |
 
-The daemon is activated by dbus-daemon directly via D-Bus service activation
-(`[D-BUS Service]`). There is no systemd dependency.
+The daemon is activated by `dbus-daemon` through D-Bus system-service activation
+(`[D-BUS Service]`). There is no systemd dependency. AccountsService
+integration is optional at runtime: `localed` monitors its D-Bus name and
+synchronizes account language changes when the service is available. No
+AccountsService development library is required.
 
 On Debian/Ubuntu:
 ```sh
-apt install libglib2.0-dev libpolkit-gobject-1-dev libdbus-1-dev \
+apt install libglib2.0-dev libpolkit-gobject-1-dev \
             meson ninja-build pkg-config
 ```
 
 On Fedora/RHEL:
 ```sh
-dnf install glib2-devel polkit-devel dbus-devel \
+dnf install glib2-devel polkit-devel \
             meson ninja-build pkg-config
 ```
 
@@ -31,6 +34,14 @@ dnf install glib2-devel polkit-devel dbus-devel \
 ```sh
 meson setup build
 ninja -C build
+```
+
+Automated tests are optional and disabled in normal package builds:
+
+```sh
+meson setup build-tests -Dtests=true
+meson compile -C build-tests
+meson test -C build-tests --print-errorlogs
 ```
 
 Common configure options:
@@ -108,13 +119,16 @@ busctl call org.freedesktop.locale1 \
 
 | File | Property |
 |---|---|
-| `/etc/profile.d/lang.sh` | `Locale` (array of KEY=value) |
+| `/etc/profile.d/lang.sh` | `Locale` (array of `KEY=value`) |
 | `/etc/rc.d/rc.keymap` | `VConsoleKeymap` |
 | `/etc/rc.d/rc.keymap.toggle` | `VConsoleKeymapToggle` |
 | `/etc/X11/xorg.conf.d/00-keyboard.conf` | `X11Layout`, `X11Model`, `X11Variant`, `X11Options` |
 
-All four files are watched with inotify; `localed` re-reads them and emits
-`PropertiesChanged` automatically whenever they are modified by any tool.
+All four configuration files are watched with inotify; `localed` re-reads
+them and emits `PropertiesChanged` when their values change. The locale
+property is read from Slackware's `lang.sh` script, not `/etc/locale.conf`.
+The console keymap is managed through Slackware's `rc.keymap` script, not
+`/etc/vconsole.conf`.
 
 ## Keyboard conversion
 
@@ -134,3 +148,14 @@ when no match is found, rather than guessing.
    ```
 3. Translate the strings in `po/de.po`.
 4. Rebuild – Meson compiles and installs `.mo` files automatically.
+
+## AccountsService integration
+
+When `org.freedesktop.Accounts` is available on the system bus, `localed`
+subscribes to account `Language` property changes and applies them for
+accounts in the configured privileged group (default: `wheel`). The monitor
+is optional and reconnects when AccountsService appears or restarts. Because
+D-Bus property-change signals do not identify the original caller, this
+integration cannot perform caller-based Polkit authorization. Other users
+should request system-wide changes through the `org.freedesktop.locale1`
+D-Bus methods, which are authorized by Polkit.
