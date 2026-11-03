@@ -244,6 +244,13 @@ property and written atomically by
 Watched with
 .BR inotify (7).
 .TP
+.I /etc/profile.d/lang.csh
+C-shell companion locale script. Updated alongside
+.I lang.sh
+by
+.B SetLocale
+so C-shell login environments receive the same locale settings.
+.TP
 .I /etc/rc.d/rc.keymap
 Slackware console keyboard script. Called by the boot process to load
 the keyboard map via
