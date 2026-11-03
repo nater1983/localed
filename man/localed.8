@@ -90,10 +90,8 @@ key in
 .IR /etc/rc.d/rc.keymap .
 .TP
 .B VConsoleKeymapToggle \fR(s)
-The secondary (toggle) console keymap, read from the
-.B KEYMAP_TOGGLE
-key in
-.IR /etc/rc.d/rc.keymap .
+The secondary (toggle) console keymap, read from the sidecar file
+.IR /etc/rc.d/rc.keymap.toggle .
 May be empty.
 .TP
 .B X11Layout \fR(s)
@@ -201,13 +199,11 @@ using the following actions, declared in
 .TQ
 .B org.freedesktop.locale1.set-keyboard
 .PP
-By default these actions require
+The policy defaults require
 .B auth_admin
 for inactive or remote callers and
 .B auth_admin_keep
-for an active local session, matching upstream
-.BR systemd-localed (8)
-policy. A PolKit rule installed at
+for an active local session. A PolKit rule installed at
 .I /usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules
 additionally grants unconditional access to members of the privileged
 group selected at build time (default
@@ -240,14 +236,11 @@ where PolKit evaluates the actual D-Bus caller.
 .SH FILES
 .TP
 .I /etc/profile.d/lang.sh
-System locale settings, stored as
-.BR KEY=value
-assignments. Read for the
+Slackware login locale script containing exported locale variables
+(e.g.\n.BR "export LANG=\"en_US.UTF-8\"" ). Read for the
 .B Locale
-property; written atomically by
-.B SetLocale
-and by
-.BR localectl (1).
+property and written atomically by
+.BR SetLocale .
 Watched with
 .BR inotify (7).
 .TP
