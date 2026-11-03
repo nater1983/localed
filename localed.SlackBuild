@@ -78,7 +78,7 @@ meson setup \
   -Dx11_keyboard_conf=/etc/X11/xorg.conf.d/00-keyboard.conf \
   .. || exit 1
   "${NINJA:=ninja}" $NUMJOBS || exit 1
-  meson test -C build --print-errorlogs
+  meson test --print-errorlogs || exit 1
   DESTDIR=$PKG $NINJA install || exit 1
 cd ..
 
