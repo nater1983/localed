@@ -77,8 +77,10 @@ sudo ninja -C build install     # for system-wide install
 ├── src/
 │   ├── meson.build         # compiles the localed binary
 │   ├── main.c              # GMainLoop, D-Bus name ownership, inotify watches
-│   ├── rcl-locale.h        # public interface: types, macros, path constants
-│   └── rcl-locale.c        # D-Bus skeleton, property sync, polkit, file I/O
+│   ├── rcl-locale.h        # locale daemon interface and path constants
+│   ├── rcl-locale.c        # D-Bus skeleton, Polkit, validation, file I/O
+│   ├── rcl-accounts-service.h # AccountsService integration interface
+│   └── rcl-accounts-service.c # optional AccountsService D-Bus monitor
 ├── data/
 │   ├── meson.build                                  # installs D-Bus and polkit data files
 │   ├── org.freedesktop.locale1.service.in           # D-Bus activation
@@ -124,7 +126,7 @@ busctl call org.freedesktop.locale1 \
 | `/etc/rc.d/rc.keymap.toggle` | `VConsoleKeymapToggle` |
 | `/etc/X11/xorg.conf.d/00-keyboard.conf` | `X11Layout`, `X11Model`, `X11Variant`, `X11Options` |
 
-All four configuration files are watched with inotify; `localed` re-reads
+The four configured paths are watched with inotify; `localed` re-reads
 them and emits `PropertiesChanged` when their values change. The locale
 property is read from Slackware's `lang.sh` script, not `/etc/locale.conf`.
 The console keymap is managed through Slackware's `rc.keymap` script, not
