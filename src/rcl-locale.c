@@ -983,6 +983,7 @@ rcl_write_lang_sh( const gchar         *path,
   GHashTable    *new_vals;
   GString       *out;
   gchar         *contents = NULL;
+  GError        *read_error = NULL;
   gchar        **lines;
   gsize          i;
   gchar         *tmp_path;
@@ -998,6 +999,20 @@ rcl_write_lang_sh( const gchar         *path,
     return FALSE;
   }
   g_free( dir );
+
+  /* Read the existing file before constructing the replacement.  A missing
+   * file is expected on first use; permission and I/O errors are not.  Do
+   * not silently replace a file that we were unable to read and preserve. */
+  if( !g_file_get_contents( path, &contents, NULL, &read_error ) )
+  {
+    if( !g_error_matches( read_error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
+    {
+      g_prefix_error( &read_error, "read %s: ", path );
+      g_propagate_error( error, read_error );
+      return FALSE;
+    }
+    g_clear_error( &read_error );
+  }
 
   /* Build the updated value map from the incoming arrays.
    * Ownership contract: keys and values are borrowed pointers into the
@@ -1023,7 +1038,7 @@ rcl_write_lang_sh( const gchar         *path,
    * surface beyond what already exists.  Any caller that sources user-
    * supplied content into lang.sh before calling this function violates
    * that assumption and must sanitise the content itself. */
-  if( g_file_get_contents( path, &contents, NULL, NULL ) )
+  if( contents != NULL )
   {
     lines = g_strsplit( contents, "\n", -1 );
     g_free( contents );
@@ -1662,8 +1677,13 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
   /* Persist toggle in sidecar (empty value removes the file) */
   if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE, keymap_toggle, &error ) )
   {
-    g_warning( "could not write toggle sidecar: %s", error->message );
+    /* The primary keymap has already been written.  Report the sidecar
+     * failure to the caller rather than claiming the complete operation
+     * succeeded, and refresh properties to reflect the file that changed. */
+    g_dbus_method_invocation_return_gerror( invocation, error );
     g_clear_error( &error );
+    rcl_daemon_sync_dbus_properties( daemon );
+    return;
   }
 
   if( convert && keymap[0] != '\0' )
