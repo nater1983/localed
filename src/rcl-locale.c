@@ -2074,6 +2074,17 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
     return;
   }
 
+  ctx->cancellable = g_object_ref( priv->auth_cancellable );
+  if( g_cancellable_is_cancelled( ctx->cancellable ) )
+  {
+    g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.Disconnected",
+      "Authorization was cancelled before it could be started" );
+    auth_ctx_free( ctx );
+    return;
+  }
+
   sender = g_dbus_method_invocation_get_sender( ctx->invocation );
 
   g_variant_builder_init( &subject_details, G_VARIANT_TYPE("a{sv}") );
@@ -2084,7 +2095,6 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
 
   flags = interactive ? 1u : 0u; /* AllowUserInteraction */
 
-  ctx->cancellable = g_object_ref( priv->auth_cancellable );
   ctx->auth_connection = g_object_ref( priv->connection );
   ctx->cancellation_id = g_uuid_string_random();
 
@@ -2103,16 +2113,6 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
    * the handler immediately; queuing the check first preserves D-Bus message
    * order so CancelCheckAuthorization cannot overtake its own request.
    */
-  if( g_cancellable_is_cancelled( ctx->cancellable ) )
-  {
-    g_dbus_method_invocation_return_dbus_error(
-      ctx->invocation,
-      "org.freedesktop.DBus.Error.Disconnected",
-      "Authorization was cancelled before it could be started" );
-    auth_ctx_free( ctx );
-    return;
-  }
-
   g_dbus_connection_call(
     ctx->auth_connection,
     "org.freedesktop.PolicyKit1",
