@@ -147,8 +147,8 @@ rcl_accounts_service_connection_closed(GDBusConnection *connection,
   if (connection != self->connection || self->stopping)
     return;
 
-  g_warning("system D-Bus connection for AccountsService closed: %s",
-            error ? error->message : "connection closed");
+  g_debug("system D-Bus connection for AccountsService closed: %s",
+           error ? error->message : "connection closed");
 
   /*
    * Explicitly release the registrations even though the underlying
