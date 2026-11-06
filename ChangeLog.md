@@ -8,6 +8,10 @@ All notable changes to `localed` are documented in this file.
 - Add a Slackware integration harness that restarts an isolated system-bus
   instance and verifies locale1 name reacquisition and AccountsService
   reconnection.
+- Replace the main daemon's shared-bus name owner with a fresh private
+  system-bus connection for each locale1 ownership attempt. Register the
+  locale1 object on that connection so daemon name reacquisition works after
+  the system bus daemon restarts.
 - Document real Polkit pending-authorization cancellation and installed
   Slackware D-Bus/AccountsService verification procedures.
 
