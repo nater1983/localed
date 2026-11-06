@@ -470,9 +470,7 @@ failed:
   g_clear_error(&error);
   g_clear_object(&state->bus_connection);
 
-  if (!state->reconnect_id && !state->exiting)
-    state->reconnect_id =
-      g_timeout_add(RECONNECT_DELAY_MS, rcl_main_reconnect_cb, state);
+  rcl_schedule_reconnect(state, "system D-Bus connection attempt failed");
 }
 
 /* ───────────────────────────────────────────── */
