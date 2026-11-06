@@ -161,6 +161,10 @@ rcl_file_snapshot_take( RclFileSnapshot *snapshot,
 static gboolean
 rcl_file_snapshot_restore( const RclFileSnapshot *snapshot, GError **error )
 {
+  gchar *tmp_path;
+  int fd;
+  gboolean ok = FALSE;
+
   if( !snapshot->existed )
   {
     if( g_unlink( snapshot->path ) != 0 && errno != ENOENT )
@@ -173,20 +177,53 @@ rcl_file_snapshot_restore( const RclFileSnapshot *snapshot, GError **error )
     return TRUE;
   }
 
-  if( !g_file_set_contents( snapshot->path, snapshot->contents,
+  /*
+   * Restore through a sibling temporary file.  Writing directly to the
+   * destination can expose truncated contents if the process or machine
+   * fails during rollback, and would leave readers observing a partial file.
+   */
+  tmp_path = g_strdup_printf( "%s.XXXXXX", snapshot->path );
+  fd = g_mkstemp( tmp_path );
+  if( fd == -1 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "create rollback temporary file for %s: %s",
+                 snapshot->path, g_strerror(errno) );
+    g_free( tmp_path );
+    return FALSE;
+  }
+  close( fd );
+
+  if( !g_file_set_contents( tmp_path, snapshot->contents,
                             (gssize)snapshot->length, error ) )
   {
     g_prefix_error( error, "restore %s: ", snapshot->path );
-    return FALSE;
+    goto out;
   }
-  if( g_chmod( snapshot->path, snapshot->mode ) != 0 )
+
+  if( g_chmod( tmp_path, snapshot->mode ) != 0 )
   {
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 "restore permissions on %s: %s",
+                 "restore permissions on temporary file for %s: %s",
                  snapshot->path, g_strerror(errno) );
-    return FALSE;
+    goto out;
   }
-  return TRUE;
+
+  if( g_rename( tmp_path, snapshot->path ) != 0 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "rollback rename(%s, %s): %s",
+                 tmp_path, snapshot->path, g_strerror(errno) );
+    goto out;
+  }
+
+  ok = TRUE;
+
+out:
+  if( !ok )
+    g_unlink( tmp_path );
+  g_free( tmp_path );
+  return ok;
 }
 
 static void
