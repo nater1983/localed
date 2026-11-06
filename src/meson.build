@@ -8,7 +8,6 @@ localed_deps = [
   glib_dep,
   gio_dep,
   gio_unix,
-  polkit,
 ]
 
 localed_inc = [
