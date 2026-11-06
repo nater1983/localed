@@ -674,7 +674,10 @@ gint main(gint argc, gchar **argv)
 
   g_debug("localed started (%s)", PACKAGE_VERSION);
 
+  g_warning("entering localed main loop");
   g_main_loop_run(state->loop);
+  g_warning("localed main loop returned (exiting=%s)",
+            state->exiting ? "true" : "false");
 
   /* ── Cleanup ───────────────────────────────────────────────────────────── */
 
