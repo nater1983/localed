@@ -155,7 +155,13 @@ rcl_schedule_reconnect(RclState *state, const gchar *reason)
   g_warning("%s; scheduling reconnect in %d ms",
             reason, RECONNECT_DELAY_MS);
   state->reconnect_id =
-    g_timeout_add(RECONNECT_DELAY_MS, rcl_main_reconnect_cb, state);
+    g_timeout_add_full(G_PRIORITY_DEFAULT,
+                       RECONNECT_DELAY_MS,
+                       rcl_main_reconnect_cb,
+                       state,
+                       NULL);
+  g_warning("D-Bus reconnect timer registered (source %u)",
+            state->reconnect_id);
 }
 
 static void
@@ -187,6 +193,7 @@ rcl_main_reconnect_cb(gpointer user_data)
 
   state->reconnect_id = 0;
 
+  g_warning("D-Bus reconnect timer fired");
   LOG(state, "attempting to re-acquire D-Bus name");
 
   state->reconnecting = TRUE;
