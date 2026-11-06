@@ -4,6 +4,14 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Debugging
+- Add temporary GLib main-loop heartbeat and diagnostics for reconnect
+  source attachment, dispatch, loop entry/exit, and signal-triggered shutdown.
+- Raise diagnostic heartbeat and reconnect timeout priority while investigating
+  system-bus restart recovery.
+- Make the Slackware D-Bus restart harness wait for reconnect timer dispatch
+  before asserting locale1 name reacquisition.
+
 ### Tests
 - Add a Slackware integration harness that restarts an isolated system-bus
   instance and verifies locale1 name reacquisition and AccountsService
