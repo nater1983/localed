@@ -229,6 +229,7 @@ typedef struct
   gchar *check_cancellation_id;
   gchar *cancel_cancellation_id;
   GError *client_error;
+  GDBusMethodInvocation *pending_check;
 } PolkitFixture;
 
 static const gchar test_polkit_xml[] =
@@ -272,8 +273,10 @@ polkit_method_call(GDBusConnection *connection,
     fixture->check_cancellation_id = g_strdup(id);
     g_variant_unref(id_value);
 
-    if (fixture->hold_check)
+    if (fixture->hold_check) {
+      fixture->pending_check = g_object_ref(invocation);
       return;
+    }
 
     g_dbus_method_invocation_return_value(
       invocation,
@@ -290,6 +293,13 @@ polkit_method_call(GDBusConnection *connection,
     g_free(fixture->cancel_cancellation_id);
     fixture->cancel_cancellation_id = g_strdup(id);
     g_variant_unref(id_value);
+    if (fixture->pending_check) {
+      g_dbus_method_invocation_return_dbus_error(
+        fixture->pending_check,
+        "org.freedesktop.PolicyKit1.Error.Cancelled",
+        "Test authorization was cancelled");
+      g_clear_object(&fixture->pending_check);
+    }
     g_dbus_method_invocation_return_value(invocation, NULL);
     return;
   }
@@ -360,6 +370,7 @@ polkit_fixture_free(PolkitFixture *fixture)
   g_free(fixture->check_cancellation_id);
   g_free(fixture->cancel_cancellation_id);
   g_clear_error(&fixture->client_error);
+  g_clear_object(&fixture->pending_check);
 }
 
 static void
