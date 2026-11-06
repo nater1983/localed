@@ -24,6 +24,8 @@ BUS_ADDRESS="unix:path=$socket"
 bus_pid=
 localed_pid=
 script_pid=
+trace_pid=
+trace_log="$tmpdir/localed-reconnect.strace"
 
 cleanup()
 {
@@ -33,6 +35,10 @@ cleanup()
   if [ -n "$script_pid" ]; then
     kill "$script_pid" 2>/dev/null || :
     wait "$script_pid" 2>/dev/null || :
+  fi
+  if [ -n "$trace_pid" ]; then
+    kill "$trace_pid" 2>/dev/null || :
+    wait "$trace_pid" 2>/dev/null || :
   fi
   if [ -n "$bus_pid" ]; then
     kill "$bus_pid" 2>/dev/null || :
@@ -136,6 +142,23 @@ kill "$bus_pid"
 wait "$bus_pid" 2>/dev/null || :
 bus_pid=
 start_bus
+
+echo "5/5 inspecting localed after D-Bus restart"
+ps -o pid,stat,wchan:32,cmd -p "$localed_pid" || :
+if command -v strace >/dev/null 2>&1; then
+  strace -f -tt -p "$localed_pid" \
+    -e trace=poll,ppoll,epoll_wait,epoll_pwait,futex,read,write \
+    -o "$trace_log" &
+  trace_pid=$!
+  sleep 5
+  kill "$trace_pid" 2>/dev/null || :
+  wait "$trace_pid" 2>/dev/null || :
+  trace_pid=
+  echo "Recent localed system-call activity:"
+  tail -100 "$trace_log" || :
+else
+  echo "strace not installed; skipping process syscall capture"
+fi
 
 echo "5/5 verifying locale1 and AccountsService reconnection"
 wait_for_log "D-Bus reconnect timer fired"
