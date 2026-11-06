@@ -32,6 +32,9 @@ jobs:
             -Db_sanitize=address \
             -Dtests=true
 
+      - name: Validate Slackware integration harness syntax
+        run: sh -n tests/test-slackware-dbus-restart.sh
+
       - name: Compile
         run: meson compile -C build-asan
 
