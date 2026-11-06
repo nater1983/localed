@@ -9,7 +9,7 @@ if [ -z "$LOCALed" ] || [ ! -x "$LOCALed" ]; then
   exit 2
 fi
 
-for tool in dbus-daemon gdbus grep; do
+for tool in dbus-daemon gdbus grep script pgrep; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "missing required tool: $tool" >&2
     exit 2
@@ -23,12 +23,16 @@ bus_log="$tmpdir/dbus.log"
 BUS_ADDRESS="unix:path=$socket"
 bus_pid=
 localed_pid=
+script_pid=
 
 cleanup()
 {
   if [ -n "$localed_pid" ]; then
     kill "$localed_pid" 2>/dev/null || :
-    wait "$localed_pid" 2>/dev/null || :
+  fi
+  if [ -n "$script_pid" ]; then
+    kill "$script_pid" 2>/dev/null || :
+    wait "$script_pid" 2>/dev/null || :
   fi
   if [ -n "$bus_pid" ]; then
     kill "$bus_pid" 2>/dev/null || :
@@ -101,8 +105,21 @@ request_accounts_name()
 export DBUS_SYSTEM_BUS_ADDRESS="$BUS_ADDRESS"
 start_bus
 
-"$LOCALed" --debug >"$log" 2>&1 &
-localed_pid=$!
+# localed routes logs to syslog when stderr is not a terminal. Run it under
+# a PTY so --debug messages are captured in the typescript for assertions.
+script -q -e -c "\"$LOCALed\" --debug" "$log" &
+script_pid=$!
+i=0
+while [ -z "$localed_pid" ]; do
+  localed_pid=$(pgrep -n -x localed 2>/dev/null || :)
+  i=$((i + 1))
+  if [ "$i" -ge 100 ] || ! kill -0 "$script_pid" 2>/dev/null; then
+    echo "localed failed to start under script(1)" >&2
+    cat "$log" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
 
 echo "1/4 waiting for initial locale1 name"
 wait_for_locale1
