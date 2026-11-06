@@ -483,6 +483,7 @@ test_polkit_cancellation(Fixture *fixture, gconstpointer user_data)
 
   iterate_until(&polkit_fixture, polkit_check_condition, 5000);
   g_assert_nonnull(polkit_fixture.check_cancellation_id);
+  g_assert_cmpstr(polkit_fixture.check_cancellation_id, !=, "");
   g_assert_cmpuint(polkit_fixture.check_flags, ==, 1u);
 
   /* Shutting down the daemon cancels the pending authorization. */
