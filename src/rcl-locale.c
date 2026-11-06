@@ -1487,7 +1487,8 @@ typedef enum
 typedef struct
 {
   RclLocaleDaemon        *daemon;       /* owned ref */
-  GDBusMethodInvocation  *invocation;   /* completed exactly once */
+  GDBusMethodInvocation  *invocation;   /* owned ref; completed exactly once */
+  GCancellable           *cancellable;  /* owned ref to this daemon session */
   LocaleOp                op;
 
   gchar  **locale;        /* OP_SET_LOCALE: owned GStrv */
@@ -1510,6 +1511,7 @@ auth_ctx_free( AuthCtx *ctx )
     return;
   g_clear_object( &ctx->daemon );
   g_clear_object( &ctx->invocation );
+  g_clear_object( &ctx->cancellable );
   g_strfreev( ctx->locale );
   g_free( ctx->keymap );
   g_free( ctx->keymap_toggle );
@@ -1912,6 +1914,23 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
     return;
   }
 
+  /*
+   * Cancellation can race with a successful Polkit reply: the reply may
+   * already be queued when shutdown cancels the request. Check the exact
+   * session cancellable retained by this request before performing any
+   * privileged file update.
+   */
+  if( g_cancellable_is_cancelled( ctx->cancellable ) )
+  {
+    g_object_unref( result );
+    g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.Disconnected",
+      "Daemon connection was closed before authorization completed" );
+    auth_ctx_free( ctx );
+    return;
+  }
+
   if( !polkit_authorization_result_get_is_authorized( result ) )
   {
     /* Distinguish "authentication required but not yet provided" from a hard
@@ -1985,9 +2004,10 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
               ? POLKIT_CHECK_AUTHORIZATION_FLAGS_ALLOW_USER_INTERACTION
               : POLKIT_CHECK_AUTHORIZATION_FLAGS_NONE;
 
+  ctx->cancellable = g_object_ref( priv->auth_cancellable );
   polkit_authority_check_authorization(
     priv->authority, subject, action_id, NULL, flags,
-    priv->auth_cancellable, on_check_done, ctx );
+    ctx->cancellable, on_check_done, ctx );
 
   g_object_unref( subject );
 }
