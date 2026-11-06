@@ -13,9 +13,10 @@ All notable changes to `localed` are documented in this file.
   Stop now cancels pending retries and releases name watches, subscriptions,
   and connection callbacks.
 - Tie asynchronous Polkit authorization checks to the active daemon
-  connection lifecycle. Shutdown cancels pending checks, and each request
-  retains its D-Bus invocation until its callback completes, preventing an
-  authorization callback from applying settings after a daemon reconnect.
+  connection lifecycle. Shutdown cancels pending checks; each request retains
+  its own session cancellable and D-Bus invocation, and the callback checks
+  cancellation again before applying settings to close authorization/reconnect
+  races.
 
 
 ### Documentation
