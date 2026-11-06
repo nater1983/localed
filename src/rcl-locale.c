@@ -1998,7 +1998,7 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
     return;
   }
 
-  g_variant_get( reply, "(bb@a{ss})", &authorized, &challenge, &details );
+  g_variant_get( reply, "((bb@a{ss}))", &authorized, &challenge, &details );
   g_variant_unref( details );
   g_variant_unref( reply );
 
@@ -2120,7 +2120,7 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
     "org.freedesktop.PolicyKit1.Authority",
     "CheckAuthorization",
     parameters,
-    G_VARIANT_TYPE( "(bba{ss})" ),
+    G_VARIANT_TYPE( "((bba{ss}))" ),
     G_DBUS_CALL_FLAGS_NONE,
     -1,
     ctx->cancellable,
