@@ -1,0 +1,139 @@
+#!/bin/sh
+# Exercise localed and AccountsService recovery on an isolated system bus.
+# Usage: tests/test-slackware-dbus-restart.sh /path/to/localed
+set -eu
+
+LOCALed=${1:-}
+if [ -z "$LOCALed" ] || [ ! -x "$LOCALed" ]; then
+  echo "usage: $0 /path/to/localed" >&2
+  exit 2
+fi
+
+for tool in dbus-daemon gdbus grep; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "missing required tool: $tool" >&2
+    exit 2
+  }
+done
+
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/localed-dbus-test.XXXXXX")
+socket="$tmpdir/system-bus"
+log="$tmpdir/localed.log"
+bus_log="$tmpdir/dbus.log"
+BUS_ADDRESS="unix:path=$socket"
+bus_pid=
+localed_pid=
+
+cleanup()
+{
+  if [ -n "$localed_pid" ]; then
+    kill "$localed_pid" 2>/dev/null || :
+    wait "$localed_pid" 2>/dev/null || :
+  fi
+  if [ -n "$bus_pid" ]; then
+    kill "$bus_pid" 2>/dev/null || :
+    wait "$bus_pid" 2>/dev/null || :
+  fi
+  rm -rf "$tmpdir"
+}
+trap cleanup EXIT HUP INT TERM
+
+start_bus()
+{
+  rm -f "$socket"
+  dbus-daemon --session --nofork --nopidfile \
+    --address="$BUS_ADDRESS" >"$bus_log" 2>&1 &
+  bus_pid=$!
+  i=0
+  while [ ! -S "$socket" ]; do
+    i=$((i + 1))
+    if [ "$i" -ge 100 ] || ! kill -0 "$bus_pid" 2>/dev/null; then
+      echo "private D-Bus daemon failed to start" >&2
+      cat "$bus_log" >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
+}
+
+wait_for_locale1()
+{
+  i=0
+  while ! DBUS_SYSTEM_BUS_ADDRESS="$BUS_ADDRESS" \
+      gdbus introspect --system \
+        --dest org.freedesktop.locale1 \
+        --object-path /org/freedesktop/locale1 >/dev/null 2>&1; do
+    i=$((i + 1))
+    if [ "$i" -ge 120 ]; then
+      echo "localed did not reacquire org.freedesktop.locale1" >&2
+      cat "$log" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+}
+
+wait_for_log()
+{
+  pattern=$1
+  i=0
+  while ! grep -F "$pattern" "$log" >/dev/null 2>&1; do
+    i=$((i + 1))
+    if [ "$i" -ge 100 ]; then
+      echo "timed out waiting for log: $pattern" >&2
+      cat "$log" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+}
+
+request_accounts_name()
+{
+  DBUS_SYSTEM_BUS_ADDRESS="$BUS_ADDRESS" \
+    gdbus call --system \
+      --dest org.freedesktop.DBus \
+      --object-path /org/freedesktop/DBus \
+      --method org.freedesktop.DBus.RequestName \
+      org.freedesktop.Accounts 0 >/dev/null
+}
+
+export DBUS_SYSTEM_BUS_ADDRESS="$BUS_ADDRESS"
+start_bus
+
+"$LOCALed" --debug >"$log" 2>&1 &
+localed_pid=$!
+
+echo "1/4 waiting for initial locale1 name"
+wait_for_locale1
+wait_for_log "name acquired: org.freedesktop.locale1"
+
+echo "2/4 verifying AccountsService name appearance"
+request_accounts_name
+wait_for_log "subscribed to AccountsService"
+
+echo "3/4 restarting the isolated system bus"
+kill "$bus_pid"
+wait "$bus_pid" 2>/dev/null || :
+bus_pid=
+start_bus
+
+echo "4/4 verifying locale1 and AccountsService reconnection"
+wait_for_locale1
+wait_for_log "name acquired: org.freedesktop.locale1"
+request_accounts_name
+# The same log text may already exist from before the restart. Require the
+# subscription message to occur at least twice to prove the second bus attach.
+i=0
+while [ "$(grep -c 'subscribed to AccountsService' "$log" || :)" -lt 2 ]; do
+  i=$((i + 1))
+  if [ "$i" -ge 100 ]; then
+    echo "AccountsService did not reconnect after the bus restart" >&2
+    cat "$log" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+echo "PASS: locale1 name reacquired after system-bus restart"
+echo "PASS: AccountsService connection and name watch re-established"
