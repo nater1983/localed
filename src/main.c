@@ -154,14 +154,18 @@ rcl_schedule_reconnect(RclState *state, const gchar *reason)
 
   g_warning("%s; scheduling reconnect in %d ms",
             reason, RECONNECT_DELAY_MS);
-  state->reconnect_id =
-    g_timeout_add_full(G_PRIORITY_DEFAULT,
-                       RECONNECT_DELAY_MS,
-                       rcl_main_reconnect_cb,
-                       state,
-                       NULL);
-  g_warning("D-Bus reconnect timer registered (source %u)",
-            state->reconnect_id);
+  {
+    GSource *source = g_timeout_source_new(RECONNECT_DELAY_MS);
+
+    g_source_set_priority(source, G_PRIORITY_DEFAULT);
+    g_source_set_callback(source, rcl_main_reconnect_cb, state, NULL);
+    state->reconnect_id =
+      g_source_attach(source, g_main_loop_get_context(state->loop));
+    g_source_unref(source);
+  }
+
+  g_warning("D-Bus reconnect timer registered on localed main context"
+            " (source %u)", state->reconnect_id);
 }
 
 static void
