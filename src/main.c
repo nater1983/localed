@@ -165,29 +165,6 @@ rcl_main_reconnect_cb(gpointer user_data)
   return G_SOURCE_REMOVE;
 }
 
-/* ───────────────────────────────────────────── */
-
-static void
-rcl_main_bus_acquired(GDBusConnection *connection,
-                      const gchar     *name,
-                      gpointer         user_data)
-{
-  RclState *state = user_data;
-
-  LOG(state, "bus acquired");
-
-  if (!rcl_daemon_startup(state->daemon, connection))
-  {
-    g_warning("Could not startup daemon");
-    g_main_loop_quit(state->loop);
-    return;
-  }
-
-  LOG(state, "daemon startup complete");
-}
-
-/* ───────────────────────────────────────────── */
-
 static void
 rcl_main_name_acquired(GDBusConnection *connection,
                        const gchar     *name,
@@ -388,6 +365,21 @@ rcl_acquire_name(RclState *state)
     goto failed;
 
   g_dbus_connection_set_exit_on_close(state->bus_connection, FALSE);
+
+  LOG(state, "system bus connected");
+
+  if (!rcl_daemon_startup(state->daemon, state->bus_connection))
+  {
+    g_warning("Could not startup daemon on the new system-bus connection");
+    g_clear_object(&state->bus_connection);
+    if (!state->reconnect_id && !state->exiting)
+      state->reconnect_id =
+        g_timeout_add(RECONNECT_DELAY_MS, rcl_main_reconnect_cb, state);
+    return;
+  }
+
+  LOG(state, "daemon startup complete");
+
   state->watch_id =
     g_bus_own_name_on_connection(state->bus_connection,
                                  LOCALE_SERVICE_NAME,
