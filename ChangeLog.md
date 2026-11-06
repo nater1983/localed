@@ -12,6 +12,10 @@ All notable changes to `localed` are documented in this file.
   creating a fresh private system-bus connection and retrying after failure.
   Stop now cancels pending retries and releases name watches, subscriptions,
   and connection callbacks.
+- Tie asynchronous Polkit authorization checks to the active daemon
+  connection lifecycle. Shutdown cancels pending checks, and each request
+  retains its D-Bus invocation until its callback completes, preventing an
+  authorization callback from applying settings after a daemon reconnect.
 
 
 ### Documentation
