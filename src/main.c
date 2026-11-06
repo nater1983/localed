@@ -141,6 +141,7 @@ rcl_state_new(void)
 /* ───────────────────────────────────────────── */
 
 static void rcl_acquire_name(RclState *state);   /* forward */
+static gboolean rcl_main_reconnect_cb(gpointer user_data); /* forward */
 
 static void
 rcl_schedule_reconnect(RclState *state, const gchar *reason)
