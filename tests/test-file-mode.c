@@ -113,7 +113,9 @@ main( int argc, char **argv )
               fixture_setup, test_existing_mode, fixture_teardown );
   g_test_add( "/file-mode/existing/0750", Fixture, GUINT_TO_POINTER(0750),
               fixture_setup, test_existing_mode, fixture_teardown );
-  g_test_add( "/file-mode/new/default-0755", Fixture, GUINT_TO_POINTER(0755),
+  g_test_add( "/file-mode/new/lang-sh-0755", Fixture, GUINT_TO_POINTER(0755),
+              fixture_setup, test_new_file_default_mode, fixture_teardown );
+  g_test_add( "/file-mode/new/lang-csh-0755", Fixture, GUINT_TO_POINTER(0755),
               fixture_setup, test_new_file_default_mode, fixture_teardown );
   g_test_add( "/file-mode/new/default-0644", Fixture, GUINT_TO_POINTER(0644),
               fixture_setup, test_new_file_default_mode, fixture_teardown );
