@@ -32,14 +32,10 @@ if not sysconfdir.startswith('/')
 endif
 
 glib_req   = '>= 2.56'
-polkit_req = '>= 0.113'
 
 glib_dep = dependency('glib-2.0',         version : glib_req)
 gio_dep  = dependency('gio-2.0',          version : glib_req)
 gio_unix = dependency('gio-unix-2.0',     version : glib_req)
-# polkit is mandatory: it is the only authorisation path for the Set* D-Bus
-# methods, and the daemon sources include <polkit/polkit.h> unconditionally.
-polkit   = dependency('polkit-gobject-1', version : polkit_req)
 
 i18n = import('i18n')
 
