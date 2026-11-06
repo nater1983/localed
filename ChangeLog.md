@@ -4,6 +4,15 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Tests
+- Add isolated GTestDBus coverage for AccountsService name appearance and
+  disappearance, repeated start/stop, locale1 object registration/shutdown,
+  and recovery after the system bus daemon restarts.
+- Run the Meson test suite in CI with AddressSanitizer, GLib malloc
+  instrumentation, and leak detection to catch memory and resource cleanup
+  regressions.
+
+
 ### Changed
 - Harden daemon startup and shutdown for repeated D-Bus registration: clear
   stale object registrations, introspection data, and cached Polkit authority
