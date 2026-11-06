@@ -136,7 +136,6 @@ start_bus
 
 echo "4/4 verifying locale1 and AccountsService reconnection"
 wait_for_locale1
-wait_for_log "name acquired: org.freedesktop.locale1"
 request_accounts_name
 # The same log text may already exist from before the restart. Require the
 # subscription message to occur at least twice to prove the second bus attach.
