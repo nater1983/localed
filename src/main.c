@@ -152,7 +152,6 @@ rcl_schedule_reconnect(RclState *state, const gchar *reason)
   if (state->reconnect_id)
     return;
 
-  state->has_name = FALSE;
   g_warning("%s; scheduling reconnect in %d ms",
             reason, RECONNECT_DELAY_MS);
   state->reconnect_id =
@@ -251,6 +250,17 @@ rcl_main_name_lost(GDBusConnection *connection,
 
   if (!state->has_name)
   {
+    /*
+     * A closed private connection can report name-lost before name-acquired
+     * during initial startup. Retry that transport failure; only treat a
+     * live connection losing an unowned name as a competing instance.
+     */
+    if (connection && g_dbus_connection_is_closed(connection))
+    {
+      rcl_schedule_reconnect(state, "system D-Bus connection closed");
+      return;
+    }
+
     g_warning("could not acquire %s – is another instance running?", name);
     g_main_loop_quit(state->loop);
     return;
