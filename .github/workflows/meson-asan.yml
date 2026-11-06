@@ -1,0 +1,42 @@
+name: Meson tests and memory checks
+
+on:
+  push:
+    branches: [ "0.3.0" ]
+  pull_request:
+    branches: [ "0.3.0" ]
+
+jobs:
+  meson-asan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            gettext \
+            libglib2.0-dev \
+            libpolkit-gobject-1-dev \
+            meson \
+            ninja-build \
+            pkg-config \
+            dbus-daemon
+
+      - name: Configure AddressSanitizer build
+        run: |
+          meson setup build-asan \
+            --buildtype=debug \
+            -Db_sanitize=address \
+            -Dtests=true
+
+      - name: Compile
+        run: meson compile -C build-asan
+
+      - name: Run tests with leak detection
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
+          G_SLICE: always-malloc
+        run: meson test -C build-asan --print-errorlogs
