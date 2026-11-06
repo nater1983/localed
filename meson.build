@@ -36,6 +36,10 @@ glib_req   = '>= 2.56'
 glib_dep = dependency('glib-2.0',         version : glib_req)
 gio_dep  = dependency('gio-2.0',          version : glib_req)
 gio_unix = dependency('gio-unix-2.0',     version : glib_req)
+# Used by data/meson.build to discover the PolicyKit action installation
+# directory. The daemon talks to PolicyKit over its managed GDBus connection
+# and does not link against polkit-gobject-1.
+polkit = dependency('polkit-gobject-1', version : '>= 0.113')
 
 i18n = import('i18n')
 
