@@ -124,17 +124,20 @@ done
 echo "1/4 waiting for initial locale1 name"
 wait_for_locale1
 
-echo "2/4 verifying AccountsService name appearance"
+echo "2/5 verifying main-loop timer dispatch before bus restart"
+wait_for_log "localed main loop heartbeat"
+
+echo "3/5 verifying AccountsService name appearance"
 request_accounts_name
 wait_for_log "subscribed to AccountsService"
 
-echo "3/4 restarting the isolated system bus"
+echo "4/5 restarting the isolated system bus"
 kill "$bus_pid"
 wait "$bus_pid" 2>/dev/null || :
 bus_pid=
 start_bus
 
-echo "4/4 verifying locale1 and AccountsService reconnection"
+echo "5/5 verifying locale1 and AccountsService reconnection"
 wait_for_log "D-Bus reconnect timer fired"
 wait_for_locale1
 request_accounts_name
