@@ -162,10 +162,13 @@ rcl_main_heartbeat_cb(gpointer user_data)
       g_main_context_find_source_by_id(g_main_loop_get_context(state->loop),
                                        state->reconnect_id);
 
-  g_warning("localed main loop heartbeat (reconnect source %s; context owner %s)",
+  g_warning("localed main loop heartbeat (reconnect source %s; context owner %s; loop context=%p; thread-default=%p; default=%p)",
             reconnect_source ? "pending" : "not attached",
             g_main_context_is_owner(g_main_loop_get_context(state->loop))
-              ? "yes" : "no");
+              ? "yes" : "no",
+            g_main_loop_get_context(state->loop),
+            g_main_context_get_thread_default(),
+            g_main_context_default());
   return G_SOURCE_CONTINUE;
 }
 
@@ -198,8 +201,11 @@ rcl_schedule_reconnect(RclState *state, const gchar *reason)
     g_source_unref(source);
   }
 
-  g_warning("D-Bus reconnect timer registered on localed main context"
-            " (source %u)", state->reconnect_id);
+  g_warning("D-Bus reconnect timer registered (source %u; loop context=%p; thread-default=%p; default=%p)",
+            state->reconnect_id,
+            g_main_loop_get_context(state->loop),
+            g_main_context_get_thread_default(),
+            g_main_context_default());
 }
 
 static void
@@ -676,7 +682,10 @@ gint main(gint argc, gchar **argv)
 
   g_debug("localed started (%s)", PACKAGE_VERSION);
 
-  g_warning("entering localed main loop");
+  g_warning("entering localed main loop (loop context=%p; thread-default=%p; default=%p)",
+            g_main_loop_get_context(state->loop),
+            g_main_context_get_thread_default(),
+            g_main_context_default());
   g_main_loop_run(state->loop);
   g_warning("localed main loop returned (exiting=%s)",
             state->exiting ? "true" : "false");
