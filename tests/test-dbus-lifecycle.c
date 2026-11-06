@@ -280,7 +280,7 @@ polkit_method_call(GDBusConnection *connection,
 
     g_dbus_method_invocation_return_value(
       invocation,
-      g_variant_new("(bb@a{ss})", FALSE, FALSE,
+      g_variant_new("((bb@a{ss}))", FALSE, FALSE,
                     g_variant_new_array(G_VARIANT_TYPE("{ss}"), NULL, 0)));
     return;
   }
