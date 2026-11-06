@@ -4,18 +4,13 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
-### Debugging
-- Add temporary GLib main-loop heartbeat and diagnostics for reconnect
-  source attachment, dispatch, loop entry/exit, and signal-triggered shutdown.
-- Raise diagnostic heartbeat and reconnect timeout priority while investigating
-  system-bus restart recovery.
-- Make the Slackware D-Bus restart harness wait for reconnect timer dispatch
-  before asserting locale1 name reacquisition.
-
 ### Tests
 - Add a Slackware integration harness that restarts an isolated system-bus
-  instance and verifies locale1 name reacquisition and AccountsService
-  reconnection.
+  instance and verifies localed remains alive, reacquires locale1, and
+  independently reconnects to AccountsService.
+- Add isolated PolicyKit D-Bus tests for authorization denial, interactive
+  authorization flags, cancellation identifier propagation, and cancellation
+  of an outstanding authorization when the daemon session shuts down.
 - Replace the main daemon's shared-bus name owner with a fresh private
   system-bus connection for each locale1 ownership attempt. Register the
   locale1 object on that connection so daemon name reacquisition works after
@@ -25,8 +20,7 @@ All notable changes to `localed` are documented in this file.
   Retire the old name watch and object registration before releasing the
   connection, then establish a fresh connection and register locale1 again.
   Preserve initial name-acquisition failure handling when the bus is still live.
-- Document real Polkit pending-authorization cancellation and installed
-  Slackware D-Bus/AccountsService verification procedures.
+- Document Slackware D-Bus/AccountsService restart verification procedures.
 
 
 ### Tests
@@ -40,17 +34,19 @@ All notable changes to `localed` are documented in this file.
 
 ### Changed
 - Harden daemon startup and shutdown for repeated D-Bus registration: clear
-  stale object registrations, introspection data, and cached Polkit authority
-  before reconnecting; clean up partially initialized startup failures.
+  stale object registrations, introspection data, and authorization-session
+  cancellables before reconnecting; clean up partially initialized startup
+  failures.
 - Make the AccountsService monitor recover from system-bus disconnections by
   creating a fresh private system-bus connection and retrying after failure.
   Stop now cancels pending retries and releases name watches, subscriptions,
   and connection callbacks.
-- Tie asynchronous Polkit authorization checks to the active daemon
-  connection lifecycle. Shutdown cancels pending checks; each request retains
-  its own session cancellable and D-Bus invocation, and the callback checks
-  cancellation again before applying settings to close authorization/reconnect
-  races.
+- Send PolicyKit CheckAuthorization and CancelCheckAuthorization requests over
+  localed's managed private system-bus connection instead of creating a
+  separate PolkitAuthority connection. Each request uses a unique cancellation
+  identifier and retains its own session cancellable and D-Bus invocation.
+  Shutdown cancels pending checks, and callbacks recheck cancellation before
+  applying settings to close authorization/reconnect races.
 
 
 ### Documentation
