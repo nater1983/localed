@@ -2395,6 +2395,32 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
     }
   }
 
+  /*
+   * Re-apply this after PolkitAuthority initialization.  Polkit may initialize
+   * or reconfigure its system-bus proxy while obtaining the authority.  The
+   * shared GDBus connection must not retain GIO's default exit-on-close
+   * behavior: a dbus-daemon restart must be handled by localed's reconnect
+   * state machine, not by GIO raising SIGTERM in this process.
+   */
+  {
+    GError *bus_error = NULL;
+    GDBusConnection *system_bus =
+      g_bus_get_sync( G_BUS_TYPE_SYSTEM, NULL, &bus_error );
+
+    if( system_bus )
+    {
+      g_dbus_connection_set_exit_on_close( system_bus, FALSE );
+      g_debug( "disabled exit-on-close on shared system-bus connection after Polkit initialization" );
+      g_object_unref( system_bus );
+    }
+    else
+    {
+      g_warning( "Could not re-acquire shared system-bus connection after Polkit initialization: %s",
+                 bus_error ? bus_error->message : "(unknown)" );
+      g_clear_error( &bus_error );
+    }
+  }
+
   g_debug( "localed D-Bus object registered at /org/freedesktop/locale1" );
   return TRUE;
 }
