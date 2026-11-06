@@ -2295,6 +2295,13 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
   GDBusInterfaceInfo     *iface_info;
   GError *error = NULL;
 
+  /*
+   * Startup may be called again after a bus/name loss. Always release any
+   * previous registration, introspection data, and cached Polkit authority
+   * before attaching the new connection.
+   */
+  rcl_daemon_shutdown( daemon );
+
   priv->connection    = g_object_ref( connection );
   priv->introspection = g_dbus_node_info_new_for_xml(
                           locale1_introspection_xml, &error );
@@ -2302,6 +2309,7 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
   {
     g_warning( "Failed to parse introspection XML: %s", error->message );
     g_error_free( error );
+    rcl_daemon_shutdown( daemon );
     return FALSE;
   }
 
@@ -2321,6 +2329,7 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
   {
     g_warning( "Could not register D-Bus object: %s", error->message );
     g_error_free( error );
+    rcl_daemon_shutdown( daemon );
     return FALSE;
   }
 
@@ -2363,6 +2372,9 @@ rcl_daemon_shutdown( RclDaemon *daemon )
     g_dbus_node_info_unref( priv->introspection );
     priv->introspection = NULL;
   }
+
+  /* Force a fresh Polkit authority lookup after a D-Bus restart. */
+  g_clear_object( &priv->authority );
 }
 
 void
