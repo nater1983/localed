@@ -225,6 +225,7 @@ typedef struct
   gboolean check_seen;
   gboolean cancel_seen;
   gboolean client_done;
+  guint check_flags;
   gchar *check_cancellation_id;
   gchar *cancel_cancellation_id;
   GError *client_error;
@@ -261,8 +262,11 @@ polkit_method_call(GDBusConnection *connection,
 
   if (g_str_equal(method_name, "CheckAuthorization")) {
     GVariant *id_value = g_variant_get_child_value(parameters, 4);
+    GVariant *flags_value = g_variant_get_child_value(parameters, 3);
     const gchar *id = g_variant_get_string(id_value, NULL);
 
+    fixture->check_flags = g_variant_get_uint32(flags_value);
+    g_variant_unref(flags_value);
     fixture->check_seen = TRUE;
     g_free(fixture->check_cancellation_id);
     fixture->check_cancellation_id = g_strdup(id);
@@ -404,6 +408,7 @@ test_polkit_denial(Fixture *fixture, gconstpointer user_data)
   g_assert_true(polkit_fixture.check_seen);
   g_assert_nonnull(polkit_fixture.check_cancellation_id);
   g_assert_cmpstr(polkit_fixture.check_cancellation_id, !=, "");
+  g_assert_cmpuint(polkit_fixture.check_flags, ==, 1u);
   g_assert_nonnull(polkit_fixture.client_error);
   g_assert_cmpstr(g_dbus_error_get_remote_error(polkit_fixture.client_error),
                   ==, "org.freedesktop.DBus.Error.AuthFailed");
@@ -463,6 +468,7 @@ test_polkit_cancellation(Fixture *fixture, gconstpointer user_data)
 
   iterate_until(&polkit_fixture, polkit_check_condition, 5000);
   g_assert_nonnull(polkit_fixture.check_cancellation_id);
+  g_assert_cmpuint(polkit_fixture.check_flags, ==, 1u);
 
   /* Shutting down the daemon cancels the pending authorization. */
   rcl_daemon_shutdown(daemon);
