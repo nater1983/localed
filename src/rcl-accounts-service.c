@@ -150,9 +150,20 @@ rcl_accounts_service_connection_closed(GDBusConnection *connection,
   g_warning("system D-Bus connection for AccountsService closed: %s",
             error ? error->message : "connection closed");
 
-  /* The closed connection has already invalidated both registrations. */
-  self->watch_id = 0;
-  self->subscription_id = 0;
+  /*
+   * Explicitly release the registrations even though the underlying
+   * connection is closed. This keeps the module's ownership bookkeeping
+   * correct and makes stop()/dispose() safe after a disconnect.
+   */
+  if (self->watch_id) {
+    g_bus_unwatch_name(self->watch_id);
+    self->watch_id = 0;
+  }
+  if (self->subscription_id) {
+    g_dbus_connection_signal_unsubscribe(connection,
+                                         self->subscription_id);
+    self->subscription_id = 0;
+  }
   self->connection_closed_id = 0;
   g_clear_object(&self->connection);
 
