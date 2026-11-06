@@ -12,6 +12,11 @@ All notable changes to `localed` are documented in this file.
   system-bus connection for each locale1 ownership attempt. Register the
   locale1 object on that connection so daemon name reacquisition works after
   the system bus daemon restarts.
+- Monitor the private locale1 connection's `closed` signal and route
+  transport closure and name loss through one idempotent reconnect scheduler.
+  Retire the old name watch and object registration before releasing the
+  connection, then establish a fresh connection and register locale1 again.
+  Preserve initial name-acquisition failure handling when the bus is still live.
 - Document real Polkit pending-authorization cancellation and installed
   Slackware D-Bus/AccountsService verification procedures.
 
