@@ -2358,6 +2358,30 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
 
   rcl_daemon_sync_dbus_properties( self );
 
+  /*
+   * PolkitAuthority uses GLib's shared system-bus connection internally.
+   * Disable exit-on-close on that shared connection before creating the
+   * authority, otherwise a system-bus restart can make GIO raise SIGTERM
+   * and terminate localed before its private-connection recovery runs.
+   */
+  {
+    GError *bus_error = NULL;
+    GDBusConnection *system_bus =
+      g_bus_get_sync( G_BUS_TYPE_SYSTEM, NULL, &bus_error );
+
+    if( system_bus )
+    {
+      g_dbus_connection_set_exit_on_close( system_bus, FALSE );
+      g_object_unref( system_bus );
+    }
+    else
+    {
+      g_warning( "Could not acquire shared system-bus connection: %s",
+                 bus_error ? bus_error->message : "(unknown)" );
+      g_clear_error( &bus_error );
+    }
+  }
+
   /* Acquire the PolKit authority once up front.  This is non-interactive and
      fast; if polkitd is not reachable yet we retry lazily on first use. */
   {
