@@ -5,6 +5,14 @@ All notable changes to `localed` are documented in this file.
 ## [0.3.0] - Unreleased
 
 ### Tests
+- Add a Slackware integration harness that restarts an isolated system-bus
+  instance and verifies locale1 name reacquisition and AccountsService
+  reconnection.
+- Document real Polkit pending-authorization cancellation and installed
+  Slackware D-Bus/AccountsService verification procedures.
+
+
+### Tests
 - Add isolated GTestDBus coverage for AccountsService name appearance and
   disappearance, repeated start/stop, locale1 object registration/shutdown,
   and recovery after the system bus daemon restarts.
