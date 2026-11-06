@@ -21,6 +21,23 @@ typedef struct
   GDBusConnection *client;
 } Fixture;
 
+static GDBusConnection *
+connect_test_bus(const gchar *address)
+{
+  GError *error = NULL;
+  GDBusConnection *connection =
+    g_dbus_connection_new_for_address_sync(
+      address,
+      G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
+      G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
+      NULL, NULL, &error);
+
+  g_assert_no_error(error);
+  g_assert_nonnull(connection);
+  g_dbus_connection_set_exit_on_close(connection, FALSE);
+  return connection;
+}
+
 static void
 fixture_setup(Fixture *fixture, gconstpointer user_data)
 {
@@ -37,14 +54,7 @@ fixture_setup(Fixture *fixture, gconstpointer user_data)
   /* The production monitor deliberately connects to the system bus. */
   g_setenv("DBUS_SYSTEM_BUS_ADDRESS", fixture->address, TRUE);
 
-  fixture->client = g_dbus_connection_new_for_address_sync(
-    fixture->address,
-    G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
-    G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
-    NULL, NULL, &error);
-  g_assert_no_error(error);
-  g_assert_nonnull(fixture->client);
-  g_dbus_connection_set_exit_on_close(fixture->client, FALSE);
+  fixture->client = connect_test_bus(fixture->address);
 }
 
 static void
@@ -164,6 +174,47 @@ test_repeated_start_stop_cleanup(Fixture *fixture, gconstpointer user_data)
   }
 }
 
+static void
+test_system_bus_restart(Fixture *fixture, gconstpointer user_data)
+{
+  RclLocaleDaemon *daemon =
+    g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
+  RclAccountsService *service = rcl_accounts_service_new(daemon);
+
+  g_assert_nonnull(daemon);
+  g_assert_nonnull(service);
+  g_assert_true(rcl_accounts_service_start(service, NULL));
+  iterate_for(100);
+
+  /* Stop the private test bus. The monitor must discard its closed
+   * connection and retry against a newly started bus daemon. */
+  g_test_dbus_down(fixture->bus);
+  iterate_for(100);
+
+  if (fixture->client) {
+    g_clear_object(&fixture->client);
+  }
+
+  g_test_dbus_up(fixture->bus);
+  g_free(fixture->address);
+  fixture->address = g_strdup(g_test_dbus_get_bus_address(fixture->bus));
+  g_assert_nonnull(fixture->address);
+  g_setenv("DBUS_SYSTEM_BUS_ADDRESS", fixture->address, TRUE);
+  fixture->client = connect_test_bus(fixture->address);
+
+  /* The production retry interval is 2.5 seconds. */
+  iterate_for(2800);
+
+  request_accounts_name(fixture, TRUE);
+  iterate_for(100);
+  request_accounts_name(fixture, FALSE);
+  iterate_for(100);
+
+  rcl_accounts_service_stop(service);
+  g_object_unref(service);
+  g_object_unref(daemon);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -173,6 +224,8 @@ main(int argc, char **argv)
              fixture_setup, test_accounts_name_lifecycle, fixture_teardown);
   g_test_add("/dbus/repeated-start-stop-cleanup", Fixture, NULL,
              fixture_setup, test_repeated_start_stop_cleanup, fixture_teardown);
+  g_test_add("/dbus/system-bus-restart", Fixture, NULL,
+             fixture_setup, test_system_bus_restart, fixture_teardown);
 
   return g_test_run();
 }
