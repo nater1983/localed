@@ -30,7 +30,6 @@
 #include <glib/gstdio.h>
 #include <glib-object.h>
 #include <glib/gi18n-lib.h>
-#include <polkit/polkit.h>
 
 #include "rcl-locale.h"
 #include "rcl-file-utils.h"
@@ -87,10 +86,11 @@ struct _RclLocaleDaemonPrivate
   guint             registration_id;
   gboolean          debug;
 
-  /* Cached PolKit authority handle, fetched once at startup.  The blocking
-     part of authorisation (the agent dialog) is driven asynchronously so it
-     never stalls the single-threaded main loop. */
-  PolkitAuthority  *authority;
+  /*
+   * Authorization requests use the daemon's private system-bus connection.
+   * This avoids PolkitAuthority creating a separate GDBus connection whose
+   * default exit-on-close behavior can terminate the daemon during bus loss.
+   */
   GCancellable     *auth_cancellable;
 
   /* Cached property values.  Refreshed by rcl_daemon_sync_dbus_properties(). */
@@ -1502,13 +1502,87 @@ typedef struct
   gchar   *x11_options;
 
   gboolean convert;       /* shared by the two keyboard ops */
+
+  GDBusConnection *auth_connection;
+  gchar *cancellation_id;
+  gulong cancel_handler_id;
 } AuthCtx;
+
+typedef struct
+{
+  GDBusConnection *connection;
+  gchar *cancellation_id;
+} AuthCancelData;
+
+static void
+auth_cancel_data_free( gpointer user_data )
+{
+  AuthCancelData *data = user_data;
+
+  g_clear_object( &data->connection );
+  g_free( data->cancellation_id );
+  g_free( data );
+}
+
+static void
+on_cancel_authorization_done( GObject *source,
+                              GAsyncResult *result,
+                              gpointer user_data )
+{
+  GError *error = NULL;
+  GVariant *reply;
+
+  reply = g_dbus_connection_call_finish( G_DBUS_CONNECTION(source),
+                                         result, &error );
+  if( reply )
+    g_variant_unref( reply );
+  else if( error )
+  {
+    g_debug( "PolicyKit cancellation request could not be delivered: %s",
+             error->message );
+    g_clear_error( &error );
+  }
+}
+
+static void
+on_auth_cancelled( GCancellable *cancellable, gpointer user_data )
+{
+  AuthCancelData *data = user_data;
+
+  /*
+   * CancelCheckAuthorization is best-effort. The local GDBus call is also
+   * cancelled, and its completion path independently prevents a cancelled
+   * request from applying any privileged change.
+   */
+  g_dbus_connection_call(
+    data->connection,
+    "org.freedesktop.PolicyKit1",
+    "/org/freedesktop/PolicyKit1/Authority",
+    "org.freedesktop.PolicyKit1.Authority",
+    "CancelCheckAuthorization",
+    g_variant_new( "(s)", data->cancellation_id ),
+    NULL, /* CancelCheckAuthorization has no output arguments. */
+    G_DBUS_CALL_FLAGS_NONE,
+    -1,
+    NULL,
+    on_cancel_authorization_done,
+    NULL );
+}
 
 static void
 auth_ctx_free( AuthCtx *ctx )
 {
   if( !ctx )
     return;
+
+  if( ctx->cancellable && ctx->cancel_handler_id )
+  {
+    g_cancellable_disconnect( ctx->cancellable, ctx->cancel_handler_id );
+    ctx->cancel_handler_id = 0;
+  }
+
+  g_clear_object( &ctx->auth_connection );
+  g_free( ctx->cancellation_id );
   g_clear_object( &ctx->daemon );
   g_clear_object( &ctx->invocation );
   g_clear_object( &ctx->cancellable );
@@ -1894,35 +1968,46 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
-/* ---- async authorisation callback ---- */
+/* ---- asynchronous PolicyKit D-Bus authorization ---- */
 
 static void
 on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
 {
-  AuthCtx                   *ctx    = user_data;
-  PolkitAuthorizationResult *result;
-  GError                    *error  = NULL;
+  AuthCtx  *ctx = user_data;
+  GVariant *reply;
+  GVariant *details = NULL;
+  GError   *error = NULL;
+  gboolean  authorized = FALSE;
+  gboolean  challenge = FALSE;
 
-  result = polkit_authority_check_authorization_finish(
-             POLKIT_AUTHORITY(source), res, &error );
+  reply = g_dbus_connection_call_finish( G_DBUS_CONNECTION(source),
+                                         res, &error );
 
-  if( !result )
+  if( !reply )
   {
-    g_dbus_method_invocation_return_gerror( ctx->invocation, error );
-    g_error_free( error );
+    if( g_cancellable_is_cancelled( ctx->cancellable ) )
+      g_dbus_method_invocation_return_dbus_error(
+        ctx->invocation,
+        "org.freedesktop.DBus.Error.Disconnected",
+        "Daemon connection was closed before authorization completed" );
+    else
+      g_dbus_method_invocation_return_gerror( ctx->invocation, error );
+
+    g_clear_error( &error );
     auth_ctx_free( ctx );
     return;
   }
 
+  g_variant_get( reply, "((bb@a{ss}))", &authorized, &challenge, &details );
+  g_variant_unref( details );
+  g_variant_unref( reply );
+
   /*
-   * Cancellation can race with a successful Polkit reply: the reply may
-   * already be queued when shutdown cancels the request. Check the exact
-   * session cancellable retained by this request before performing any
-   * privileged file update.
+   * Cancellation can race with a successful PolicyKit reply. Check the
+   * daemon-session cancellable before performing any privileged file update.
    */
   if( g_cancellable_is_cancelled( ctx->cancellable ) )
   {
-    g_object_unref( result );
     g_dbus_method_invocation_return_dbus_error(
       ctx->invocation,
       "org.freedesktop.DBus.Error.Disconnected",
@@ -1931,28 +2016,21 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
     return;
   }
 
-  if( !polkit_authorization_result_get_is_authorized( result ) )
+  if( !authorized )
   {
-    /* Distinguish "authentication required but not yet provided" from a hard
-     * denial.  When is_challenge is TRUE the caller passed interactive=FALSE
-     * but the policy requires interaction; the correct D-Bus error tells the
-     * client to retry with interactive=TRUE (e.g. to raise an agent dialog).
-     * Without this check both cases collapse to AUTH_FAILED, preventing GUI
-     * clients from retrying with a password prompt. */
-  if( polkit_authorization_result_get_is_challenge( result ) )
+    if( challenge )
       g_dbus_method_invocation_return_dbus_error(
-      ctx->invocation,
-      "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired",
-      "Authentication is required to perform the requested action" );
+        ctx->invocation,
+        "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired",
+        "Authentication is required to perform the requested action" );
     else
-      g_dbus_method_invocation_return_error( ctx->invocation,
-        G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED,
+      g_dbus_method_invocation_return_error(
+        ctx->invocation, G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED,
         "Not authorised to perform the requested action" );
-    g_object_unref( result );
+
     auth_ctx_free( ctx );
     return;
   }
-  g_object_unref( result );
 
   switch( ctx->op )
   {
@@ -1973,43 +2051,91 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
   auth_ctx_free( ctx );
 }
 
-/* ---- async authorisation starter (takes ownership of ctx) ---- */
+/* ---- asynchronous PolicyKit authorization starter ---- */
 
 static void
 check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
 {
-  RclLocaleDaemonPrivate        *priv = ctx->daemon->priv;
-  PolkitSubject                 *subject;
-  PolkitCheckAuthorizationFlags  flags;
-  const gchar                   *sender;
+  RclLocaleDaemonPrivate *priv = ctx->daemon->priv;
+  GVariantBuilder subject_details;
+  GVariantBuilder details;
+  GVariant *parameters;
+  AuthCancelData *cancel_data;
+  const gchar *sender;
+  guint flags;
 
-  /* Acquire the authority handle lazily if the startup fetch failed.  This
-     is a fast, non-interactive call (it only connects to polkitd). */
-  if( priv->authority == NULL )
+  if( !priv->connection || g_dbus_connection_is_closed(priv->connection) )
   {
-    GError *err = NULL;
-    priv->authority = polkit_authority_get_sync( NULL, &err );
-    if( priv->authority == NULL )
-    {
-      g_dbus_method_invocation_return_gerror( ctx->invocation, err );
-      g_error_free( err );
-      auth_ctx_free( ctx );
-      return;
-    }
+    g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.Disconnected",
+      "System bus connection is unavailable" );
+    auth_ctx_free( ctx );
+    return;
   }
 
-  sender  = g_dbus_method_invocation_get_sender( ctx->invocation );
-  subject = polkit_system_bus_name_new( sender );
-  flags   = interactive
-              ? POLKIT_CHECK_AUTHORIZATION_FLAGS_ALLOW_USER_INTERACTION
-              : POLKIT_CHECK_AUTHORIZATION_FLAGS_NONE;
-
   ctx->cancellable = g_object_ref( priv->auth_cancellable );
-  polkit_authority_check_authorization(
-    priv->authority, subject, action_id, NULL, flags,
-    ctx->cancellable, on_check_done, ctx );
+  if( g_cancellable_is_cancelled( ctx->cancellable ) )
+  {
+    g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.Disconnected",
+      "Authorization was cancelled before it could be started" );
+    auth_ctx_free( ctx );
+    return;
+  }
 
-  g_object_unref( subject );
+  sender = g_dbus_method_invocation_get_sender( ctx->invocation );
+
+  g_variant_builder_init( &subject_details, G_VARIANT_TYPE("a{sv}") );
+  g_variant_builder_add( &subject_details, "{sv}", "name",
+                         g_variant_new_string(sender) );
+
+  g_variant_builder_init( &details, G_VARIANT_TYPE("a{ss}") );
+
+  flags = interactive ? 1u : 0u; /* AllowUserInteraction */
+
+  ctx->auth_connection = g_object_ref( priv->connection );
+  ctx->cancellation_id = g_uuid_string_random();
+
+  parameters = g_variant_new(
+    "((s@a{sv})s@a{ss}us)",
+    "system-bus-name",
+    g_variant_builder_end( &subject_details ),
+    action_id,
+    g_variant_builder_end( &details ),
+    flags,
+    ctx->cancellation_id );
+
+  /*
+   * Queue CheckAuthorization before connecting the cancellation handler.
+   * If the cancellable is already cancelled, g_cancellable_connect() invokes
+   * the handler immediately; queuing the check first preserves D-Bus message
+   * order so CancelCheckAuthorization cannot overtake its own request.
+   */
+  g_dbus_connection_call(
+    ctx->auth_connection,
+    "org.freedesktop.PolicyKit1",
+    "/org/freedesktop/PolicyKit1/Authority",
+    "org.freedesktop.PolicyKit1.Authority",
+    "CheckAuthorization",
+    parameters,
+    G_VARIANT_TYPE( "((bba{ss}))" ),
+    G_DBUS_CALL_FLAGS_NONE,
+    -1,
+    ctx->cancellable,
+    on_check_done,
+    ctx );
+
+  cancel_data = g_new0( AuthCancelData, 1 );
+  cancel_data->connection = g_object_ref( ctx->auth_connection );
+  cancel_data->cancellation_id = g_strdup( ctx->cancellation_id );
+
+  ctx->cancel_handler_id =
+    g_cancellable_connect( ctx->cancellable,
+                           G_CALLBACK(on_auth_cancelled),
+                           cancel_data,
+                           auth_cancel_data_free );
 }
 
 /* Commit the two Slackware locale files as one logical operation.  Each
@@ -2319,7 +2445,7 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
 
   /*
    * Startup may be called again after a bus/name loss. Always release any
-   * previous registration, introspection data, and cached Polkit authority
+   * previous registration, introspection data, and authorization session
    * before attaching the new connection.
    */
   rcl_daemon_shutdown( daemon );
@@ -2358,19 +2484,6 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
 
   rcl_daemon_sync_dbus_properties( self );
 
-  /* Acquire the PolKit authority once up front.  This is non-interactive and
-     fast; if polkitd is not reachable yet we retry lazily on first use. */
-  {
-    GError *pk_error = NULL;
-    priv->authority = polkit_authority_get_sync( NULL, &pk_error );
-    if( priv->authority == NULL )
-    {
-      g_warning( "Could not acquire PolKit authority at startup: %s",
-                 pk_error ? pk_error->message : "(unknown)" );
-      g_clear_error( &pk_error );
-    }
-  }
-
   g_debug( "localed D-Bus object registered at /org/freedesktop/locale1" );
   return TRUE;
 }
@@ -2397,7 +2510,7 @@ rcl_daemon_shutdown( RclDaemon *daemon )
   }
 
   /*
-   * Cancel outstanding authorization checks before releasing the authority.
+   * Cancel outstanding authorization checks before releasing the session.
    * Their callbacks may still run, but cancellation prevents them from
    * executing the protected Set* operation after this daemon session ends.
    */
@@ -2405,8 +2518,6 @@ rcl_daemon_shutdown( RclDaemon *daemon )
     g_cancellable_cancel( priv->auth_cancellable );
   g_clear_object( &priv->auth_cancellable );
 
-  /* Force a fresh Polkit authority lookup after a D-Bus restart. */
-  g_clear_object( &priv->authority );
 }
 
 void
@@ -2434,8 +2545,6 @@ rcl_locale_daemon_finalize( GObject *object )
     priv->registration_id = 0;
   }
   g_clear_object( &priv->connection );
-
-  g_clear_object( &priv->authority );
 
   g_strfreev( priv->locale );
   g_free( priv->vconsole_keymap );

@@ -28,7 +28,6 @@
 #include <unistd.h>
 
 #include <gio/gio.h>
-#include <polkit/polkit.h>
 #include <glib.h>
 #include <glib-unix.h>
 #include <glib-object.h>
@@ -157,15 +156,19 @@ rcl_schedule_reconnect(RclState *state, const gchar *reason)
   {
     GSource *source = g_timeout_source_new(RECONNECT_DELAY_MS);
 
-    g_source_set_priority(source, G_PRIORITY_DEFAULT);
+    /*
+     * Bus teardown can leave GDBus I/O sources continuously ready. Give
+     * recovery precedence over ordinary bus traffic so a busy connection
+     * cannot starve the reconnect deadline.
+     */
+    g_source_set_priority(source, G_PRIORITY_HIGH);
     g_source_set_callback(source, rcl_main_reconnect_cb, state, NULL);
     state->reconnect_id =
       g_source_attach(source, g_main_loop_get_context(state->loop));
     g_source_unref(source);
   }
 
-  g_warning("D-Bus reconnect timer registered on localed main context"
-            " (source %u)", state->reconnect_id);
+  LOG(state, "D-Bus reconnect timer registered");
 }
 
 static void
@@ -197,7 +200,7 @@ rcl_main_reconnect_cb(gpointer user_data)
 
   state->reconnect_id = 0;
 
-  g_warning("D-Bus reconnect timer fired");
+  LOG(state, "D-Bus reconnect timer fired");
   LOG(state, "attempting to re-acquire D-Bus name");
 
   state->reconnecting = TRUE;
@@ -294,6 +297,7 @@ rcl_main_sigint_cb(gpointer user_data)
 {
   RclState *state = user_data;
   LOG(state, "SIGINT received");
+  g_warning("main loop quit requested by SIGINT");
   state->exiting = TRUE;
   g_main_loop_quit(state->loop);
   return G_SOURCE_REMOVE;
@@ -304,6 +308,7 @@ rcl_main_sigterm_cb(gpointer user_data)
 {
   RclState *state = user_data;
   LOG(state, "SIGTERM received");
+  g_warning("main loop quit requested by SIGTERM");
   state->exiting = TRUE;
   g_main_loop_quit(state->loop);
   return G_SOURCE_REMOVE;
@@ -630,6 +635,7 @@ gint main(gint argc, gchar **argv)
 
   g_debug("localed started (%s)", PACKAGE_VERSION);
 
+  g_debug("entering localed main loop");
   g_main_loop_run(state->loop);
 
   /* ── Cleanup ───────────────────────────────────────────────────────────── */

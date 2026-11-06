@@ -14,7 +14,7 @@ dbus_lifecycle_test = executable(
     '../src/rcl-accounts-service.c',
     '../src/rcl-locale.c',
   ],
-  dependencies        : [glib_dep, gio_dep, gio_unix, polkit],
+  dependencies        : [glib_dep, gio_dep, gio_unix],
   include_directories : [config_h_inc, include_directories('../src')],
 )
 
