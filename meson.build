@@ -8,17 +8,39 @@ project(
     'c_std=gnu11',
     'warning_level=2',
     'werror=false',
+    'optimization=2',
   ],
 )
 
 cc = meson.get_compiler('c')
 
 extra_c_args = cc.get_supported_arguments([
-  '-Wno-unused-parameter',      # GLib callbacks often leave params unused
+  '-Wno-unused-parameter',
   '-Wno-missing-field-initializers',
   '-fstack-protector-strong',
-  '-D_FORTIFY_SOURCE=2',
 ])
+
+# Enable fortified libc functions only when optimization is active.
+optimized_src = '''
+  #if !defined(__OPTIMIZE__) || __OPTIMIZE__ == 0
+  #error Optimization is disabled
+  #endif
+'''
+
+if cc.compiles(optimized_src, name : 'compiler optimization enabled')
+  extra_c_args += cc.get_supported_arguments([
+    '-D_FORTIFY_SOURCE=2',
+  ])
+endif
+
+if get_option('buildtype').contains('debug')
+  extra_c_args += cc.get_supported_arguments([
+    '-Wcast-align',
+    '-Wmissing-declarations',
+    '-Wmissing-prototypes',
+    '-Wnested-externs',
+  ])
+endif
 
 add_project_arguments(extra_c_args, language : 'c')
 
