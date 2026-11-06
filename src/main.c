@@ -162,8 +162,10 @@ rcl_main_heartbeat_cb(gpointer user_data)
       g_main_context_find_source_by_id(g_main_loop_get_context(state->loop),
                                        state->reconnect_id);
 
-  g_warning("localed main loop heartbeat (reconnect source %s)",
-            reconnect_source ? "pending" : "not attached");
+  g_warning("localed main loop heartbeat (reconnect source %s; context owner %s)",
+            reconnect_source ? "pending" : "not attached",
+            g_main_context_is_owner(g_main_loop_get_context(state->loop))
+              ? "yes" : "no");
   return G_SOURCE_CONTINUE;
 }
 
@@ -184,7 +186,12 @@ rcl_schedule_reconnect(RclState *state, const gchar *reason)
   {
     GSource *source = g_timeout_source_new(RECONNECT_DELAY_MS);
 
-    g_source_set_priority(source, G_PRIORITY_DEFAULT);
+    /*
+     * Bus teardown can leave GDBus I/O sources continuously ready. Give
+     * recovery precedence over ordinary bus traffic so a busy connection
+     * cannot starve the reconnect deadline.
+     */
+    g_source_set_priority(source, G_PRIORITY_HIGH);
     g_source_set_callback(source, rcl_main_reconnect_cb, state, NULL);
     state->reconnect_id =
       g_source_attach(source, g_main_loop_get_context(state->loop));
@@ -656,8 +663,14 @@ gint main(gint argc, gchar **argv)
   rcl_acquire_name(state);
 
   /* Temporary diagnostic: verify main-context dispatch during bus loss. */
-  state->heartbeat_id =
-    g_timeout_add_seconds(1, rcl_main_heartbeat_cb, state);
+  {
+    GSource *source = g_timeout_source_new_seconds(1);
+    g_source_set_priority(source, G_PRIORITY_HIGH);
+    g_source_set_callback(source, rcl_main_heartbeat_cb, state, NULL);
+    state->heartbeat_id =
+      g_source_attach(source, g_main_loop_get_context(state->loop));
+    g_source_unref(source);
+  }
 
   g_debug("localed started (%s)", PACKAGE_VERSION);
 
