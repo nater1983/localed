@@ -28,7 +28,6 @@
 #include <unistd.h>
 
 #include <gio/gio.h>
-#include <polkit/polkit.h>
 #include <glib.h>
 #include <glib-unix.h>
 #include <glib-object.h>
