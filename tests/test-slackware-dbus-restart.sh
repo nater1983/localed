@@ -137,30 +137,34 @@ echo "3/5 verifying AccountsService name appearance"
 request_accounts_name
 wait_for_log "subscribed to AccountsService"
 
-echo "4/5 restarting the isolated system bus"
+echo "4/6 attaching process diagnostics before bus restart"
+ps -o pid,ppid,stat,wchan:32,cmd -p "$localed_pid" || :
+if command -v strace >/dev/null 2>&1; then
+  strace -f -tt -e signal=all -p "$localed_pid" \
+    -e trace=poll,ppoll,epoll_wait,epoll_pwait,futex,read,write \
+    -o "$trace_log" &
+  trace_pid=$!
+  sleep 0.2
+else
+  echo "strace not installed; skipping process syscall capture"
+fi
+
+echo "5/6 restarting the isolated system bus"
 kill "$bus_pid"
 wait "$bus_pid" 2>/dev/null || :
 bus_pid=
 start_bus
 
-echo "5/5 inspecting localed after D-Bus restart"
-ps -o pid,stat,wchan:32,cmd -p "$localed_pid" || :
-if command -v strace >/dev/null 2>&1; then
-  strace -f -tt -p "$localed_pid" \
-    -e trace=poll,ppoll,epoll_wait,epoll_pwait,futex,read,write \
-    -o "$trace_log" &
-  trace_pid=$!
-  sleep 5
+echo "6/6 verifying locale1 and AccountsService reconnection"
+sleep 5
+if [ -n "$trace_pid" ]; then
   kill "$trace_pid" 2>/dev/null || :
   wait "$trace_pid" 2>/dev/null || :
   trace_pid=
   echo "Recent localed system-call activity:"
   tail -100 "$trace_log" || :
-else
-  echo "strace not installed; skipping process syscall capture"
 fi
-
-echo "5/5 verifying locale1 and AccountsService reconnection"
+ps -o pid,ppid,stat,wchan:32,cmd -p "$localed_pid" || :
 wait_for_log "D-Bus reconnect timer fired"
 wait_for_locale1
 request_accounts_name
