@@ -107,11 +107,11 @@ start_bus
 
 # localed routes logs to syslog when stderr is not a terminal. Run it under
 # a PTY so --debug messages are captured in the typescript for assertions.
-script -q -e -c "\"$LOCALed\" --debug" "$log" &
+script -q -e -c "exec \"$LOCALed\" --debug" "$log" &
 script_pid=$!
 i=0
 while [ -z "$localed_pid" ]; do
-  localed_pid=$(pgrep -n -x localed 2>/dev/null || :)
+  localed_pid=$(pgrep -P "$script_pid" -x localed 2>/dev/null || :)
   i=$((i + 1))
   if [ "$i" -ge 100 ] || ! kill -0 "$script_pid" 2>/dev/null; then
     echo "localed failed to start under script(1)" >&2
