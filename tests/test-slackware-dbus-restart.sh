@@ -135,6 +135,7 @@ bus_pid=
 start_bus
 
 echo "4/4 verifying locale1 and AccountsService reconnection"
+wait_for_log "D-Bus reconnect timer fired"
 wait_for_locale1
 request_accounts_name
 # The same log text may already exist from before the restart. Require the
