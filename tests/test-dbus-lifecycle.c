@@ -17,6 +17,7 @@ typedef struct
 {
   GTestDBus *bus;
   gchar *address;
+  gchar *previous_system_bus_address;
   GDBusConnection *client;
 } Fixture;
 
@@ -30,6 +31,8 @@ fixture_setup(Fixture *fixture, gconstpointer user_data)
 
   fixture->address = g_strdup(g_test_dbus_get_bus_address(fixture->bus));
   g_assert_nonnull(fixture->address);
+  fixture->previous_system_bus_address =
+    g_strdup(g_getenv("DBUS_SYSTEM_BUS_ADDRESS"));
 
   /* The production monitor deliberately connects to the system bus. */
   g_setenv("DBUS_SYSTEM_BUS_ADDRESS", fixture->address, TRUE);
@@ -54,7 +57,12 @@ fixture_teardown(Fixture *fixture, gconstpointer user_data)
 
   g_test_dbus_down(fixture->bus);
   g_clear_object(&fixture->bus);
-  g_unsetenv("DBUS_SYSTEM_BUS_ADDRESS");
+  if (fixture->previous_system_bus_address)
+    g_setenv("DBUS_SYSTEM_BUS_ADDRESS",
+             fixture->previous_system_bus_address, TRUE);
+  else
+    g_unsetenv("DBUS_SYSTEM_BUS_ADDRESS");
+  g_free(fixture->previous_system_bus_address);
   g_free(fixture->address);
 }
 
@@ -138,10 +146,16 @@ test_repeated_start_stop_cleanup(Fixture *fixture, gconstpointer user_data)
 
     g_assert_nonnull(daemon);
     g_assert_nonnull(service);
+
+    /* Exercise real object registration and repeated shutdown cleanup. */
+    g_assert_true(rcl_daemon_startup(RCL_DAEMON(daemon),
+                                     fixture->client));
     g_assert_true(rcl_accounts_service_start(service, NULL));
     iterate_for(5);
 
     rcl_accounts_service_stop(service);
+    rcl_daemon_shutdown(RCL_DAEMON(daemon));
+    rcl_daemon_shutdown(RCL_DAEMON(daemon));
     g_object_unref(service);
     g_object_unref(daemon);
 
