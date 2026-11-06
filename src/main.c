@@ -71,6 +71,7 @@ typedef struct RclState
    */
   guint       watch_id;
   GDBusConnection *bus_connection;
+  gulong      bus_closed_id;
   gboolean    has_name;
   guint       reconnect_id;
   gboolean    reconnecting;
@@ -104,6 +105,12 @@ rcl_state_free(RclState *state)
     g_bus_unown_name(state->watch_id);
     state->watch_id = 0;
   }
+  if (state->bus_connection && state->bus_closed_id)
+  {
+    g_signal_handler_disconnect(state->bus_connection,
+                                state->bus_closed_id);
+    state->bus_closed_id = 0;
+  }
   g_clear_object(&state->bus_connection);
 
   rcl_daemon_shutdown(state->daemon);
@@ -135,6 +142,39 @@ rcl_state_new(void)
 
 static void rcl_acquire_name(RclState *state);   /* forward */
 
+static void
+rcl_schedule_reconnect(RclState *state, const gchar *reason)
+{
+  if (state->exiting || state->replace || state->reconnecting)
+    return;
+
+  if (state->reconnect_id)
+    return;
+
+  state->has_name = FALSE;
+  g_warning("%s; scheduling reconnect in %d ms",
+            reason, RECONNECT_DELAY_MS);
+  state->reconnect_id =
+    g_timeout_add(RECONNECT_DELAY_MS, rcl_main_reconnect_cb, state);
+}
+
+static void
+rcl_main_bus_closed(GDBusConnection *connection,
+                    gboolean remote_peer_vanished,
+                    GError *error,
+                    gpointer user_data)
+{
+  RclState *state = user_data;
+
+  if (connection != state->bus_connection || state->exiting ||
+      state->reconnecting)
+    return;
+
+  LOG(state, "system D-Bus connection closed: %s",
+      error ? error->message : "connection closed");
+  rcl_schedule_reconnect(state, "system D-Bus connection closed");
+}
+
 /*
  * Retry name acquisition after a transient D-Bus disconnect. Clear the old
  * daemon registration first so startup does not retain the previous
@@ -150,16 +190,26 @@ rcl_main_reconnect_cb(gpointer user_data)
   LOG(state, "attempting to re-acquire D-Bus name");
 
   state->reconnecting = TRUE;
+
   if (state->watch_id)
   {
     g_bus_unown_name(state->watch_id);
     state->watch_id = 0;
   }
-  g_clear_object(&state->bus_connection);
 
+  if (state->bus_connection && state->bus_closed_id)
+  {
+    g_signal_handler_disconnect(state->bus_connection,
+                                state->bus_closed_id);
+    state->bus_closed_id = 0;
+  }
+
+  /* Unregister locale1 before releasing the old connection. */
   rcl_daemon_shutdown(state->daemon);
+  g_clear_object(&state->bus_connection);
   state->has_name = FALSE;
   state->reconnecting = FALSE;
+
   rcl_acquire_name(state);
 
   return G_SOURCE_REMOVE;
@@ -193,10 +243,10 @@ rcl_main_name_lost(GDBusConnection *connection,
 {
   RclState *state = user_data;
 
-  g_warning("D-Bus name lost: %s", name);
-
   if (state->exiting || state->reconnecting)
     return;
+
+  LOG(state, "D-Bus name lost: %s", name);
 
   if (!state->has_name)
   {
@@ -212,13 +262,7 @@ rcl_main_name_lost(GDBusConnection *connection,
     return;
   }
 
-  if (!state->reconnect_id)
-  {
-    g_warning("scheduling reconnect in %d ms", RECONNECT_DELAY_MS);
-    state->reconnect_id = g_timeout_add(RECONNECT_DELAY_MS,
-                                        rcl_main_reconnect_cb,
-                                        state);
-  }
+  rcl_schedule_reconnect(state, "D-Bus name lost");
 }
 
 /* ───────────────────────────────────────────── */
@@ -365,16 +409,23 @@ rcl_acquire_name(RclState *state)
     goto failed;
 
   g_dbus_connection_set_exit_on_close(state->bus_connection, FALSE);
+  state->bus_closed_id =
+    g_signal_connect(state->bus_connection, "closed",
+                     G_CALLBACK(rcl_main_bus_closed), state);
 
   LOG(state, "system bus connected");
 
   if (!rcl_daemon_startup(state->daemon, state->bus_connection))
   {
     g_warning("Could not startup daemon on the new system-bus connection");
+    if (state->bus_closed_id)
+    {
+      g_signal_handler_disconnect(state->bus_connection,
+                                  state->bus_closed_id);
+      state->bus_closed_id = 0;
+    }
     g_clear_object(&state->bus_connection);
-    if (!state->reconnect_id && !state->exiting)
-      state->reconnect_id =
-        g_timeout_add(RECONNECT_DELAY_MS, rcl_main_reconnect_cb, state);
+    rcl_schedule_reconnect(state, "locale1 D-Bus object registration failed");
     return;
   }
 
