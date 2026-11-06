@@ -41,8 +41,6 @@ connect_test_bus(const gchar *address)
 static void
 fixture_setup(Fixture *fixture, gconstpointer user_data)
 {
-  GError *error = NULL;
-
   fixture->bus = g_test_dbus_new(G_TEST_DBUS_NONE);
   g_test_dbus_up(fixture->bus);
 
