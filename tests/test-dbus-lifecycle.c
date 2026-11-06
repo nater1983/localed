@@ -277,7 +277,7 @@ polkit_method_call(GDBusConnection *connection,
 
     g_dbus_method_invocation_return_value(
       invocation,
-      g_variant_new("(bba{ss})", FALSE, FALSE,
+      g_variant_new("(bb@a{ss})", FALSE, FALSE,
                     g_variant_new_array(G_VARIANT_TYPE("{ss}"), NULL, 0)));
     return;
   }
@@ -410,8 +410,12 @@ test_polkit_denial(Fixture *fixture, gconstpointer user_data)
   g_assert_cmpstr(polkit_fixture.check_cancellation_id, !=, "");
   g_assert_cmpuint(polkit_fixture.check_flags, ==, 1u);
   g_assert_nonnull(polkit_fixture.client_error);
-  g_assert_cmpstr(g_dbus_error_get_remote_error(polkit_fixture.client_error),
-                  ==, "org.freedesktop.DBus.Error.AuthFailed");
+  {
+    gchar *remote_error =
+      g_dbus_error_get_remote_error(polkit_fixture.client_error);
+    g_assert_cmpstr(remote_error, ==, "org.freedesktop.DBus.Error.AuthFailed");
+    g_free(remote_error);
+  }
 
   polkit_fixture_free(&polkit_fixture);
   rcl_daemon_shutdown(daemon);
