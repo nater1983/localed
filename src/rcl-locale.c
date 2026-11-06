@@ -91,6 +91,7 @@ struct _RclLocaleDaemonPrivate
      part of authorisation (the agent dialog) is driven asynchronously so it
      never stalls the single-threaded main loop. */
   PolkitAuthority  *authority;
+  GCancellable     *auth_cancellable;
 
   /* Cached property values.  Refreshed by rcl_daemon_sync_dbus_properties(). */
   gchar  **locale;                 /* GStrv, "KEY=value" entries, never NULL */
@@ -1508,6 +1509,7 @@ auth_ctx_free( AuthCtx *ctx )
   if( !ctx )
     return;
   g_clear_object( &ctx->daemon );
+  g_clear_object( &ctx->invocation );
   g_strfreev( ctx->locale );
   g_free( ctx->keymap );
   g_free( ctx->keymap_toggle );
@@ -1985,7 +1987,7 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
 
   polkit_authority_check_authorization(
     priv->authority, subject, action_id, NULL, flags,
-    NULL /* cancellable */, on_check_done, ctx );
+    priv->auth_cancellable, on_check_done, ctx );
 
   g_object_unref( subject );
 }
@@ -2213,7 +2215,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon     = g_object_ref( daemon );
-    ctx->invocation = invocation;
+    ctx->invocation = g_object_ref( invocation );
     ctx->op         = OP_SET_LOCALE;
     ctx->locale     = locale;
 
@@ -2231,7 +2233,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon         = g_object_ref( daemon );
-    ctx->invocation     = invocation;
+    ctx->invocation = g_object_ref( invocation );
     ctx->op             = OP_SET_VCONSOLE_KEYBOARD;
     ctx->keymap         = g_strdup( keymap );
     ctx->keymap_toggle  = g_strdup( keymap_toggle );
@@ -2251,7 +2253,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon      = g_object_ref( daemon );
-    ctx->invocation  = invocation;
+    ctx->invocation = g_object_ref( invocation );
     ctx->op          = OP_SET_X11_KEYBOARD;
     ctx->x11_layout  = g_strdup( layout );
     ctx->x11_model   = g_strdup( model );
@@ -2302,7 +2304,8 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
    */
   rcl_daemon_shutdown( daemon );
 
-  priv->connection    = g_object_ref( connection );
+  priv->connection       = g_object_ref( connection );
+  priv->auth_cancellable = g_cancellable_new();
   priv->introspection = g_dbus_node_info_new_for_xml(
                           locale1_introspection_xml, &error );
   if( !priv->introspection )
@@ -2372,6 +2375,15 @@ rcl_daemon_shutdown( RclDaemon *daemon )
     g_dbus_node_info_unref( priv->introspection );
     priv->introspection = NULL;
   }
+
+  /*
+   * Cancel outstanding authorization checks before releasing the authority.
+   * Their callbacks may still run, but cancellation prevents them from
+   * executing the protected Set* operation after this daemon session ends.
+   */
+  if( priv->auth_cancellable )
+    g_cancellable_cancel( priv->auth_cancellable );
+  g_clear_object( &priv->auth_cancellable );
 
   /* Force a fresh Polkit authority lookup after a D-Bus restart. */
   g_clear_object( &priv->authority );
