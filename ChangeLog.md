@@ -4,6 +4,16 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Changed
+- Harden daemon startup and shutdown for repeated D-Bus registration: clear
+  stale object registrations, introspection data, and cached Polkit authority
+  before reconnecting; clean up partially initialized startup failures.
+- Make the AccountsService monitor recover from system-bus disconnections by
+  creating a fresh private system-bus connection and retrying after failure.
+  Stop now cancels pending retries and releases name watches, subscriptions,
+  and connection callbacks.
+
+
 ### Documentation
 - Correct the README and manual pages to describe Slackware's actual locale
   and keyboard files instead of the systemd-specific `locale.conf` and
