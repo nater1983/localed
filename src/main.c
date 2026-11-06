@@ -168,11 +168,7 @@ rcl_schedule_reconnect(RclState *state, const gchar *reason)
     g_source_unref(source);
   }
 
-  g_warning("D-Bus reconnect timer registered (source %u; loop context=%p; thread-default=%p; default=%p)",
-            state->reconnect_id,
-            g_main_loop_get_context(state->loop),
-            g_main_context_get_thread_default(),
-            g_main_context_default());
+  LOG(state, "D-Bus reconnect timer registered");
 }
 
 static void
@@ -204,7 +200,7 @@ rcl_main_reconnect_cb(gpointer user_data)
 
   state->reconnect_id = 0;
 
-  g_warning("D-Bus reconnect timer fired");
+  LOG(state, "D-Bus reconnect timer fired");
   LOG(state, "attempting to re-acquire D-Bus name");
 
   state->reconnecting = TRUE;
