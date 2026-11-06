@@ -1561,7 +1561,7 @@ on_auth_cancelled( GCancellable *cancellable, gpointer user_data )
     "org.freedesktop.PolicyKit1.Authority",
     "CancelCheckAuthorization",
     g_variant_new( "(s)", data->cancellation_id ),
-    G_VARIANT_TYPE( "(b)" ),
+    NULL, /* CancelCheckAuthorization has no output arguments. */
     G_DBUS_CALL_FLAGS_NONE,
     -1,
     NULL,
