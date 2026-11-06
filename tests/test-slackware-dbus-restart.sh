@@ -140,8 +140,8 @@ wait_for_log "subscribed to AccountsService"
 echo "4/6 attaching process diagnostics before bus restart"
 ps -o pid,ppid,stat,wchan:32,cmd -p "$localed_pid" || :
 if command -v strace >/dev/null 2>&1; then
-  strace -f -tt -e signal=all -p "$localed_pid" \
-    -e trace=poll,ppoll,epoll_wait,epoll_pwait,futex,read,write \
+  strace -f -tt -k -e signal=all -p "$localed_pid" \
+    -e trace=poll,ppoll,epoll_wait,epoll_pwait,futex,read,write,kill,tkill,tgkill,rt_sigqueueinfo,rt_tgsigqueueinfo \
     -o "$trace_log" &
   trace_pid=$!
   sleep 0.2
