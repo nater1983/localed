@@ -2510,7 +2510,7 @@ rcl_daemon_shutdown( RclDaemon *daemon )
   }
 
   /*
-   * Cancel outstanding authorization checks before releasing the authority.
+   * Cancel outstanding authorization checks before releasing the session.
    * Their callbacks may still run, but cancellation prevents them from
    * executing the protected Set* operation after this daemon session ends.
    */
