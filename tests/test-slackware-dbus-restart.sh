@@ -162,7 +162,7 @@ if [ -n "$trace_pid" ]; then
   wait "$trace_pid" 2>/dev/null || :
   trace_pid=
   echo "Signal delivery and sender syscalls:"
-  grep -n -B 8 -A 12 -E 'kill\\(|tkill\\(|tgkill\\(|rt_sigqueueinfo|rt_tgsigqueueinfo|SIGTERM|SIGINT' "$trace_log" || :
+  grep -n -B 8 -A 12 -E 'kill|tkill|tgkill|rt_sigqueueinfo|rt_tgsigqueueinfo|SIGTERM|SIGINT' "$trace_log" || :
   echo "Recent localed system-call activity:"
   tail -100 "$trace_log" || :
 fi
