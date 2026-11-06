@@ -4,6 +4,16 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Fixed
+- Restore configuration snapshots through a sibling temporary file, apply the
+  original mode before replacement, and atomically rename the restored file
+  into place. Rollback no longer truncates the live destination while
+  restoring its previous contents.
+- Keep newly-created `/etc/profile.d/lang.sh` and
+  `/etc/profile.d/lang.csh` executable with mode 0755. Add separate
+  regression cases for both locale profile scripts while continuing to
+  preserve the modes of existing files.
+
 ### Tests
 - Add a Slackware integration harness that restarts an isolated system-bus
   instance and verifies localed remains alive, reacquires locale1, and
