@@ -74,7 +74,6 @@ typedef struct RclState
   gulong      bus_closed_id;
   gboolean    has_name;
   guint       reconnect_id;
-  guint       heartbeat_id;
   gboolean    reconnecting;
   gboolean    exiting;
   guint       sync_id;
@@ -96,12 +95,6 @@ rcl_state_free(RclState *state)
   {
     g_source_remove(state->reconnect_id);
     state->reconnect_id = 0;
-  }
-
-  if (state->heartbeat_id)
-  {
-    g_source_remove(state->heartbeat_id);
-    state->heartbeat_id = 0;
   }
 
   g_clear_object(&state->accounts_service);
@@ -146,31 +139,6 @@ rcl_state_new(void)
   } while (0)
 
 /* ───────────────────────────────────────────── */
-
-/*
- * Temporary diagnostic heartbeat. Confirms whether the main context
- * continues dispatching sources while the system bus is unavailable.
- */
-static gboolean
-rcl_main_heartbeat_cb(gpointer user_data)
-{
-  RclState *state = user_data;
-  GSource *reconnect_source = NULL;
-
-  if (state->reconnect_id)
-    reconnect_source =
-      g_main_context_find_source_by_id(g_main_loop_get_context(state->loop),
-                                       state->reconnect_id);
-
-  g_warning("localed main loop heartbeat (reconnect source %s; context owner %s; loop context=%p; thread-default=%p; default=%p)",
-            reconnect_source ? "pending" : "not attached",
-            g_main_context_is_owner(g_main_loop_get_context(state->loop))
-              ? "yes" : "no",
-            g_main_loop_get_context(state->loop),
-            g_main_context_get_thread_default(),
-            g_main_context_default());
-  return G_SOURCE_CONTINUE;
-}
 
 static void rcl_acquire_name(RclState *state);   /* forward */
 static gboolean rcl_main_reconnect_cb(gpointer user_data); /* forward */
@@ -670,25 +638,10 @@ gint main(gint argc, gchar **argv)
   /* Acquire the D-Bus name for the first time */
   rcl_acquire_name(state);
 
-  /* Temporary diagnostic: verify main-context dispatch during bus loss. */
-  {
-    GSource *source = g_timeout_source_new_seconds(1);
-    g_source_set_priority(source, G_PRIORITY_HIGH);
-    g_source_set_callback(source, rcl_main_heartbeat_cb, state, NULL);
-    state->heartbeat_id =
-      g_source_attach(source, g_main_loop_get_context(state->loop));
-    g_source_unref(source);
-  }
-
   g_debug("localed started (%s)", PACKAGE_VERSION);
 
-  g_warning("entering localed main loop (loop context=%p; thread-default=%p; default=%p)",
-            g_main_loop_get_context(state->loop),
-            g_main_context_get_thread_default(),
-            g_main_context_default());
+  g_debug("entering localed main loop");
   g_main_loop_run(state->loop);
-  g_warning("localed main loop returned (exiting=%s)",
-            state->exiting ? "true" : "false");
 
   /* ── Cleanup ───────────────────────────────────────────────────────────── */
 
