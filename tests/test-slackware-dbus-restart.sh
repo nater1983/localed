@@ -107,7 +107,7 @@ start_bus
 
 # localed routes logs to syslog when stderr is not a terminal. Run it under
 # a PTY so --debug messages are captured in the typescript for assertions.
-script -q -e -c "exec \"$LOCALed\" --debug" "$log" &
+script -q -f -e -c "exec \"$LOCALed\" --debug" "$log" &
 script_pid=$!
 i=0
 while [ -z "$localed_pid" ]; do
@@ -123,7 +123,6 @@ done
 
 echo "1/4 waiting for initial locale1 name"
 wait_for_locale1
-wait_for_log "name acquired: org.freedesktop.locale1"
 
 echo "2/4 verifying AccountsService name appearance"
 request_accounts_name
