@@ -2084,6 +2084,10 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
 
   flags = interactive ? 1u : 0u; /* AllowUserInteraction */
 
+  ctx->cancellable = g_object_ref( priv->auth_cancellable );
+  ctx->auth_connection = g_object_ref( priv->connection );
+  ctx->cancellation_id = g_uuid_string_random();
+
   parameters = g_variant_new(
     "((s@a{sv})s@a{ss}us)",
     "system-bus-name",
@@ -2091,23 +2095,15 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
     action_id,
     g_variant_builder_end( &details ),
     flags,
-    "" );
+    ctx->cancellation_id );
 
-  ctx->cancellable = g_object_ref( priv->auth_cancellable );
-  ctx->auth_connection = g_object_ref( priv->connection );
-  ctx->cancellation_id = g_uuid_string_random();
-
-  cancel_data = g_new0( AuthCancelData, 1 );
-  cancel_data->connection = g_object_ref( ctx->auth_connection );
-  cancel_data->cancellation_id = g_strdup( ctx->cancellation_id );
-
-  ctx->cancel_handler_id =
-    g_cancellable_connect( ctx->cancellable,
-                           G_CALLBACK(on_auth_cancelled),
-                           cancel_data,
-                           auth_cancel_data_free );
-
-  if( ctx->cancel_handler_id == 0 )
+  /*
+   * Queue CheckAuthorization before connecting the cancellation handler.
+   * If the cancellable is already cancelled, g_cancellable_connect() invokes
+   * the handler immediately; queuing the check first preserves D-Bus message
+   * order so CancelCheckAuthorization cannot overtake its own request.
+   */
+  if( g_cancellable_is_cancelled( ctx->cancellable ) )
   {
     g_dbus_method_invocation_return_dbus_error(
       ctx->invocation,
@@ -2130,6 +2126,16 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
     ctx->cancellable,
     on_check_done,
     ctx );
+
+  cancel_data = g_new0( AuthCancelData, 1 );
+  cancel_data->connection = g_object_ref( ctx->auth_connection );
+  cancel_data->cancellation_id = g_strdup( ctx->cancellation_id );
+
+  ctx->cancel_handler_id =
+    g_cancellable_connect( ctx->cancellable,
+                           G_CALLBACK(on_auth_cancelled),
+                           cancel_data,
+                           auth_cancel_data_free );
 }
 
 /* Commit the two Slackware locale files as one logical operation.  Each
@@ -2439,7 +2445,7 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
 
   /*
    * Startup may be called again after a bus/name loss. Always release any
-   * previous registration, introspection data, and cached Polkit authority
+   * previous registration, introspection data, and authorization session
    * before attaching the new connection.
    */
   rcl_daemon_shutdown( daemon );
@@ -2477,12 +2483,6 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
   }
 
   rcl_daemon_sync_dbus_properties( self );
-
-  /*
-   * Authorization requests are sent over priv->connection by
-   * check_polkit_async(). Keeping PolicyKit on this already-managed private
-   * connection avoids a hidden GDBus connection with exit-on-close enabled.
-   */
 
   g_debug( "localed D-Bus object registered at /org/freedesktop/locale1" );
   return TRUE;
