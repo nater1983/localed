@@ -328,6 +328,7 @@ rcl_main_sigint_cb(gpointer user_data)
 {
   RclState *state = user_data;
   LOG(state, "SIGINT received");
+  g_warning("main loop quit requested by SIGINT");
   state->exiting = TRUE;
   g_main_loop_quit(state->loop);
   return G_SOURCE_REMOVE;
@@ -338,6 +339,7 @@ rcl_main_sigterm_cb(gpointer user_data)
 {
   RclState *state = user_data;
   LOG(state, "SIGTERM received");
+  g_warning("main loop quit requested by SIGTERM");
   state->exiting = TRUE;
   g_main_loop_quit(state->loop);
   return G_SOURCE_REMOVE;
