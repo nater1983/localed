@@ -340,6 +340,83 @@ test_snapshot_read_error ( Fixture *fixture, gconstpointer user_data )
   rcl_file_snapshot_clear( &snapshot );
 }
 
+
+static void
+test_checked_temporary_close_without_error_receiver (
+    Fixture *fixture, gconstpointer user_data )
+{
+  gchar *tmp_path = g_strdup_printf( "%s.XXXXXX", fixture->first );
+  int fd;
+  RclFileTransactionTestOps ops = {
+    imkstemp, iclose, iwrite, ichown, ichmod, irename, iunlink
+  };
+
+  fd = g_mkstemp( tmp_path );
+  g_assert_cmpint( fd, >=, 0 );
+
+  fstage = F_CLOSE;
+  rcl_file_transaction_set_test_ops( &ops );
+  g_test_expect_message( NULL, G_LOG_LEVEL_WARNING,
+                         "*close temporary file*" );
+  g_assert_false( rcl_file_close_temporary( fd, tmp_path,
+                                            fixture->first, NULL ) );
+  g_test_assert_expected_messages();
+  rcl_file_transaction_set_test_ops( NULL );
+  fstage = F_NONE;
+
+  g_assert_false( g_file_test( tmp_path, G_FILE_TEST_EXISTS ) );
+  g_assert_cmpuint( temp_count( fixture->directory ), ==, 0 );
+  g_free( tmp_path );
+}
+
+static void
+test_checked_temporary_close_and_cleanup_without_error_receiver (
+    Fixture *fixture, gconstpointer user_data )
+{
+  gchar *tmp_path = g_strdup_printf( "%s.XXXXXX", fixture->first );
+  int fd;
+  RclFileTransactionTestOps ops = {
+    imkstemp, iclose, iwrite, ichown, ichmod, irename, iunlink
+  };
+
+  fd = g_mkstemp( tmp_path );
+  g_assert_cmpint( fd, >=, 0 );
+
+  fstage = F_CLOSE_CLEANUP;
+  rcl_file_transaction_set_test_ops( &ops );
+  g_test_expect_message( NULL, G_LOG_LEVEL_WARNING,
+                         "*close temporary file*" );
+  g_test_expect_message( NULL, G_LOG_LEVEL_WARNING,
+                         "*temporary-file cleanup also failed*" );
+  g_assert_false( rcl_file_close_temporary( fd, tmp_path,
+                                            fixture->first, NULL ) );
+  g_test_assert_expected_messages();
+  rcl_file_transaction_set_test_ops( NULL );
+  fstage = F_NONE;
+
+  /* The injected unlink failure deliberately leaves the staged file behind. */
+  g_assert_true( g_file_test( tmp_path, G_FILE_TEST_EXISTS ) );
+  g_assert_cmpint( g_unlink( tmp_path ), ==, 0 );
+  g_assert_cmpuint( temp_count( fixture->directory ), ==, 0 );
+  g_free( tmp_path );
+}
+
+static void
+test_report_rollback_failure_without_error_receiver (
+    Fixture *fixture, gconstpointer user_data )
+{
+  GError *rollback_error = NULL;
+
+  g_set_error_literal( &rollback_error, G_IO_ERROR,
+                       G_IO_ERROR_PERMISSION_DENIED,
+                       "rollback restore failed" );
+
+  g_test_expect_message( NULL, G_LOG_LEVEL_WARNING,
+                         "*rollback restore failed*" );
+  rcl_report_rollback_failure( NULL, rollback_error );
+  g_test_assert_expected_messages();
+}
+
 int
 main ( int argc, char **argv )
 {
@@ -361,6 +438,18 @@ main ( int argc, char **argv )
               fixture_setup, test_report_rollback_failure_preserves_both_errors,
               fixture_teardown );
   g_test_add("/file-transaction/checked-temporary-close",Fixture,NULL,fixture_setup,test_checked_temporary_close_failure,fixture_teardown);
+  g_test_add( "/file-transaction/checked-temporary-close-no-error",
+              Fixture, NULL, fixture_setup,
+              test_checked_temporary_close_without_error_receiver,
+              fixture_teardown );
+  g_test_add( "/file-transaction/checked-temporary-close-cleanup-no-error",
+              Fixture, NULL, fixture_setup,
+              test_checked_temporary_close_and_cleanup_without_error_receiver,
+              fixture_teardown );
+  g_test_add( "/file-transaction/rollback-failure-no-error",
+              Fixture, NULL, fixture_setup,
+              test_report_rollback_failure_without_error_receiver,
+              fixture_teardown );
   g_test_add("/file-transaction/checked-temporary-close-cleanup-failure",Fixture,NULL,fixture_setup,test_checked_temporary_close_cleanup_failure,fixture_teardown);
   g_test_add("/file-transaction/failure-injection",Fixture,NULL,fixture_setup,test_injected_failures,fixture_teardown);
   g_test_add("/file-transaction/cleanup-failure-preserves-error",Fixture,NULL,fixture_setup,test_cleanup_failure_preserves_restore_error,fixture_teardown);
