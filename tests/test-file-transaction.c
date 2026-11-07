@@ -33,6 +33,34 @@ struct _Fixture
   gchar *second;
 };
 
+static void
+test_checked_temporary_close_failure ( Fixture *f, gconstpointer user_data )
+{
+  gchar *tmp_path = g_strdup_printf( "%s.XXXXXX", f->first );
+  int fd;
+  GError *error = NULL;
+  RclFileTransactionTestOps ops = {
+    imkstemp, iclose, iwrite, ichown, ichmod, irename, iunlink
+  };
+
+  fd = g_mkstemp( tmp_path );
+  g_assert_cmpint( fd, >=, 0 );
+
+  fstage = F_CLOSE;
+  rcl_file_transaction_set_test_ops( &ops );
+  g_assert_false( rcl_file_close_temporary( fd, tmp_path, f->first, &error ) );
+  rcl_file_transaction_set_test_ops( NULL );
+  fstage = F_NONE;
+
+  g_assert_error( error, G_IO_ERROR, G_IO_ERROR_FAILED );
+  g_assert_nonnull( strstr( error->message, "close temporary file" ) );
+  g_assert_false( g_file_test( tmp_path, G_FILE_TEST_EXISTS ) );
+  g_assert_cmpuint( temp_count( f->directory ), ==, 0 );
+
+  g_clear_error( &error );
+  g_free( tmp_path );
+}
+
 static void test_injected_failures(Fixture*f,gconstpointer u){FStage ss[]={F_CREATE,F_CLOSE,F_WRITE,F_CHOWN,F_CHMOD,F_RENAME};const gchar*msg[]={"create rollback temporary","close rollback temporary","restore ","restore ownership","restore permissions","rollback rename"};guint i;for(i=0;i<G_N_ELEMENTS(ss);i++){RclFileSnapshot s={0};GError*e=NULL;RclFileTransactionTestOps o={imkstemp,iclose,iwrite,ichown,ichmod,irename,NULL};g_assert_true(g_file_set_contents(f->first,"before",-1,&e));g_assert_no_error(e);g_assert_true(rcl_file_snapshot_take(&s,f->first,&e));g_assert_no_error(e);fstage=ss[i];rcl_file_transaction_set_test_ops(&o);g_assert_false(rcl_file_snapshot_restore(&s,&e));rcl_file_transaction_set_test_ops(NULL);fstage=F_NONE;g_assert_nonnull(e);g_assert_nonnull(strstr(e->message,msg[i]));g_clear_error(&e);g_assert_cmpuint(temp_count(f->directory),==,0);rcl_file_snapshot_clear(&s);g_unlink(f->first);}}
 
 static void test_cleanup_failure_preserves_restore_error(Fixture*f,gconstpointer u){
@@ -288,6 +316,7 @@ main ( int argc, char **argv )
   g_test_add( "/file-transaction/report-rollback-failure", Fixture, NULL,
               fixture_setup, test_report_rollback_failure_preserves_both_errors,
               fixture_teardown );
+  g_test_add("/file-transaction/checked-temporary-close",Fixture,NULL,fixture_setup,test_checked_temporary_close_failure,fixture_teardown);
   g_test_add("/file-transaction/failure-injection",Fixture,NULL,fixture_setup,test_injected_failures,fixture_teardown);
   g_test_add("/file-transaction/cleanup-failure-preserves-error",Fixture,NULL,fixture_setup,test_cleanup_failure_preserves_restore_error,fixture_teardown);
   g_test_add("/file-transaction/ownership-before-mode",Fixture,NULL,fixture_setup,test_ownership_before_mode,fixture_teardown);
