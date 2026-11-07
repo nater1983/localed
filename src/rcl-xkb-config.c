@@ -117,6 +117,15 @@ rcl_xkb_tokenize_line ( const gchar *line, GError **error )
   return (gchar **) g_ptr_array_free( tokens, FALSE );
 }
 
+static gboolean
+rcl_xkb_option_is_managed ( const gchar *name )
+{
+  return g_strcmp0( name, "XkbLayout" ) == 0 ||
+         g_strcmp0( name, "XkbModel" ) == 0 ||
+         g_strcmp0( name, "XkbVariant" ) == 0 ||
+         g_strcmp0( name, "XkbOptions" ) == 0;
+}
+
 static void
 rcl_xkb_section_set_option ( RclXkbSection *section,
                              const gchar *name,
@@ -246,14 +255,16 @@ rcl_xkb_config_parse ( const gchar *contents,
     else if( in_section && in_input_class &&
              g_ascii_strcasecmp( tokens[0], "Option" ) == 0 )
     {
-      if( n != 3 )
+      if( n < 2 ||
+          ( rcl_xkb_option_is_managed( tokens[1] ) && n != 3 ) )
       {
         g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
                              "malformed Option in Xorg InputClass" );
         g_strfreev( tokens );
         goto fail;
       }
-      rcl_xkb_section_set_option( &current, tokens[1], tokens[2] );
+      if( n == 3 )
+        rcl_xkb_section_set_option( &current, tokens[1], tokens[2] );
     }
 
     g_strfreev( tokens );
