@@ -118,6 +118,130 @@ rcl_xkb_tokenize_line ( const gchar *line, GError **error )
 }
 
 static gboolean
+rcl_xkb_identifier_is_valid ( const gchar *value )
+{
+  const gchar *p;
+
+  if( !value || value[0] == '\0' )
+    return FALSE;
+
+  for( p = value; *p; p++ )
+  {
+    if( g_ascii_isalnum( *p ) || *p == '_' || *p == '-' ||
+        *p == '.' || *p == '+' )
+      continue;
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+static gboolean
+rcl_xkb_list_is_valid ( const gchar *value,
+                        gboolean allow_empty_items )
+{
+  gchar **items;
+  guint i, count;
+  gboolean valid = TRUE;
+
+  if( !value || value[0] == '\0' )
+    return TRUE;
+
+  items = g_strsplit( value, ",", -1 );
+  count = g_strv_length( items );
+
+  for( i = 0; i < count; i++ )
+  {
+    if( items[i][0] == '\0' )
+    {
+      if( !allow_empty_items )
+        valid = FALSE;
+      continue;
+    }
+
+    if( !rcl_xkb_identifier_is_valid( items[i] ) )
+    {
+      valid = FALSE;
+      break;
+    }
+  }
+
+  g_strfreev( items );
+  return valid;
+}
+
+static gboolean
+rcl_xkb_options_are_valid ( const gchar *value )
+{
+  gchar **items;
+  guint i;
+  gboolean valid = TRUE;
+
+  if( !value || value[0] == '\0' )
+    return TRUE;
+
+  items = g_strsplit( value, ",", -1 );
+
+  for( i = 0; items[i] != NULL; i++ )
+  {
+    gchar *colon = strchr( items[i], ':' );
+
+    if( !colon || colon == items[i] || colon[1] == '\0' ||
+        strchr( colon + 1, ':' ) != NULL )
+    {
+      valid = FALSE;
+      break;
+    }
+
+    *colon = '\0';
+    if( !rcl_xkb_identifier_is_valid( items[i] ) ||
+        !rcl_xkb_identifier_is_valid( colon + 1 ) )
+    {
+      valid = FALSE;
+      break;
+    }
+  }
+
+  g_strfreev( items );
+  return valid;
+}
+
+gboolean
+rcl_xkb_value_is_valid ( RclXkbValueType type,
+                         const gchar *value )
+{
+  if( !value || strlen( value ) > 256 )
+    return FALSE;
+
+  switch( type )
+  {
+    case RCL_XKB_VALUE_LAYOUT:
+      return rcl_xkb_list_is_valid( value, FALSE );
+
+    case RCL_XKB_VALUE_MODEL:
+      return value[0] == '\0' || rcl_xkb_identifier_is_valid( value );
+
+    case RCL_XKB_VALUE_VARIANT:
+      /*
+       * Empty list elements preserve positional correspondence with layouts,
+       * e.g. ",dvorak" selects the default first layout and dvorak for the
+       * second.  A comma-only value is not meaningful.
+       */
+      if( value[0] == '\0' )
+        return TRUE;
+      if( strspn( value, "," ) == strlen( value ) )
+        return FALSE;
+      return rcl_xkb_list_is_valid( value, TRUE );
+
+    case RCL_XKB_VALUE_OPTIONS:
+      return rcl_xkb_options_are_valid( value );
+
+    default:
+      return FALSE;
+  }
+}
+
+static gboolean
 rcl_xkb_option_is_managed ( const gchar *name )
 {
   return g_strcmp0( name, "XkbLayout" ) == 0 ||
