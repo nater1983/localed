@@ -12,16 +12,16 @@
 
 #include "rcl-file-transaction.h"
 
-typedef enum { F_NONE,F_CREATE,F_CLOSE,F_WRITE,F_CHOWN,F_CHMOD,F_RENAME,F_CLEANUP } FStage;
+typedef enum { F_NONE,F_CREATE,F_CLOSE,F_WRITE,F_CHOWN,F_CHMOD,F_RENAME,F_CLEANUP,F_CLOSE_CLEANUP } FStage;
 static FStage fstage;
 static gchar operation_order[8];
 static guint operation_count;
 static int imkstemp(gchar*p){if(fstage==F_CREATE){errno=EACCES;return -1;}return g_mkstemp(p);}
-static int iclose(int fd){int r=close(fd);if(fstage==F_CLOSE){errno=EIO;return -1;}return r;}
+static int iclose(int fd){int r=close(fd);if(fstage==F_CLOSE||fstage==F_CLOSE_CLEANUP){errno=EIO;return -1;}return r;}
 static gboolean iwrite(const gchar*p,const gchar*d,gssize n,GError**e){if(fstage==F_WRITE){g_set_error_literal(e,G_IO_ERROR,G_IO_ERROR_NO_SPACE,"injected write failure");return FALSE;}return g_file_set_contents(p,d,n,e);}
 static int ichown(const gchar*p,uid_t u,gid_t g){if(operation_count<sizeof(operation_order)-1)operation_order[operation_count++]='C';if(fstage==F_CHOWN){errno=EPERM;return -1;}return chown(p,u,g);}
 static int ichmod(const gchar*p,mode_t m){if(operation_count<sizeof(operation_order)-1)operation_order[operation_count++]='M';if(fstage==F_CHMOD||fstage==F_CLEANUP){errno=EPERM;return -1;}return g_chmod(p,m);}
-static int iunlink(const gchar*p){if(fstage==F_CLEANUP){errno=EACCES;return -1;}return g_unlink(p);}
+static int iunlink(const gchar*p){if(fstage==F_CLEANUP||fstage==F_CLOSE_CLEANUP){errno=EACCES;return -1;}return g_unlink(p);}
 static int irename(const gchar*a,const gchar*b){if(fstage==F_RENAME){errno=EIO;return -1;}return g_rename(a,b);}
 static guint temp_count(const gchar*d){GDir*x=g_dir_open(d,0,NULL);const gchar*n;guint c=0;while((n=g_dir_read_name(x)))if(g_str_has_prefix(n,"first."))c++;g_dir_close(x);return c;}
 typedef struct _Fixture Fixture;
@@ -58,6 +58,50 @@ test_checked_temporary_close_failure ( Fixture *f, gconstpointer user_data )
   g_assert_cmpuint( temp_count( f->directory ), ==, 0 );
 
   g_clear_error( &error );
+  g_free( tmp_path );
+}
+
+static void
+test_checked_temporary_close_cleanup_failure ( Fixture *f,
+                                               gconstpointer user_data )
+{
+  gchar *tmp_path = g_strdup_printf( "%s.XXXXXX", f->first );
+  int fd;
+  GError *error = NULL;
+  GDir *directory;
+  const gchar *name;
+  RclFileTransactionTestOps ops = {
+    imkstemp, iclose, iwrite, ichown, ichmod, irename, iunlink
+  };
+
+  fd = g_mkstemp( tmp_path );
+  g_assert_cmpint( fd, >=, 0 );
+
+  fstage = F_CLOSE_CLEANUP;
+  rcl_file_transaction_set_test_ops( &ops );
+  g_assert_false( rcl_file_close_temporary( fd, tmp_path, f->first, &error ) );
+  rcl_file_transaction_set_test_ops( NULL );
+  fstage = F_NONE;
+
+  g_assert_nonnull( error );
+  g_assert_nonnull( strstr( error->message, "close temporary file" ) );
+  g_assert_nonnull( strstr( error->message,
+                            "temporary-file cleanup also failed" ) );
+
+  g_clear_error( &error );
+
+  /* The injected unlink failure deliberately leaves the staged file behind. */
+  directory = g_dir_open( f->directory, 0, NULL );
+  g_assert_nonnull( directory );
+  while( ( name = g_dir_read_name( directory ) ) != NULL )
+    if( g_str_has_prefix( name, "first." ) )
+    {
+      gchar *leftover = g_build_filename( f->directory, name, NULL );
+      g_unlink( leftover );
+      g_free( leftover );
+    }
+  g_dir_close( directory );
+  g_assert_cmpuint( temp_count( f->directory ), ==, 0 );
   g_free( tmp_path );
 }
 
@@ -317,6 +361,7 @@ main ( int argc, char **argv )
               fixture_setup, test_report_rollback_failure_preserves_both_errors,
               fixture_teardown );
   g_test_add("/file-transaction/checked-temporary-close",Fixture,NULL,fixture_setup,test_checked_temporary_close_failure,fixture_teardown);
+  g_test_add("/file-transaction/checked-temporary-close-cleanup-failure",Fixture,NULL,fixture_setup,test_checked_temporary_close_cleanup_failure,fixture_teardown);
   g_test_add("/file-transaction/failure-injection",Fixture,NULL,fixture_setup,test_injected_failures,fixture_teardown);
   g_test_add("/file-transaction/cleanup-failure-preserves-error",Fixture,NULL,fixture_setup,test_cleanup_failure_preserves_restore_error,fixture_teardown);
   g_test_add("/file-transaction/ownership-before-mode",Fixture,NULL,fixture_setup,test_ownership_before_mode,fixture_teardown);
