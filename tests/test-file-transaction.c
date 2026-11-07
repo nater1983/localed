@@ -400,6 +400,38 @@ test_checked_temporary_close_and_cleanup_without_error_receiver (
 }
 
 static void
+test_multiple_rollback_failures_without_error_receiver (
+    Fixture *fixture, gconstpointer user_data )
+{
+  GError *write_error = NULL;
+
+  g_set_error_literal( &write_error, G_IO_ERROR, G_IO_ERROR_NO_SPACE,
+                       "configuration write failed" );
+  rcl_report_rollback_failure(
+    &write_error,
+    g_error_new_literal( G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                         "first rollback failed" ) );
+  rcl_report_rollback_failure(
+    &write_error,
+    g_error_new_literal( G_IO_ERROR, G_IO_ERROR_FAILED,
+                         "second rollback failed" ) );
+
+  g_assert_nonnull( write_error );
+  g_assert_cmpint( write_error->code, ==, G_IO_ERROR_NO_SPACE );
+  g_assert_nonnull( strstr( write_error->message,
+                            "configuration write failed" ) );
+  g_assert_nonnull( strstr( write_error->message,
+                            "first rollback failed" ) );
+  g_assert_nonnull( strstr( write_error->message,
+                            "second rollback failed" ) );
+
+  g_test_expect_message( NULL, G_LOG_LEVEL_WARNING,
+                         "*configuration write failed*first rollback failed*second rollback failed*" );
+  rcl_report_write_failure( NULL, write_error );
+  g_test_assert_expected_messages();
+}
+
+static void
 test_report_rollback_failure_without_error_receiver (
     Fixture *fixture, gconstpointer user_data )
 {
@@ -447,6 +479,10 @@ main ( int argc, char **argv )
   g_test_add( "/file-transaction/rollback-failure-no-error",
               Fixture, NULL, fixture_setup,
               test_report_rollback_failure_without_error_receiver,
+              fixture_teardown );
+  g_test_add( "/file-transaction/multiple-rollback-failures-no-error",
+              Fixture, NULL, fixture_setup,
+              test_multiple_rollback_failures_without_error_receiver,
               fixture_teardown );
   g_test_add("/file-transaction/checked-temporary-close-cleanup-failure",Fixture,NULL,fixture_setup,test_checked_temporary_close_cleanup_failure,fixture_teardown);
   g_test_add("/file-transaction/failure-injection",Fixture,NULL,fixture_setup,test_injected_failures,fixture_teardown);
