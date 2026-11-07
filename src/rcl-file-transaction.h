@@ -28,6 +28,13 @@ typedef struct
   gboolean existed;
 } RclFileSnapshot;
 
+/* Close a staged temporary file, checking delayed errors and removing its
+ * pathname on failure without discarding the close error. */
+gboolean rcl_file_close_temporary ( int fd,
+                                    const gchar *temporary_path,
+                                    const gchar *destination_path,
+                                    GError **error );
+
 void rcl_file_snapshot_clear ( RclFileSnapshot *snapshot );
 
 gboolean rcl_file_snapshot_take ( RclFileSnapshot *snapshot,
