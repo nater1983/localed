@@ -48,11 +48,13 @@ rcl_remove_temporary_file ( const gchar *path, GError **error )
 
   if( error && *error )
   {
-    gchar *message = g_strdup_printf( "%s (temporary-file cleanup also failed: %s)",
-                                      (*error)->message,
-                                      cleanup_error->message );
+    GQuark domain = (*error)->domain;
+    gint code = (*error)->code;
+    gchar *message = g_strdup_printf(
+      "%s (temporary-file cleanup also failed: %s)",
+      (*error)->message, cleanup_error->message );
     g_clear_error( error );
-    g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
+    g_set_error_literal( error, domain, code, message );
     g_free( message );
     g_error_free( cleanup_error );
   }
