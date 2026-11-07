@@ -38,3 +38,15 @@ file_transaction_test = executable(
 )
 
 test('configuration file transaction rollback', file_transaction_test)
+
+xkb_config_test = executable(
+  'test-xkb-config',
+  [
+    'test-xkb-config.c',
+    '../src/rcl-xkb-config.c',
+  ],
+  dependencies        : [glib_dep, gio_dep],
+  include_directories : include_directories('../src'),
+)
+
+test('Xorg XKB configuration parsing', xkb_config_test)
