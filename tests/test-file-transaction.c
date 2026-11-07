@@ -133,6 +133,77 @@ test_multi_file_rollback_after_second_write_failure (
   rcl_file_snapshot_clear( &second_snapshot );
 }
 
+
+static void
+test_restore_rename_failure_cleans_temporary_file (
+    Fixture *fixture, gconstpointer user_data )
+{
+  RclFileSnapshot snapshot = { 0 };
+  GError *error = NULL;
+  gchar *contents = NULL;
+  gchar *pattern = g_strdup_printf( "%s.XXXXXX", fixture->first );
+  gchar *directory = NULL;
+  GDir *dir;
+  const gchar *name;
+  guint leftovers = 0;
+
+  g_assert_true( g_file_set_contents( fixture->first, "before", -1, &error ) );
+  g_assert_no_error( error );
+  g_assert_true( rcl_file_snapshot_take( &snapshot, fixture->first, &error ) );
+  g_assert_no_error( error );
+
+  /* Force the final rename to fail after the rollback temporary file has
+   * been created and populated. */
+  g_assert_cmpint( g_unlink( fixture->first ), ==, 0 );
+  g_assert_cmpint( g_mkdir( fixture->first, 0755 ), ==, 0 );
+
+  g_assert_false( rcl_file_snapshot_restore( &snapshot, &error ) );
+  g_assert_nonnull( error );
+  g_assert_nonnull( strstr( error->message, "rollback rename" ) );
+  g_clear_error( &error );
+
+  directory = g_path_get_dirname( fixture->first );
+  dir = g_dir_open( directory, 0, &error );
+  g_assert_no_error( error );
+  g_assert_nonnull( dir );
+
+  while( ( name = g_dir_read_name( dir ) ) != NULL )
+    if( g_str_has_prefix( name, "first." ) )
+      leftovers++;
+
+  g_dir_close( dir );
+  g_assert_cmpuint( leftovers, ==, 0 );
+  g_assert_true( g_file_test( fixture->first, G_FILE_TEST_IS_DIR ) );
+
+  g_rmdir( fixture->first );
+  g_free( directory );
+  g_free( pattern );
+  g_free( contents );
+  rcl_file_snapshot_clear( &snapshot );
+}
+
+static void
+test_report_rollback_failure_preserves_both_errors (
+    Fixture *fixture, gconstpointer user_data )
+{
+  GError *primary_error = NULL;
+  GError *rollback_error = NULL;
+
+  g_set_error_literal( &primary_error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "configuration write failed" );
+  g_set_error_literal( &rollback_error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                       "rollback restore failed" );
+
+  rcl_report_rollback_failure( &primary_error, rollback_error );
+
+  g_assert_nonnull( primary_error );
+  g_assert_nonnull( strstr( primary_error->message,
+                            "configuration write failed" ) );
+  g_assert_nonnull( strstr( primary_error->message,
+                            "rollback also failed: rollback restore failed" ) );
+  g_clear_error( &primary_error );
+}
+
 static void
 test_snapshot_read_error ( Fixture *fixture, gconstpointer user_data )
 {
@@ -161,6 +232,12 @@ main ( int argc, char **argv )
               fixture_teardown );
   g_test_add( "/file-transaction/snapshot-read-error", Fixture, NULL,
               fixture_setup, test_snapshot_read_error, fixture_teardown );
+  g_test_add( "/file-transaction/restore-rename-failure-cleans-temp", Fixture, NULL,
+              fixture_setup, test_restore_rename_failure_cleans_temporary_file,
+              fixture_teardown );
+  g_test_add( "/file-transaction/report-rollback-failure", Fixture, NULL,
+              fixture_setup, test_report_rollback_failure_preserves_both_errors,
+              fixture_teardown );
 
   return g_test_run();
 }
