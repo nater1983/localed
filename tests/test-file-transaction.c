@@ -7,6 +7,7 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <sys/stat.h>
+#include <string.h>
 
 #include "rcl-file-transaction.h"
 
@@ -140,8 +141,6 @@ test_restore_rename_failure_cleans_temporary_file (
 {
   RclFileSnapshot snapshot = { 0 };
   GError *error = NULL;
-  gchar *contents = NULL;
-  gchar *pattern = g_strdup_printf( "%s.XXXXXX", fixture->first );
   gchar *directory = NULL;
   GDir *dir;
   const gchar *name;
@@ -177,8 +176,6 @@ test_restore_rename_failure_cleans_temporary_file (
 
   g_rmdir( fixture->first );
   g_free( directory );
-  g_free( pattern );
-  g_free( contents );
   rcl_file_snapshot_clear( &snapshot );
 }
 
