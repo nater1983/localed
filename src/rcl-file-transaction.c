@@ -6,6 +6,7 @@
 #include "rcl-file-transaction.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -126,8 +127,11 @@ rcl_file_snapshot_take ( RclFileSnapshot *snapshot,
                          const gchar *path,
                          GError **error )
 {
-  GError *local_error = NULL;
   GStatBuf st;
+  GString *contents;
+  gchar buffer[8192];
+  int fd;
+  gboolean ok = FALSE;
 
   g_return_val_if_fail( snapshot != NULL, FALSE );
   g_return_val_if_fail( path != NULL, FALSE );
@@ -135,35 +139,75 @@ rcl_file_snapshot_take ( RclFileSnapshot *snapshot,
   memset( snapshot, 0, sizeof(*snapshot) );
   snapshot->path = g_strdup( path );
 
-  if( !g_file_get_contents( path, &snapshot->contents,
-                            &snapshot->length, &local_error ) )
+  /*
+   * Open once and obtain metadata from that descriptor.  A separate
+   * path-based stat after reading could describe a replacement inode if
+   * another process atomically replaced the configuration file meanwhile.
+   */
+  fd = open( path, O_RDONLY | O_CLOEXEC );
+  if( fd < 0 )
   {
-    if( g_error_matches( local_error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
+    if( errno == ENOENT )
     {
-      g_clear_error( &local_error );
       snapshot->existed = FALSE;
       return TRUE;
     }
 
-    g_prefix_error( &local_error, "snapshot %s: ", path );
-    g_propagate_error( error, local_error );
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "open snapshot %s: %s", path, g_strerror(errno) );
     rcl_file_snapshot_clear( snapshot );
     return FALSE;
   }
 
-  if( g_stat( path, &st ) != 0 )
+  if( fstat( fd, &st ) != 0 )
   {
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 "stat %s: %s", path, g_strerror(errno) );
-    rcl_file_snapshot_clear( snapshot );
-    return FALSE;
+                 "stat snapshot %s: %s", path, g_strerror(errno) );
+    goto out;
   }
 
+  contents = g_string_sized_new( 0 );
+  for( ;; )
+  {
+    ssize_t n = read( fd, buffer, sizeof(buffer) );
+
+    if( n < 0 && errno == EINTR )
+      continue;
+
+    if( n < 0 )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "read snapshot %s: %s", path, g_strerror(errno) );
+      g_string_free( contents, TRUE );
+      goto out;
+    }
+
+    if( n == 0 )
+      break;
+
+    g_string_append_len( contents, buffer, n );
+  }
+
+  snapshot->length = contents->len;
+  snapshot->contents = g_string_free( contents, FALSE );
   snapshot->mode = st.st_mode & 07777;
   snapshot->uid = st.st_uid;
   snapshot->gid = st.st_gid;
   snapshot->existed = TRUE;
-  return TRUE;
+  ok = TRUE;
+
+out:
+  if( close( fd ) != 0 && ok )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "close snapshot %s: %s", path, g_strerror(errno) );
+    ok = FALSE;
+  }
+
+  if( !ok )
+    rcl_file_snapshot_clear( snapshot );
+
+  return ok;
 }
 
 gboolean
@@ -256,6 +300,22 @@ out:
     rcl_file_cleanup_temporary( tmp_path, error );
   g_free( tmp_path );
   return ok;
+}
+
+void
+rcl_report_write_failure ( GError **error, GError *write_error )
+{
+  if( !write_error )
+    return;
+
+  if( error )
+    g_propagate_error( error, write_error );
+  else
+  {
+    /* Preserve the primary error and all rollback failures in one warning. */
+    g_warning( "%s", write_error->message );
+    g_error_free( write_error );
+  }
 }
 
 void
