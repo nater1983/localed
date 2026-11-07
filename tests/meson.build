@@ -34,6 +34,7 @@ file_transaction_test = executable(
   ],
   dependencies        : [glib_dep, gio_dep],
   include_directories : include_directories('../src'),
+  c_args              : ['-DRCL_FILE_TRANSACTION_TESTING'],
 )
 
 test('configuration file transaction rollback', file_transaction_test)

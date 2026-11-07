@@ -430,6 +430,7 @@ read_x11_keyboard_conf( const gchar *path,
 #undef SANITISE_XKB
 }
 
+
 static gboolean
 write_x11_keyboard_conf( const gchar *path,
                          const gchar *layout, const gchar *model,
@@ -466,13 +467,21 @@ write_x11_keyboard_conf( const gchar *path,
     int fd = g_mkstemp( tmp_path );
     if( fd == -1 )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "create temporary file for %s: %s", path, g_strerror(errno) );
+      int saved_errno = errno;
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                   "create temporary file for %s: %s",
+                   path, g_strerror(saved_errno) );
       g_free( tmp_path );
       g_string_free( out, TRUE );
       return FALSE;
     }
-    close( fd );
+
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
+    {
+      g_free( tmp_path );
+      g_string_free( out, TRUE );
+      return FALSE;
+    }
   }
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
@@ -485,22 +494,20 @@ write_x11_keyboard_conf( const gchar *path,
      * scratch.  Mirrors the g_chmod() calls in rcl_write_lang_sh() and
      * rcl_write_rc_keymap_toggle(). */
     if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
-    {
-      g_unlink( tmp_path );
       ok = FALSE;
-    }
 
     if( ok && g_rename( tmp_path, path ) != 0 )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
-      g_unlink( tmp_path );
+      int saved_errno = errno;
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                   "rename(%s, %s): %s",
+                   tmp_path, path, g_strerror(saved_errno) );
       ok = FALSE;
     }
   }
 
   if( !ok )
-    g_unlink( tmp_path );
+    rcl_file_cleanup_temporary( tmp_path, error );
 
   g_free( tmp_path );
   g_string_free( out, TRUE );
@@ -659,7 +666,12 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
       g_string_free( out, TRUE );
       return FALSE;
     }
-    close( fd );
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
+    {
+      g_free( tmp_path );
+      g_string_free( out, TRUE );
+      return FALSE;
+    }
   }
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
@@ -668,7 +680,6 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
     /* Preserve existing mode, defaulting to executable 0755. */
     if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
     {
-      g_unlink( tmp_path );
       ok = FALSE;
     }
 
@@ -676,13 +687,12 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
-      g_unlink( tmp_path );
       ok = FALSE;
     }
   }
 
   if( !ok )
-    g_unlink( tmp_path );
+    rcl_file_cleanup_temporary( tmp_path, error );
 
   g_free( tmp_path );
   g_string_free( out, TRUE );
@@ -752,7 +762,12 @@ rcl_write_rc_keymap_toggle( const gchar *path,
       g_free( tmp_path );
       return FALSE;
     }
-    close( fd );
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
+    {
+      g_free( tmp_path );
+      g_free( line );
+      return FALSE;
+    }
     ok = g_file_set_contents( tmp_path, line, -1, error );
 
     if( ok )
@@ -763,7 +778,6 @@ rcl_write_rc_keymap_toggle( const gchar *path,
        * readers if created from scratch. */
       if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
       {
-        g_unlink( tmp_path );
         ok = FALSE;
       }
 
@@ -771,13 +785,12 @@ rcl_write_rc_keymap_toggle( const gchar *path,
       {
         g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                      "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
-        g_unlink( tmp_path );
         ok = FALSE;
       }
     }
 
     if( !ok )
-      g_unlink( tmp_path );
+      rcl_file_cleanup_temporary( tmp_path, error );
 
     g_free( tmp_path );
     g_free( line );
@@ -1108,7 +1121,12 @@ rcl_write_lang_sh( const gchar         *path,
       g_string_free( out, TRUE );
       return FALSE;
     }
-    close( fd );
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
+    {
+      g_free( tmp_path );
+      g_string_free( out, TRUE );
+      return FALSE;
+    }
   }
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
@@ -1121,7 +1139,6 @@ rcl_write_lang_sh( const gchar         *path,
      * accessible, even when localed creates it from scratch. */
     if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
     {
-      g_unlink( tmp_path );
       ok = FALSE;
     }
 
@@ -1129,13 +1146,12 @@ rcl_write_lang_sh( const gchar         *path,
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
-      g_unlink( tmp_path );
       ok = FALSE;
     }
   }
 
   if( !ok )
-    g_unlink( tmp_path );
+    rcl_file_cleanup_temporary( tmp_path, error );
 
   g_free( tmp_path );
   g_string_free( out, TRUE );
@@ -1208,7 +1224,12 @@ rcl_write_lang_csh( const gchar         *path,
       g_string_free(out, TRUE);
       return FALSE;
     }
-    close(fd);
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
+    {
+      g_free( tmp_path );
+      g_string_free( out, TRUE );
+      return FALSE;
+    }
   }
 
   ok = g_file_set_contents(tmp_path, out->str, (gssize)out->len, error);
@@ -1221,7 +1242,7 @@ rcl_write_lang_csh( const gchar         *path,
     ok = FALSE;
   }
   if( !ok )
-    g_unlink(tmp_path);
+    rcl_file_cleanup_temporary(tmp_path, error);
 
   g_free(tmp_path);
   g_string_free(out, TRUE);
@@ -2043,9 +2064,9 @@ rcl_write_locale_files( const gchar *const *known_keys,
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &sh, RCL_LANG_SH_FILE, error ) ||
-      !rcl_file_snapshot_take( &csh, RCL_LANG_CSH_FILE, error ) )
-    goto out;
+  if( !rcl_file_snapshot_take( &sh, RCL_LANG_SH_FILE, &write_error ) ||
+      !rcl_file_snapshot_take( &csh, RCL_LANG_CSH_FILE, &write_error ) )
+    goto fail;
   if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &write_error ) )
     goto fail;
   if( !rcl_write_lang_csh( RCL_LANG_CSH_FILE, known_keys, new_values, &write_error ) )
@@ -2058,8 +2079,7 @@ rcl_write_locale_files( const gchar *const *known_keys,
   goto out;
 
 fail:
-  if( error ) g_propagate_error( error, write_error );
-  else g_clear_error( &write_error );
+  rcl_report_write_failure( error, write_error );
 out:
   rcl_file_snapshot_clear( &sh );
   rcl_file_snapshot_clear( &csh );
@@ -2075,9 +2095,9 @@ rcl_write_vconsole_files( const gchar *keymap, const gchar *keymap_toggle,
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &keymap_snapshot, RCL_RC_KEYMAP_FILE, error ) ||
-      !rcl_file_snapshot_take( &toggle_snapshot, RCL_RC_KEYMAP_TOGGLE_FILE, error ) )
-    goto out;
+  if( !rcl_file_snapshot_take( &keymap_snapshot, RCL_RC_KEYMAP_FILE, &write_error ) ||
+      !rcl_file_snapshot_take( &toggle_snapshot, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) )
+    goto fail;
   if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
     goto fail;
   if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE,
@@ -2091,8 +2111,7 @@ rcl_write_vconsole_files( const gchar *keymap, const gchar *keymap_toggle,
   goto out;
 
 fail:
-  if( error ) g_propagate_error( error, write_error );
-  else g_clear_error( &write_error );
+  rcl_report_write_failure( error, write_error );
 out:
   rcl_file_snapshot_clear( &keymap_snapshot );
   rcl_file_snapshot_clear( &toggle_snapshot );
@@ -2107,13 +2126,12 @@ rcl_write_x11_vconsole_files( const gchar *layout, const gchar *model,
                               const gchar *variant, const gchar *options,
                               const gchar *keymap, GError **error )
 {
-  RclFileSnapshot x11 = { 0 }, vc = { 0 };
+  RclFileSnapshot x11 = { 0 };
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) ||
-      !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, error ) )
-    goto out;
+  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, &write_error ) )
+    goto fail;
   if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
                                 variant, options, &write_error ) )
     goto fail;
@@ -2126,11 +2144,9 @@ rcl_write_x11_vconsole_files( const gchar *layout, const gchar *model,
   ok = TRUE;
   goto out;
 fail:
-  if( error ) g_propagate_error( error, write_error );
-  else g_clear_error( &write_error );
+  rcl_report_write_failure( error, write_error );
 out:
   rcl_file_snapshot_clear( &x11 );
-  rcl_file_snapshot_clear( &vc );
   return ok;
 }
 
@@ -2144,10 +2160,10 @@ rcl_write_vconsole_x11_files( const gchar *keymap, const gchar *keymap_toggle,
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean keymap_written = FALSE, toggle_written = FALSE, ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, error ) ||
-      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, error ) ||
-      !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) )
-    goto out;
+  if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, &write_error ) ||
+      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) ||
+      !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, &write_error ) )
+    goto fail;
   if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
     goto fail;
   keymap_written = TRUE;
@@ -2167,8 +2183,7 @@ rollback:
   if( keymap_written && !rcl_file_snapshot_restore( &vc, &rollback_error ) )
     rcl_report_rollback_failure( &write_error, rollback_error );
 fail:
-  if( error ) g_propagate_error( error, write_error );
-  else g_clear_error( &write_error );
+  rcl_report_write_failure( error, write_error );
 out:
   rcl_file_snapshot_clear( &vc );
   rcl_file_snapshot_clear( &toggle );

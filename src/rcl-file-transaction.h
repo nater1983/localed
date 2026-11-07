@@ -23,8 +23,20 @@ typedef struct
   gchar   *contents;
   gsize    length;
   mode_t   mode;
+  uid_t    uid;
+  gid_t    gid;
   gboolean existed;
 } RclFileSnapshot;
+
+/* Remove a staged file, appending cleanup failures to an existing error. */
+void rcl_file_cleanup_temporary ( const gchar *temporary_path,
+                                  GError **error );
+
+/* Close a staged file and remove its pathname if close reports an error. */
+gboolean rcl_file_close_temporary ( int fd,
+                                    const gchar *temporary_path,
+                                    const gchar *destination_path,
+                                    GError **error );
 
 void rcl_file_snapshot_clear ( RclFileSnapshot *snapshot );
 
@@ -37,6 +49,15 @@ gboolean rcl_file_snapshot_restore ( const RclFileSnapshot *snapshot,
 
 void rcl_report_rollback_failure ( GError **error,
                                    GError *rollback_error );
+
+/* Propagate a transaction failure, or log it when no error receiver exists. */
+void rcl_report_write_failure ( GError **error,
+                                GError *write_error );
+
+#ifdef RCL_FILE_TRANSACTION_TESTING
+typedef struct { int (*mkstemp_fn)(gchar*); int (*close_fn)(int); gboolean (*write_fn)(const gchar*,const gchar*,gssize,GError**); int (*chown_fn)(const gchar*,uid_t,gid_t); int (*chmod_fn)(const gchar*,mode_t); int (*rename_fn)(const gchar*,const gchar*); int (*unlink_fn)(const gchar*); } RclFileTransactionTestOps;
+void rcl_file_transaction_set_test_ops(const RclFileTransactionTestOps *ops);
+#endif
 
 G_END_DECLS
 
