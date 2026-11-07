@@ -84,10 +84,29 @@ rcl_file_close_temporary ( int fd, const gchar *temporary_path,
     return TRUE;
 
   saved_errno = errno;
-  g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
-               "close temporary file for %s: %s",
-               destination_path, g_strerror(saved_errno) );
-  rcl_file_cleanup_temporary( temporary_path, error );
+  {
+    GError *close_error = NULL;
+
+    g_set_error( &close_error, G_IO_ERROR,
+                 g_io_error_from_errno(saved_errno),
+                 "close temporary file for %s: %s",
+                 destination_path, g_strerror(saved_errno) );
+
+    /*
+     * Keep the close failure even when the caller does not request an
+     * error object.  Cleanup may append a secondary failure to this error.
+     */
+    rcl_file_cleanup_temporary( temporary_path, &close_error );
+
+    if( error )
+      g_propagate_error( error, close_error );
+    else
+    {
+      g_warning( "%s", close_error->message );
+      g_error_free( close_error );
+    }
+  }
+
   return FALSE;
 }
 
@@ -258,5 +277,8 @@ rcl_report_rollback_failure ( GError **error, GError *rollback_error )
   else if( error )
     g_propagate_error( error, rollback_error );
   else
+  {
+    g_warning( "%s", rollback_error->message );
     g_error_free( rollback_error );
+  }
 }
