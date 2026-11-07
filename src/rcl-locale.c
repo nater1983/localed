@@ -833,7 +833,7 @@ rcl_write_rc_keymap_toggle( const gchar *path,
     if( !rcl_close_temporary_file( fd, tmp_path, path, error ) )
     {
       g_free( tmp_path );
-      g_string_free( out, TRUE );
+      g_free( line );
       return FALSE;
     }
     ok = g_file_set_contents( tmp_path, line, -1, error );
