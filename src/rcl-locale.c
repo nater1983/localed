@@ -430,40 +430,6 @@ read_x11_keyboard_conf( const gchar *path,
 #undef SANITISE_XKB
 }
 
-/*
- * Check the close of a newly-created staging file.  close() can report
- * delayed I/O errors; on Linux the descriptor is released even when close()
- * returns EINTR, so callers must not retry it.  If close fails, remove the
- * named staging file and preserve both errors when cleanup also fails.
- */
-static gboolean
-rcl_close_temporary_file ( int fd, const gchar *tmp_path,
-                           const gchar *destination, GError **error )
-{
-  if( close( fd ) == 0 )
-    return TRUE;
-
-  {
-    int saved_errno = errno;
-    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
-                 "close temporary file for %s: %s",
-                 destination, g_strerror(saved_errno) );
-  }
-
-  if( g_unlink( tmp_path ) != 0 && errno != ENOENT && error && *error )
-  {
-    GQuark domain = (*error)->domain;
-    gint code = (*error)->code;
-    gchar *message = g_strdup_printf(
-      "%s (temporary-file cleanup also failed: %s)",
-      (*error)->message, g_strerror(errno) );
-    g_clear_error( error );
-    g_set_error_literal( error, domain, code, message );
-    g_free( message );
-  }
-
-  return FALSE;
-}
 
 static gboolean
 write_x11_keyboard_conf( const gchar *path,
@@ -732,7 +698,7 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
       g_string_free( out, TRUE );
       return FALSE;
     }
-    if( !rcl_close_temporary_file( fd, tmp_path, path, error ) )
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
     {
       g_free( tmp_path );
       g_string_free( out, TRUE );
@@ -830,7 +796,7 @@ rcl_write_rc_keymap_toggle( const gchar *path,
       g_free( tmp_path );
       return FALSE;
     }
-    if( !rcl_close_temporary_file( fd, tmp_path, path, error ) )
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
     {
       g_free( tmp_path );
       g_free( line );
@@ -1191,7 +1157,7 @@ rcl_write_lang_sh( const gchar         *path,
       g_string_free( out, TRUE );
       return FALSE;
     }
-    if( !rcl_close_temporary_file( fd, tmp_path, path, error ) )
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
     {
       g_free( tmp_path );
       g_string_free( out, TRUE );
@@ -1296,7 +1262,7 @@ rcl_write_lang_csh( const gchar         *path,
       g_string_free(out, TRUE);
       return FALSE;
     }
-    if( !rcl_close_temporary_file( fd, tmp_path, path, error ) )
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
     {
       g_free( tmp_path );
       g_string_free( out, TRUE );
