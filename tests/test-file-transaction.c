@@ -17,7 +17,7 @@ static FStage fstage;
 static int imkstemp(gchar*p){if(fstage==F_CREATE){errno=EACCES;return -1;}return g_mkstemp(p);}
 static int iclose(int fd){int r=close(fd);if(fstage==F_CLOSE){errno=EIO;return -1;}return r;}
 static gboolean iwrite(const gchar*p,const gchar*d,gssize n,GError**e){if(fstage==F_WRITE){g_set_error_literal(e,G_IO_ERROR,G_IO_ERROR_NO_SPACE,"injected write failure");return FALSE;}return g_file_set_contents(p,d,n,e);}
-static int ichown(const gchar*p,uid_t u,gid_t g){if(fstage==F_CHOWN){errno=EPERM;return -1;}return g_chown(p,u,g);}
+static int ichown(const gchar*p,uid_t u,gid_t g){if(fstage==F_CHOWN){errno=EPERM;return -1;}return chown(p,u,g);}
 static int ichmod(const gchar*p,mode_t m){if(fstage==F_CHMOD){errno=EPERM;return -1;}return g_chmod(p,m);}
 static int irename(const gchar*a,const gchar*b){if(fstage==F_RENAME){errno=EIO;return -1;}return g_rename(a,b);}
 static guint temp_count(const gchar*d){GDir*x=g_dir_open(d,0,NULL);const gchar*n;guint c=0;while((n=g_dir_read_name(x)))if(g_str_has_prefix(n,"first."))c++;g_dir_close(x);return c;}
