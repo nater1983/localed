@@ -5,6 +5,7 @@
 
 #include <gio/gio.h>
 #include <glib.h>
+#include <string.h>
 
 #include "rcl-xkb-config.h"
 
