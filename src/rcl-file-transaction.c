@@ -64,6 +64,30 @@ rcl_remove_temporary_file ( const gchar *path, GError **error )
     g_error_free( cleanup_error );
 }
 
+gboolean
+rcl_file_close_temporary ( int fd, const gchar *temporary_path,
+                           const gchar *destination_path, GError **error )
+{
+  int saved_errno;
+
+  g_return_val_if_fail( temporary_path != NULL, FALSE );
+  g_return_val_if_fail( destination_path != NULL, FALSE );
+
+  /*
+   * On Linux, close() releases the descriptor even when it reports EINTR.
+   * Never retry it: the descriptor number may already have been reused.
+   */
+  if( TC( fd ) == 0 )
+    return TRUE;
+
+  saved_errno = errno;
+  g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+               "close temporary file for %s: %s",
+               destination_path, g_strerror(saved_errno) );
+  rcl_remove_temporary_file( temporary_path, error );
+  return FALSE;
+}
+
 void
 rcl_file_snapshot_clear ( RclFileSnapshot *snapshot )
 {
