@@ -466,13 +466,37 @@ write_x11_keyboard_conf( const gchar *path,
     int fd = g_mkstemp( tmp_path );
     if( fd == -1 )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "create temporary file for %s: %s", path, g_strerror(errno) );
+      int saved_errno = errno;
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                   "create temporary file for %s: %s",
+                   path, g_strerror(saved_errno) );
       g_free( tmp_path );
       g_string_free( out, TRUE );
       return FALSE;
     }
-    close( fd );
+
+    /* Treat delayed close errors as a failed staging operation. */
+    if( close( fd ) != 0 )
+    {
+      int saved_errno = errno;
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                   "close temporary file for %s: %s",
+                   path, g_strerror(saved_errno) );
+
+      if( g_unlink( tmp_path ) != 0 && errno != ENOENT )
+      {
+        gchar *message = g_strdup_printf(
+          "%s (temporary-file cleanup also failed: %s)",
+          (*error)->message, g_strerror(errno) );
+        g_clear_error( error );
+        g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
+        g_free( message );
+      }
+
+      g_free( tmp_path );
+      g_string_free( out, TRUE );
+      return FALSE;
+    }
   }
   ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
 
@@ -485,22 +509,36 @@ write_x11_keyboard_conf( const gchar *path,
      * scratch.  Mirrors the g_chmod() calls in rcl_write_lang_sh() and
      * rcl_write_rc_keymap_toggle(). */
     if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
-    {
-      g_unlink( tmp_path );
       ok = FALSE;
-    }
 
     if( ok && g_rename( tmp_path, path ) != 0 )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
-      g_unlink( tmp_path );
+      int saved_errno = errno;
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                   "rename(%s, %s): %s",
+                   tmp_path, path, g_strerror(saved_errno) );
       ok = FALSE;
     }
   }
 
   if( !ok )
-    g_unlink( tmp_path );
+  {
+    if( g_unlink( tmp_path ) != 0 && errno != ENOENT )
+    {
+      gchar *message = g_strdup_printf(
+        "%s (temporary-file cleanup also failed: %s)",
+        error && *error ? (*error)->message : "configuration write failed",
+        g_strerror(errno) );
+      if( error )
+      {
+        g_clear_error( error );
+        g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
+      }
+      else
+        g_warning( "%s", message );
+      g_free( message );
+    }
+  }
 
   g_free( tmp_path );
   g_string_free( out, TRUE );
