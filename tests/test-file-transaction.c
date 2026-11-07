@@ -12,13 +12,16 @@
 
 #include "rcl-file-transaction.h"
 
-typedef enum { F_NONE,F_CREATE,F_CLOSE,F_WRITE,F_CHOWN,F_CHMOD,F_RENAME } FStage;
+typedef enum { F_NONE,F_CREATE,F_CLOSE,F_WRITE,F_CHOWN,F_CHMOD,F_RENAME,F_CLEANUP } FStage;
 static FStage fstage;
+static gchar operation_order[8];
+static guint operation_count;
 static int imkstemp(gchar*p){if(fstage==F_CREATE){errno=EACCES;return -1;}return g_mkstemp(p);}
 static int iclose(int fd){int r=close(fd);if(fstage==F_CLOSE){errno=EIO;return -1;}return r;}
 static gboolean iwrite(const gchar*p,const gchar*d,gssize n,GError**e){if(fstage==F_WRITE){g_set_error_literal(e,G_IO_ERROR,G_IO_ERROR_NO_SPACE,"injected write failure");return FALSE;}return g_file_set_contents(p,d,n,e);}
-static int ichown(const gchar*p,uid_t u,gid_t g){if(fstage==F_CHOWN){errno=EPERM;return -1;}return chown(p,u,g);}
-static int ichmod(const gchar*p,mode_t m){if(fstage==F_CHMOD){errno=EPERM;return -1;}return g_chmod(p,m);}
+static int ichown(const gchar*p,uid_t u,gid_t g){if(operation_count<sizeof(operation_order)-1)operation_order[operation_count++]='C';if(fstage==F_CHOWN){errno=EPERM;return -1;}return chown(p,u,g);}
+static int ichmod(const gchar*p,mode_t m){if(operation_count<sizeof(operation_order)-1)operation_order[operation_count++]='M';if(fstage==F_CHMOD||fstage==F_CLEANUP){errno=EPERM;return -1;}return g_chmod(p,m);}
+static int iunlink(const gchar*p){if(fstage==F_CLEANUP){errno=EACCES;return -1;}return g_unlink(p);}
 static int irename(const gchar*a,const gchar*b){if(fstage==F_RENAME){errno=EIO;return -1;}return g_rename(a,b);}
 static guint temp_count(const gchar*d){GDir*x=g_dir_open(d,0,NULL);const gchar*n;guint c=0;while((n=g_dir_read_name(x)))if(g_str_has_prefix(n,"first."))c++;g_dir_close(x);return c;}
 typedef struct _Fixture Fixture;
@@ -31,6 +34,36 @@ struct _Fixture
 };
 
 static void test_injected_failures(Fixture*f,gconstpointer u){FStage ss[]={F_CREATE,F_CLOSE,F_WRITE,F_CHOWN,F_CHMOD,F_RENAME};const gchar*msg[]={"create rollback temporary","close rollback temporary","restore ","restore ownership","restore permissions","rollback rename"};guint i;for(i=0;i<G_N_ELEMENTS(ss);i++){RclFileSnapshot s={0};GError*e=NULL;RclFileTransactionTestOps o={imkstemp,iclose,iwrite,ichown,ichmod,irename,NULL};g_assert_true(g_file_set_contents(f->first,"before",-1,&e));g_assert_no_error(e);g_assert_true(rcl_file_snapshot_take(&s,f->first,&e));g_assert_no_error(e);fstage=ss[i];rcl_file_transaction_set_test_ops(&o);g_assert_false(rcl_file_snapshot_restore(&s,&e));rcl_file_transaction_set_test_ops(NULL);fstage=F_NONE;g_assert_nonnull(e);g_assert_nonnull(strstr(e->message,msg[i]));g_clear_error(&e);g_assert_cmpuint(temp_count(f->directory),==,0);rcl_file_snapshot_clear(&s);g_unlink(f->first);}}
+
+static void test_cleanup_failure_preserves_restore_error(Fixture*f,gconstpointer u){
+ RclFileSnapshot s={0};GError*e=NULL;RclFileTransactionTestOps o={imkstemp,iclose,iwrite,ichown,ichmod,irename,iunlink};
+ g_assert_true(g_file_set_contents(f->first,"before",-1,&e));g_assert_no_error(e);
+ g_assert_true(rcl_file_snapshot_take(&s,f->first,&e));g_assert_no_error(e);
+ fstage=F_CLEANUP;rcl_file_transaction_set_test_ops(&o);
+ g_assert_false(rcl_file_snapshot_restore(&s,&e));
+ rcl_file_transaction_set_test_ops(NULL);fstage=F_NONE;
+ g_assert_nonnull(e);g_assert_nonnull(strstr(e->message,"restore permissions"));
+ g_assert_nonnull(strstr(e->message,"temporary-file cleanup also failed"));
+ g_assert_cmpuint(e->domain,==,G_IO_ERROR);g_assert_cmpint(e->code,==,G_IO_ERROR_PERMISSION_DENIED);
+ g_clear_error(&e);
+ /* The injected unlink failure intentionally leaves one file; remove it now. */
+ GDir*d=g_dir_open(f->directory,0,NULL);const gchar*n;while((n=g_dir_read_name(d)))if(g_str_has_prefix(n,"first.")){gchar*q=g_build_filename(f->directory,n,NULL);g_unlink(q);g_free(q);}g_dir_close(d);
+ g_assert_cmpuint(temp_count(f->directory),==,0);rcl_file_snapshot_clear(&s);
+}
+static void test_ownership_before_mode(Fixture*f,gconstpointer u){
+ RclFileSnapshot s={0};GError*e=NULL;RclFileTransactionTestOps o={imkstemp,iclose,iwrite,ichown,ichmod,irename,iunlink};
+ g_assert_true(g_file_set_contents(f->first,"before",-1,&e));g_assert_no_error(e);
+ g_assert_cmpint(g_chmod(f->first,04750),==,0);
+ g_assert_true(rcl_file_snapshot_take(&s,f->first,&e));g_assert_no_error(e);
+ g_assert_true(g_file_set_contents(f->first,"after",-1,&e));g_assert_no_error(e);
+ operation_count=0;memset(operation_order,0,sizeof(operation_order));
+ rcl_file_transaction_set_test_ops(&o);
+ g_assert_true(rcl_file_snapshot_restore(&s,&e));
+ rcl_file_transaction_set_test_ops(NULL);
+ g_assert_no_error(e);g_assert_cmpstr(operation_order,==,"CM");
+ rcl_file_snapshot_clear(&s);
+}
+
 static void test_owner_group(Fixture*f,gconstpointer u){RclFileSnapshot s={0};GError*e=NULL;GStatBuf a,b;g_assert_true(g_file_set_contents(f->first,"before",-1,&e));g_assert_no_error(e);g_chmod(f->first,04750);g_stat(f->first,&a);g_assert_true(rcl_file_snapshot_take(&s,f->first,&e));g_assert_no_error(e);g_file_set_contents(f->first,"after",-1,&e);g_assert_no_error(e);g_assert_true(rcl_file_snapshot_restore(&s,&e));g_assert_no_error(e);g_stat(f->first,&b);g_assert_cmpuint(b.st_uid,==,a.st_uid);g_assert_cmpuint(b.st_gid,==,a.st_gid);g_assert_cmpuint(b.st_mode&07777,==,a.st_mode&07777);rcl_file_snapshot_clear(&s);}
 
 static void
@@ -256,6 +289,8 @@ main ( int argc, char **argv )
               fixture_setup, test_report_rollback_failure_preserves_both_errors,
               fixture_teardown );
   g_test_add("/file-transaction/failure-injection",Fixture,NULL,fixture_setup,test_injected_failures,fixture_teardown);
+  g_test_add("/file-transaction/cleanup-failure-preserves-error",Fixture,NULL,fixture_setup,test_cleanup_failure_preserves_restore_error,fixture_teardown);
+  g_test_add("/file-transaction/ownership-before-mode",Fixture,NULL,fixture_setup,test_ownership_before_mode,fixture_teardown);
   g_test_add("/file-transaction/owner-group",Fixture,NULL,fixture_setup,test_owner_group,fixture_teardown);
 
   return g_test_run();
