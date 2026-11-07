@@ -61,7 +61,10 @@ rcl_file_cleanup_temporary ( const gchar *path, GError **error )
   else if( error )
     g_propagate_error( error, cleanup_error );
   else
+  {
+    g_warning( "%s", cleanup_error->message );
     g_error_free( cleanup_error );
+  }
 }
 
 gboolean
