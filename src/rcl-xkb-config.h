@@ -9,6 +9,22 @@
 
 G_BEGIN_DECLS
 
+typedef enum
+{
+  RCL_XKB_VALUE_LAYOUT,
+  RCL_XKB_VALUE_MODEL,
+  RCL_XKB_VALUE_VARIANT,
+  RCL_XKB_VALUE_OPTIONS
+} RclXkbValueType;
+
+/*
+ * Validate the syntax of one XKB field without maintaining a hardcoded list
+ * of installed XKB definitions.  This checks field grammar and length only;
+ * Xorg/XKB remains responsible for resolving names against installed rules.
+ */
+gboolean rcl_xkb_value_is_valid ( RclXkbValueType type,
+                                  const gchar *value );
+
 /*
  * Parse the localed-owned InputClass section from an Xorg configuration.
  *
