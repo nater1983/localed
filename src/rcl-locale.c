@@ -476,24 +476,8 @@ write_x11_keyboard_conf( const gchar *path,
       return FALSE;
     }
 
-    /* Treat delayed close errors as a failed staging operation. */
-    if( close( fd ) != 0 )
+    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
     {
-      int saved_errno = errno;
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
-                   "close temporary file for %s: %s",
-                   path, g_strerror(saved_errno) );
-
-      if( g_unlink( tmp_path ) != 0 && errno != ENOENT )
-      {
-        gchar *message = g_strdup_printf(
-          "%s (temporary-file cleanup also failed: %s)",
-          (*error)->message, g_strerror(errno) );
-        g_clear_error( error );
-        g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
-        g_free( message );
-      }
-
       g_free( tmp_path );
       g_string_free( out, TRUE );
       return FALSE;
