@@ -35,8 +35,8 @@ void rcl_file_transaction_set_test_ops(const RclFileTransactionTestOps *ops){if(
  * reported alongside the original error because leaving a named temporary
  * file behind is itself an operational failure.
  */
-static void
-rcl_remove_temporary_file ( const gchar *path, GError **error )
+void
+rcl_file_cleanup_temporary ( const gchar *path, GError **error )
 {
   GError *cleanup_error = NULL;
 
@@ -84,7 +84,7 @@ rcl_file_close_temporary ( int fd, const gchar *temporary_path,
   g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
                "close temporary file for %s: %s",
                destination_path, g_strerror(saved_errno) );
-  rcl_remove_temporary_file( temporary_path, error );
+  rcl_file_cleanup_temporary( temporary_path, error );
   return FALSE;
 }
 
@@ -192,7 +192,7 @@ rcl_file_snapshot_restore ( const RclFileSnapshot *snapshot,
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
                  "close rollback temporary file %s: %s",
                  tmp_path, g_strerror(saved_errno) );
-    rcl_remove_temporary_file( tmp_path, error );
+    rcl_file_cleanup_temporary( tmp_path, error );
     g_free( tmp_path );
     return FALSE;
   }
@@ -231,7 +231,7 @@ rcl_file_snapshot_restore ( const RclFileSnapshot *snapshot,
 
 out:
   if( !ok )
-    rcl_remove_temporary_file( tmp_path, error );
+    rcl_file_cleanup_temporary( tmp_path, error );
   g_free( tmp_path );
   return ok;
 }
