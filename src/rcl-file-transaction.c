@@ -10,6 +10,25 @@
 #include <unistd.h>
 
 #include <glib/gstdio.h>
+#ifdef RCL_FILE_TRANSACTION_TESTING
+static RclFileTransactionTestOps test_ops;
+void rcl_file_transaction_set_test_ops(const RclFileTransactionTestOps *ops){if(ops)test_ops=*ops;else memset(&test_ops,0,sizeof(test_ops));}
+#define TM(p) (test_ops.mkstemp_fn?test_ops.mkstemp_fn(p):g_mkstemp(p))
+#define TC(fd) (test_ops.close_fn?test_ops.close_fn(fd):close(fd))
+#define TW(p,d,n,e) (test_ops.write_fn?test_ops.write_fn(p,d,n,e):g_file_set_contents(p,d,n,e))
+#define TO(p,u,g) (test_ops.chown_fn?test_ops.chown_fn(p,u,g):g_chown(p,u,g))
+#define TP(p,m) (test_ops.chmod_fn?test_ops.chmod_fn(p,m):g_chmod(p,m))
+#define TR(a,b) (test_ops.rename_fn?test_ops.rename_fn(a,b):g_rename(a,b))
+#define TU(p) (test_ops.unlink_fn?test_ops.unlink_fn(p):g_unlink(p))
+#else
+#define TM(p) g_mkstemp(p)
+#define TC(fd) close(fd)
+#define TW(p,d,n,e) g_file_set_contents(p,d,n,e)
+#define TO(p,u,g) g_chown(p,u,g)
+#define TP(p,m) g_chmod(p,m)
+#define TR(a,b) g_rename(a,b)
+#define TU(p) g_unlink(p)
+#endif
 
 /*
  * Remove a staged file without hiding a prior failure.  A failed unlink is
@@ -21,7 +40,7 @@ rcl_remove_temporary_file ( const gchar *path, GError **error )
 {
   GError *cleanup_error = NULL;
 
-  if( g_unlink( path ) == 0 || errno == ENOENT )
+  if( TU( path ) == 0 || errno == ENOENT )
     return;
 
   g_set_error( &cleanup_error, G_IO_ERROR, g_io_error_from_errno(errno),
@@ -93,6 +112,8 @@ rcl_file_snapshot_take ( RclFileSnapshot *snapshot,
   }
 
   snapshot->mode = st.st_mode & 07777;
+  snapshot->uid = st.st_uid;
+  snapshot->gid = st.st_gid;
   snapshot->existed = TRUE;
   return TRUE;
 }
@@ -126,7 +147,7 @@ rcl_file_snapshot_restore ( const RclFileSnapshot *snapshot,
    * complete restored file, never truncated intermediate contents.
    */
   tmp_path = g_strdup_printf( "%s.XXXXXX", snapshot->path );
-  fd = g_mkstemp( tmp_path );
+  fd = TM( tmp_path );
   if( fd == -1 )
   {
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
@@ -139,7 +160,7 @@ rcl_file_snapshot_restore ( const RclFileSnapshot *snapshot,
    * close() can report delayed write/metadata errors.  Do not retry close()
    * after EINTR: on Linux the descriptor has already been released.
    */
-  if( close( fd ) != 0 )
+  if( TC( fd ) != 0 )
   {
     int saved_errno = errno;
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
@@ -150,22 +171,29 @@ rcl_file_snapshot_restore ( const RclFileSnapshot *snapshot,
     return FALSE;
   }
 
-  if( !g_file_set_contents( tmp_path, snapshot->contents,
-                            (gssize)snapshot->length, error ) )
+  if( !TW( tmp_path, snapshot->contents,
+             (gssize)snapshot->length, error ) )
   {
     g_prefix_error( error, "restore %s: ", snapshot->path );
     goto out;
   }
 
-  if( g_chmod( tmp_path, snapshot->mode ) != 0 )
+  /* chown may clear setuid/setgid bits: restore ownership before mode. */
+  if( TO( tmp_path, snapshot->uid, snapshot->gid ) != 0 )
   {
-    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 "restore permissions on temporary file for %s: %s",
-                 snapshot->path, g_strerror(errno) );
+    int saved_errno = errno;
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                 "restore ownership on temporary file for %s: %s", snapshot->path, g_strerror(saved_errno) );
     goto out;
   }
-
-  if( g_rename( tmp_path, snapshot->path ) != 0 )
+  if( TP( tmp_path, snapshot->mode ) != 0 )
+  {
+    int saved_errno = errno;
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                 "restore permissions on temporary file for %s: %s", snapshot->path, g_strerror(saved_errno) );
+    goto out;
+  }
+  if( TR( tmp_path, snapshot->path ) != 0 )
   {
     g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                  "rollback rename(%s, %s): %s",
@@ -190,11 +218,11 @@ rcl_report_rollback_failure ( GError **error, GError *rollback_error )
 
   if( error && *error )
   {
-    gchar *message = g_strdup_printf( "%s (rollback also failed: %s)",
-                                      (*error)->message,
-                                      rollback_error->message );
+    GQuark domain = (*error)->domain;
+    gint code = (*error)->code;
+    gchar *message = g_strdup_printf( "%s (rollback also failed: %s)", (*error)->message, rollback_error->message );
     g_clear_error( error );
-    g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
+    g_set_error_literal( error, domain, code, message );
     g_free( message );
     g_error_free( rollback_error );
   }
