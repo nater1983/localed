@@ -2064,9 +2064,9 @@ rcl_write_locale_files( const gchar *const *known_keys,
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &sh, RCL_LANG_SH_FILE, error ) ||
-      !rcl_file_snapshot_take( &csh, RCL_LANG_CSH_FILE, error ) )
-    goto out;
+  if( !rcl_file_snapshot_take( &sh, RCL_LANG_SH_FILE, &write_error ) ||
+      !rcl_file_snapshot_take( &csh, RCL_LANG_CSH_FILE, &write_error ) )
+    goto fail;
   if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &write_error ) )
     goto fail;
   if( !rcl_write_lang_csh( RCL_LANG_CSH_FILE, known_keys, new_values, &write_error ) )
@@ -2095,9 +2095,9 @@ rcl_write_vconsole_files( const gchar *keymap, const gchar *keymap_toggle,
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &keymap_snapshot, RCL_RC_KEYMAP_FILE, error ) ||
-      !rcl_file_snapshot_take( &toggle_snapshot, RCL_RC_KEYMAP_TOGGLE_FILE, error ) )
-    goto out;
+  if( !rcl_file_snapshot_take( &keymap_snapshot, RCL_RC_KEYMAP_FILE, &write_error ) ||
+      !rcl_file_snapshot_take( &toggle_snapshot, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) )
+    goto fail;
   if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
     goto fail;
   if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE,
@@ -2130,8 +2130,8 @@ rcl_write_x11_vconsole_files( const gchar *layout, const gchar *model,
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) )
-    goto out;
+  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, &write_error ) )
+    goto fail;
   if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
                                 variant, options, &write_error ) )
     goto fail;
@@ -2160,10 +2160,10 @@ rcl_write_vconsole_x11_files( const gchar *keymap, const gchar *keymap_toggle,
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean keymap_written = FALSE, toggle_written = FALSE, ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, error ) ||
-      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, error ) ||
-      !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) )
-    goto out;
+  if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, &write_error ) ||
+      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) ||
+      !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, &write_error ) )
+    goto fail;
   if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
     goto fail;
   keymap_written = TRUE;
