@@ -101,6 +101,18 @@ test_escaped_quotes ( void )
 }
 
 static void
+test_valueless_unrelated_option ( void )
+{
+  assert_parse(
+    "Section \"InputClass\"\n"
+    "Identifier \"system-keyboard\"\n"
+    "Option \"NoAccel\"\n"
+    "Option \"XkbLayout\" \"us\"\n"
+    "EndSection\n",
+    "us", "", "", "" );
+}
+
+static void
 assert_invalid ( const gchar *contents )
 {
   gchar *layout = NULL, *model = NULL, *variant = NULL, *options = NULL;
@@ -152,6 +164,7 @@ main ( int argc, char **argv )
   g_test_add_func( "/xkb-config/duplicate-option", test_last_duplicate_option_wins );
   g_test_add_func( "/xkb-config/duplicate-section", test_last_owned_section_wins );
   g_test_add_func( "/xkb-config/escaped-quotes", test_escaped_quotes );
+  g_test_add_func( "/xkb-config/valueless-unrelated-option", test_valueless_unrelated_option );
   g_test_add_func( "/xkb-config/unterminated-quote", test_unterminated_quote );
   g_test_add_func( "/xkb-config/unbalanced-section", test_unbalanced_section );
   g_test_add_func( "/xkb-config/malformed-option", test_malformed_owned_option );
