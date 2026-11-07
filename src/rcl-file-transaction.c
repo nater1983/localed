@@ -11,6 +11,38 @@
 
 #include <glib/gstdio.h>
 
+/*
+ * Remove a staged file without hiding a prior failure.  A failed unlink is
+ * reported alongside the original error because leaving a named temporary
+ * file behind is itself an operational failure.
+ */
+static void
+rcl_remove_temporary_file ( const gchar *path, GError **error )
+{
+  GError *cleanup_error = NULL;
+
+  if( g_unlink( path ) == 0 || errno == ENOENT )
+    return;
+
+  g_set_error( &cleanup_error, G_IO_ERROR, g_io_error_from_errno(errno),
+               "remove temporary file %s: %s", path, g_strerror(errno) );
+
+  if( error && *error )
+  {
+    gchar *message = g_strdup_printf( "%s (temporary-file cleanup also failed: %s)",
+                                      (*error)->message,
+                                      cleanup_error->message );
+    g_clear_error( error );
+    g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
+    g_free( message );
+    g_error_free( cleanup_error );
+  }
+  else if( error )
+    g_propagate_error( error, cleanup_error );
+  else
+    g_error_free( cleanup_error );
+}
+
 void
 rcl_file_snapshot_clear ( RclFileSnapshot *snapshot )
 {
@@ -103,7 +135,20 @@ rcl_file_snapshot_restore ( const RclFileSnapshot *snapshot,
     g_free( tmp_path );
     return FALSE;
   }
-  close( fd );
+  /*
+   * close() can report delayed write/metadata errors.  Do not retry close()
+   * after EINTR: on Linux the descriptor has already been released.
+   */
+  if( close( fd ) != 0 )
+  {
+    int saved_errno = errno;
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                 "close rollback temporary file %s: %s",
+                 tmp_path, g_strerror(saved_errno) );
+    rcl_remove_temporary_file( tmp_path, error );
+    g_free( tmp_path );
+    return FALSE;
+  }
 
   if( !g_file_set_contents( tmp_path, snapshot->contents,
                             (gssize)snapshot->length, error ) )
@@ -132,7 +177,7 @@ rcl_file_snapshot_restore ( const RclFileSnapshot *snapshot,
 
 out:
   if( !ok )
-    g_unlink( tmp_path );
+    rcl_remove_temporary_file( tmp_path, error );
   g_free( tmp_path );
   return ok;
 }
