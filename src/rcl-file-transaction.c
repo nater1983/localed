@@ -127,7 +127,7 @@ rcl_file_snapshot_take ( RclFileSnapshot *snapshot,
                          const gchar *path,
                          GError **error )
 {
-  GStatBuf st;
+  GStatBuf st, st_after;
   GString *contents;
   gchar buffer[8192];
   int fd;
@@ -186,6 +186,34 @@ rcl_file_snapshot_take ( RclFileSnapshot *snapshot,
       break;
 
     g_string_append_len( contents, buffer, n );
+  }
+
+  /*
+   * Reject an in-place modification during the read.  Atomic replacement
+   * leaves this descriptor attached to the original inode; comparing its
+   * metadata before and after the read also catches ordinary concurrent
+   * writes to that inode.
+   */
+  if( fstat( fd, &st_after ) != 0 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "re-stat snapshot %s: %s", path, g_strerror(errno) );
+    g_string_free( contents, TRUE );
+    goto out;
+  }
+
+  if( st.st_dev != st_after.st_dev ||
+      st.st_ino != st_after.st_ino ||
+      st.st_size != st_after.st_size ||
+      st.st_mtim.tv_sec != st_after.st_mtim.tv_sec ||
+      st.st_mtim.tv_nsec != st_after.st_mtim.tv_nsec ||
+      st.st_ctim.tv_sec != st_after.st_ctim.tv_sec ||
+      st.st_ctim.tv_nsec != st_after.st_ctim.tv_nsec )
+  {
+    g_set_error( error, G_IO_ERROR, G_IO_ERROR_BUSY,
+                 "file %s changed while its snapshot was being read", path );
+    g_string_free( contents, TRUE );
+    goto out;
   }
 
   snapshot->length = contents->len;
