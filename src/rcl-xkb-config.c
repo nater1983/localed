@@ -76,7 +76,7 @@ rcl_xkb_tokenize_line ( const gchar *line, GError **error )
           quoted = FALSE;
           break;
         }
-        if( *p == '\\\\' && p[1] != '\0' )
+        if( *p == '\\' && p[1] != '\0' )
           p++;
         g_string_append_c( token, *p++ );
       }
@@ -246,7 +246,7 @@ rcl_xkb_config_parse ( const gchar *contents,
     else if( in_section && in_input_class &&
              g_ascii_strcasecmp( tokens[0], "Option" ) == 0 )
     {
-      if( n < 3 )
+      if( n != 3 )
       {
         g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
                              "malformed Option in Xorg InputClass" );
