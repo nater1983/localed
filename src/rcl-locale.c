@@ -34,6 +34,7 @@
 #include "rcl-locale.h"
 #include "rcl-file-utils.h"
 #include "rcl-file-transaction.h"
+#include "rcl-xkb-config.h"
 
 /* --------------------------------------------------------------------------
    The org.freedesktop.locale1 introspection XML.
@@ -341,55 +342,14 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
    (real XKB layout/model/variant/options strings are well under 64 chars). */
 #define MAX_XKB_VALUE_LEN  256
 
-static gchar *
-extract_xkb_option( const gchar *contents, const gchar *option_name )
-{
-  gchar **lines = g_strsplit( contents, "\n", -1 );
-  gchar  *result = NULL;
-  guint   i;
-
-  /* Only match Option "Name" "value" lines, ignoring comments and unrelated
-     text that happens to mention the option name. */
-  for( i = 0; lines[i] != NULL && result == NULL; i++ )
-  {
-    gchar *line = g_strstrip( lines[i] );
-    gchar *q1, *q2, *q3, *q4;
-    gsize  nlen;
-
-    if( g_str_has_prefix( line, "#" ) ||
-        strncmp( line, "Option", 6 ) != 0 ||
-        ( line[6] != ' ' && line[6] != '\t' ) )
-      continue;
-
-    q1 = strchr( line + 6, '"' );
-    q2 = q1 ? strchr( q1 + 1, '"' ) : NULL;
-    q3 = q2 ? strchr( q2 + 1, '"' ) : NULL;
-    q4 = q3 ? strchr( q3 + 1, '"' ) : NULL;
-    if( !q1 || !q2 || !q3 || !q4 )
-      continue;
-
-    nlen = (gsize)( q2 - q1 - 1 );
-    if( nlen != strlen( option_name ) ||
-        strncmp( q1 + 1, option_name, nlen ) != 0 )
-      continue;
-
-    if( (gsize)( q4 - q3 - 1 ) <= MAX_XKB_VALUE_LEN )
-      result = g_strndup( q3 + 1, (gsize)( q4 - q3 - 1 ) );
-    else
-      g_warning( "extract_xkb_option: value for '%s' exceeds %d bytes, ignoring",
-                 option_name, MAX_XKB_VALUE_LEN );
-  }
-
-  g_strfreev( lines );
-  return result ? result : g_strdup( "" );
-}
-
 static void
 read_x11_keyboard_conf( const gchar *path,
                         gchar **out_layout, gchar **out_model,
                         gchar **out_variant, gchar **out_options )
 {
   gchar *contents = NULL;
+  gchar *layout = NULL, *model = NULL, *variant = NULL, *options = NULL;
+  GError *error = NULL;
 
   *out_layout  = g_strdup( "" );
   *out_model   = g_strdup( "" );
@@ -399,25 +359,32 @@ read_x11_keyboard_conf( const gchar *path,
   if( !g_file_get_contents( path, &contents, NULL, NULL ) )
     return;
 
-  g_free( *out_layout );  *out_layout  = extract_xkb_option( contents, "XkbLayout" );
-  g_free( *out_model );   *out_model   = extract_xkb_option( contents, "XkbModel" );
-  g_free( *out_variant ); *out_variant = extract_xkb_option( contents, "XkbVariant" );
-  g_free( *out_options ); *out_options = extract_xkb_option( contents, "XkbOptions" );
+  if( !rcl_xkb_config_parse( contents, &layout, &model, &variant,
+                             &options, &error ) )
+  {
+    g_warning( "read_x11_keyboard_conf: cannot parse %s: %s",
+               path, error ? error->message : "unknown parser error" );
+    g_clear_error( &error );
+    g_free( contents );
+    return;
+  }
 
   g_free( contents );
 
+  g_free( *out_layout );  *out_layout = layout;
+  g_free( *out_model );   *out_model = model;
+  g_free( *out_variant ); *out_variant = variant;
+  g_free( *out_options ); *out_options = options;
+
   /* Validate values read from disk against the same allowlist used by
-   * SetX11Keyboard.  A manually-edited 00-keyboard.conf with characters
-   * outside [A-Za-z0-9\-_.,+:] is reset to empty rather than served as
-   * a D-Bus property, keeping the property consistent with what SetX11Keyboard
-   * would accept. */
+   * SetX11Keyboard. Unsafe values are not exposed as D-Bus properties. */
 #define SANITISE_XKB(field, name)                                         \
   do {                                                                    \
     if( (*field)[0] != '\0' && !rcl_keyboard_value_is_safe( *field ) )   \
     {                                                                     \
       g_warning( "read_x11_keyboard_conf: unsafe value for %s, ignoring", \
                  name );                                                  \
-      g_free( *field );                                                   \
+      g_clear_pointer( field, g_free );                                   \
       *field = g_strdup( "" );                                            \
     }                                                                     \
   } while(0)
@@ -429,7 +396,6 @@ read_x11_keyboard_conf( const gchar *path,
 
 #undef SANITISE_XKB
 }
-
 
 static gboolean
 write_x11_keyboard_conf( const gchar *path,
