@@ -2079,8 +2079,7 @@ rcl_write_locale_files( const gchar *const *known_keys,
   goto out;
 
 fail:
-  if( error ) g_propagate_error( error, write_error );
-  else g_clear_error( &write_error );
+  rcl_report_write_failure( error, write_error );
 out:
   rcl_file_snapshot_clear( &sh );
   rcl_file_snapshot_clear( &csh );
@@ -2112,8 +2111,7 @@ rcl_write_vconsole_files( const gchar *keymap, const gchar *keymap_toggle,
   goto out;
 
 fail:
-  if( error ) g_propagate_error( error, write_error );
-  else g_clear_error( &write_error );
+  rcl_report_write_failure( error, write_error );
 out:
   rcl_file_snapshot_clear( &keymap_snapshot );
   rcl_file_snapshot_clear( &toggle_snapshot );
@@ -2128,12 +2126,11 @@ rcl_write_x11_vconsole_files( const gchar *layout, const gchar *model,
                               const gchar *variant, const gchar *options,
                               const gchar *keymap, GError **error )
 {
-  RclFileSnapshot x11 = { 0 }, vc = { 0 };
+  RclFileSnapshot x11 = { 0 };
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) ||
-      !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, error ) )
+  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) )
     goto out;
   if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
                                 variant, options, &write_error ) )
@@ -2147,11 +2144,9 @@ rcl_write_x11_vconsole_files( const gchar *layout, const gchar *model,
   ok = TRUE;
   goto out;
 fail:
-  if( error ) g_propagate_error( error, write_error );
-  else g_clear_error( &write_error );
+  rcl_report_write_failure( error, write_error );
 out:
   rcl_file_snapshot_clear( &x11 );
-  rcl_file_snapshot_clear( &vc );
   return ok;
 }
 
@@ -2188,8 +2183,7 @@ rollback:
   if( keymap_written && !rcl_file_snapshot_restore( &vc, &rollback_error ) )
     rcl_report_rollback_failure( &write_error, rollback_error );
 fail:
-  if( error ) g_propagate_error( error, write_error );
-  else g_clear_error( &write_error );
+  rcl_report_write_failure( error, write_error );
 out:
   rcl_file_snapshot_clear( &vc );
   rcl_file_snapshot_clear( &toggle );
