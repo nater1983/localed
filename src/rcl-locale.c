@@ -378,21 +378,21 @@ read_x11_keyboard_conf( const gchar *path,
 
   /* Validate values read from disk against the same allowlist used by
    * SetX11Keyboard. Unsafe values are not exposed as D-Bus properties. */
-#define SANITISE_XKB(field, name)                                         \
-  do {                                                                    \
-    if( (*field)[0] != '\0' && !rcl_keyboard_value_is_safe( *field ) )   \
-    {                                                                     \
-      g_warning( "read_x11_keyboard_conf: unsafe value for %s, ignoring", \
-                 name );                                                  \
-      g_clear_pointer( field, g_free );                                   \
-      *field = g_strdup( "" );                                            \
-    }                                                                     \
+#define SANITISE_XKB(field, name, kind)                                  \
+  do {                                                                      \
+    if( (*field)[0] != '\0' && !rcl_xkb_value_is_valid( kind, *field ) )   \
+    {                                                                       \
+      g_warning( "read_x11_keyboard_conf: invalid value for %s, ignoring", \
+                 name );                                                    \
+      g_clear_pointer( field, g_free );                                     \
+      *field = g_strdup( "" );                                              \
+    }                                                                       \
   } while(0)
 
-  SANITISE_XKB( out_layout,  "XkbLayout" );
-  SANITISE_XKB( out_model,   "XkbModel" );
-  SANITISE_XKB( out_variant, "XkbVariant" );
-  SANITISE_XKB( out_options, "XkbOptions" );
+  SANITISE_XKB( out_layout,  "XkbLayout",  RCL_XKB_VALUE_LAYOUT );
+  SANITISE_XKB( out_model,   "XkbModel",   RCL_XKB_VALUE_MODEL );
+  SANITISE_XKB( out_variant, "XkbVariant", RCL_XKB_VALUE_VARIANT );
+  SANITISE_XKB( out_options, "XkbOptions", RCL_XKB_VALUE_OPTIONS );
 
 #undef SANITISE_XKB
 }
@@ -1796,10 +1796,10 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
 {
   GError *error = NULL;
 
-  if( ( layout[0]  && !rcl_keyboard_value_is_safe(layout) )  ||
-      ( model[0]   && !rcl_keyboard_value_is_safe(model) )   ||
-      ( variant[0] && !rcl_keyboard_value_is_safe(variant) ) ||
-      ( options[0] && !rcl_keyboard_value_is_safe(options) ) )
+  if( !rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, layout ) ||
+      !rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, model ) ||
+      !rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT, variant ) ||
+      !rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, options ) )
   {
     g_dbus_method_invocation_return_error( invocation,
       G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
