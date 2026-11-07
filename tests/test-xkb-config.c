@@ -156,6 +156,62 @@ test_malformed_owned_option ( void )
     "EndSection\n" );
 }
 
+static void
+test_xkb_layout_validation ( void )
+{
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, "us" ) );
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, "us,de,ru" ) );
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, "" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, ",us" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, "us,,de" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, "us;" ) );
+}
+
+static void
+test_xkb_model_validation ( void )
+{
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, "pc105" ) );
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, "thinkpad" ) );
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, "" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, "pc 105" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, "pc/105" ) );
+}
+
+static void
+test_xkb_variant_validation ( void )
+{
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT, "dvorak" ) );
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT,
+                                         ",dvorak,nodeadkeys" ) );
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT, "" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT, ",,," ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT, "dvorak;" ) );
+}
+
+static void
+test_xkb_options_validation ( void )
+{
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS,
+                                         "grp:alt_shift_toggle" ) );
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS,
+                                         "grp:alt_shift_toggle,compose:ralt,terminate:ctrl_alt_bksp" ) );
+  g_assert_true( rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, "" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, "grp" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, ":toggle" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, "grp:" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, "grp:a:b" ) );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, "grp:toggle,,compose:ralt" ) );
+}
+
+static void
+test_xkb_validation_length_limit ( void )
+{
+  gchar *value = g_malloc0( 258 );
+  memset( value, 'a', 257 );
+  g_assert_false( rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, value ) );
+  g_free( value );
+}
+
 int
 main ( int argc, char **argv )
 {
@@ -168,5 +224,10 @@ main ( int argc, char **argv )
   g_test_add_func( "/xkb-config/unterminated-quote", test_unterminated_quote );
   g_test_add_func( "/xkb-config/unbalanced-section", test_unbalanced_section );
   g_test_add_func( "/xkb-config/malformed-option", test_malformed_owned_option );
+  g_test_add_func( "/xkb-validation/layout", test_xkb_layout_validation );
+  g_test_add_func( "/xkb-validation/model", test_xkb_model_validation );
+  g_test_add_func( "/xkb-validation/variant", test_xkb_variant_validation );
+  g_test_add_func( "/xkb-validation/options", test_xkb_options_validation );
+  g_test_add_func( "/xkb-validation/length-limit", test_xkb_validation_length_limit );
   return g_test_run();
 }
