@@ -1,6 +1,7 @@
 localed_sources = files(
   'main.c',
   'rcl-accounts-service.c',
+  'rcl-file-transaction.c',
   'rcl-locale.c',
 )
 

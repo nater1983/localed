@@ -24,3 +24,15 @@ test(
   timeout : 30,
   env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
 )
+
+file_transaction_test = executable(
+  'test-file-transaction',
+  [
+    'test-file-transaction.c',
+    '../src/rcl-file-transaction.c',
+  ],
+  dependencies        : [glib_dep, gio_dep],
+  include_directories : include_directories('../src'),
+)
+
+test('configuration file transaction rollback', file_transaction_test)
