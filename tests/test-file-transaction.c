@@ -385,9 +385,7 @@ test_checked_temporary_close_and_cleanup_without_error_receiver (
   fstage = F_CLOSE_CLEANUP;
   rcl_file_transaction_set_test_ops( &ops );
   g_test_expect_message( NULL, G_LOG_LEVEL_WARNING,
-                         "*close temporary file*" );
-  g_test_expect_message( NULL, G_LOG_LEVEL_WARNING,
-                         "*temporary-file cleanup also failed*" );
+                         "*close temporary file*temporary-file cleanup also failed*" );
   g_assert_false( rcl_file_close_temporary( fd, tmp_path,
                                             fixture->first, NULL ) );
   g_test_assert_expected_messages();
