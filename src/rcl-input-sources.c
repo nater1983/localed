@@ -11,7 +11,6 @@
 #include "config.h"
 
 #include <string.h>
-#include <grp.h>
 #include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -76,16 +75,11 @@ enum
 static guint signals[N_SIGNALS];
 
 static gboolean
-uid_in_privileged_group(guint uid, gid_t *primary_gid, gchar **home)
+lookup_session_user(guint uid, gid_t *primary_gid, gchar **home)
 {
   struct passwd *pw = getpwuid((uid_t) uid);
-  struct group *gr = getgrnam(PRIVILEGED_GROUP);
-  gid_t *groups;
-  int ngroups = 16;
-  gboolean found = FALSE;
-  int i;
 
-  if (!pw || !gr)
+  if (!pw)
     return FALSE;
 
   if (primary_gid)
@@ -93,26 +87,7 @@ uid_in_privileged_group(guint uid, gid_t *primary_gid, gchar **home)
   if (home)
     *home = g_strdup(pw->pw_dir);
 
-  groups = g_new(gid_t, ngroups);
-  if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
-  {
-    groups = g_renew(gid_t, groups, ngroups);
-    if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
-    {
-      g_free(groups);
-      return FALSE;
-    }
-  }
-
-  for (i = 0; i < ngroups; i++)
-    if (groups[i] == gr->gr_gid)
-    {
-      found = TRUE;
-      break;
-    }
-
-  g_free(groups);
-  return found;
+  return TRUE;
 }
 
 static void settings_helper_read_next(RclInputSources *self);
@@ -359,11 +334,10 @@ start_settings_helper(RclInputSources *self)
   if (!self->active || self->stopping || !self->connection)
     return FALSE;
 
-  if (!uid_in_privileged_group(self->active->uid, &primary_gid, &home))
+  if (!lookup_session_user(self->active->uid, &primary_gid, &home))
   {
-    g_debug("not monitoring GNOME input sources for uid %u: account is not "
-            "in privileged group '%s'", self->active->uid, PRIVILEGED_GROUP);
-    g_free(home);
+    g_warning("could not look up GNOME session user with uid %u",
+              self->active->uid);
     return FALSE;
   }
 
