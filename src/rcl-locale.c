@@ -2140,13 +2140,12 @@ rcl_write_vconsole_x11_files( const gchar *keymap, const gchar *keymap_toggle,
                               const gchar *variant, const gchar *options,
                               GError **error )
 {
-  RclFileSnapshot vc = { 0 }, toggle = { 0 }, x11 = { 0 };
+  RclFileSnapshot vc = { 0 }, toggle = { 0 };
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean keymap_written = FALSE, toggle_written = FALSE, ok = FALSE;
 
   if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, &write_error ) ||
-      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) ||
-      !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, &write_error ) )
+      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) )
     goto fail;
   if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
     goto fail;
@@ -2171,7 +2170,6 @@ fail:
 out:
   rcl_file_snapshot_clear( &vc );
   rcl_file_snapshot_clear( &toggle );
-  rcl_file_snapshot_clear( &x11 );
   return ok;
 }
 
