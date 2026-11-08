@@ -20,6 +20,7 @@
 #include <glib.h>
 
 #include "rcl-input-sources.h"
+#include "rcl-locale.h"
 #include "rcl-xkb-config.h"
 
 #define LOGIND_NAME             "org.freedesktop.login1"
@@ -57,7 +58,7 @@ struct _RclInputSources
   GSubprocess *settings_helper;
   GDataInputStream *settings_stream;
   GCancellable *settings_cancellable;
-  GCancellable *settings_apply_cancellable;
+  RclLocaleDaemon *daemon; /* borrowed; owned by the main daemon state */
 
   gboolean stopping;
   gboolean logind_available;
@@ -98,35 +99,6 @@ static void settings_helper_read_next(RclInputSources *self);
 static gboolean helper_restart_cb(gpointer user_data);
 static void restart_settings_helper(RclInputSources *self);
 
-static void
-settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
-{
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
-  GError *error = NULL;
-  GVariant *reply;
-
-  reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), result,
-                                        &error);
-  if (!reply)
-  {
-    if (!error || !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-    {
-      g_warning("could not synchronize GNOME XKB settings with localed: %s",
-                error ? error->message : "unknown error");
-      if (!self->stopping && self->active && !self->helper_restart_id)
-        self->helper_restart_id =
-          g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
-    }
-    g_clear_error(&error);
-  }
-  else
-  {
-    g_debug("GNOME XKB settings synchronized with localed");
-    g_variant_unref(reply);
-  }
-
-  g_object_unref(user_data);
-}
 
 typedef struct
 {
@@ -254,25 +226,15 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   g_debug("synchronizing GNOME input sources: layouts=%s variants=%s",
           layout, variant);
 
-  /* localed calls its own public method over the system bus. The call is
-   * made by the privileged daemon, not by the untrusted session process. */
-  g_clear_object(&self->settings_apply_cancellable);
-  self->settings_apply_cancellable = g_cancellable_new();
+  if (!rcl_locale_daemon_set_x11_keyboard_internal(
+          self->daemon, layout, current_model ? current_model : "",
+          variant, option, &error))
+  {
+    g_warning("could not synchronize GNOME XKB source list: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+  }
 
-  g_dbus_connection_call(self->connection,
-                         "org.freedesktop.locale1",
-                         "/org/freedesktop/locale1",
-                         "org.freedesktop.locale1",
-                         "SetX11Keyboard",
-                         g_variant_new("(ssssbb)", layout,
-                                       current_model ? current_model : "",
-                                       variant, option, TRUE, FALSE),
-                         NULL,
-                         G_DBUS_CALL_FLAGS_NONE,
-                         -1,
-                         self->settings_apply_cancellable,
-                         settings_apply_done,
-                         g_object_ref(self));
 
   /* The X11 source list is the complete GNOME list. The console keymap,
    * however, follows only the currently selected XKB source. Do not ask
@@ -281,23 +243,15 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   console_keymap = gnome_console_keymap_lookup(active_layout, active_variant);
   if (console_keymap)
   {
-    g_debug("calling SetVConsoleKeyboard for active GNOME source %s+%s "
-            "with console keymap %s",
-            active_layout, active_variant, console_keymap);
     g_debug("synchronizing active GNOME input source: %s+%s -> console keymap %s",
             active_layout, active_variant, console_keymap);
-    g_dbus_connection_call(self->connection,
-                           "org.freedesktop.locale1",
-                           "/org/freedesktop/locale1",
-                           "org.freedesktop.locale1",
-                           "SetVConsoleKeyboard",
-                           g_variant_new("(ssbb)", console_keymap, "", FALSE, FALSE),
-                           NULL,
-                           G_DBUS_CALL_FLAGS_NONE,
-                           -1,
-                           self->settings_apply_cancellable,
-                           settings_apply_done,
-                           g_object_ref(self));
+    if (!rcl_locale_daemon_set_vconsole_keyboard_internal(
+            self->daemon, console_keymap, "", &error))
+    {
+      g_warning("could not synchronize active GNOME console keymap: %s",
+                error ? error->message : "unknown error");
+      g_clear_error(&error);
+    }
   }
   else if (active_layout && *active_layout)
     g_debug("no console keymap mapping for active GNOME source %s+%s; "
@@ -390,9 +344,6 @@ stop_settings_helper(RclInputSources *self)
 
   if (self->settings_cancellable)
     g_cancellable_cancel(self->settings_cancellable);
-  if (self->settings_apply_cancellable)
-    g_cancellable_cancel(self->settings_apply_cancellable);
-  g_clear_object(&self->settings_apply_cancellable);
 
   if (self->settings_helper)
     g_subprocess_force_exit(self->settings_helper);
@@ -1524,7 +1475,12 @@ rcl_input_sources_init(RclInputSources *self)
 }
 
 RclInputSources *
-rcl_input_sources_new(void)
+rcl_input_sources_new(RclLocaleDaemon *daemon)
 {
-  return g_object_new(RCL_TYPE_INPUT_SOURCES, NULL);
+  RclInputSources *self;
+
+  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
+  self = g_object_new(RCL_TYPE_INPUT_SOURCES, NULL);
+  self->daemon = daemon;
+  return self;
 }
