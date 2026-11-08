@@ -121,6 +121,7 @@ static void restart_settings_helper(RclInputSources *self);
 static void
 settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
 {
+  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
   GError *error = NULL;
   GVariant *reply;
 
@@ -131,11 +132,9 @@ settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
     g_warning("could not synchronize GNOME XKB settings with localed: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
-    if (!RCL_INPUT_SOURCES(user_data)->stopping &&
-        RCL_INPUT_SOURCES(user_data)->active &&
-        !RCL_INPUT_SOURCES(user_data)->helper_restart_id)
-      RCL_INPUT_SOURCES(user_data)->helper_restart_id =
-        g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, user_data);
+    if (!self->stopping && self->active && !self->helper_restart_id)
+      self->helper_restart_id =
+        g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
   }
   else
     g_variant_unref(reply);
@@ -309,6 +308,8 @@ start_settings_helper(RclInputSources *self)
   struct passwd *pw;
   gid_t primary_gid = 0;
   gchar *home = NULL;
+  gchar *config_home = NULL;
+  gchar *data_home = NULL;
   gchar *uid_text = NULL;
   gchar *gid_text = NULL;
   gchar *runtime_dir = NULL;
@@ -376,11 +377,11 @@ start_settings_helper(RclInputSources *self)
 
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE |
                                         G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+  config_home = g_build_filename(home, ".config", NULL);
+  data_home = g_build_filename(home, ".local", "share", NULL);
   g_subprocess_launcher_setenv(launcher, "HOME", home, TRUE);
-  g_subprocess_launcher_setenv(launcher, "XDG_CONFIG_HOME",
-                               g_build_filename(home, ".config", NULL), TRUE);
-  g_subprocess_launcher_setenv(launcher, "XDG_DATA_HOME",
-                               g_build_filename(home, ".local", "share", NULL), TRUE);
+  g_subprocess_launcher_setenv(launcher, "XDG_CONFIG_HOME", config_home, TRUE);
+  g_subprocess_launcher_setenv(launcher, "XDG_DATA_HOME", data_home, TRUE);
   g_subprocess_launcher_setenv(launcher, "GSETTINGS_BACKEND", "dconf", TRUE);
   g_subprocess_launcher_unsetenv(launcher, "GSETTINGS_SCHEMA_DIR");
   g_subprocess_launcher_setenv(launcher, "USER", pw->pw_name, TRUE);
@@ -411,6 +412,8 @@ out:
   if (launcher)
     g_object_unref(launcher);
   g_free(setpriv);
+  g_free(config_home);
+  g_free(data_home);
   g_free(bus_address);
   g_free(bus_path);
   g_free(runtime_dir);
