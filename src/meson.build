@@ -25,7 +25,4 @@ executable(
   install               : true,
   install_dir           : get_option('libexecdir'),
   gnu_symbol_visibility : 'hidden',
-  c_args                : [
-    '-DGLIB_DISABLE_DEPRECATION_WARNINGS',
-  ],
 )
