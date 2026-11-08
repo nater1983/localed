@@ -147,14 +147,34 @@ rcl_file_snapshot_take ( RclFileSnapshot *snapshot,
   fd = open( path, O_RDONLY | O_CLOEXEC );
   if( fd < 0 )
   {
-    if( errno == ENOENT )
+    int saved_errno = errno;
+
+    if( saved_errno == ENOENT )
     {
-      snapshot->existed = FALSE;
-      return TRUE;
+      /*
+       * Confirm that the path is still absent.  It may have been created
+       * between the failed open() and this check.
+       */
+      if( g_stat( path, &st ) == 0 )
+      {
+        g_set_error( error, G_IO_ERROR, G_IO_ERROR_BUSY,
+                     "file %s appeared while its snapshot was being opened",
+                     path );
+        rcl_file_snapshot_clear( snapshot );
+        return FALSE;
+      }
+
+      if( errno == ENOENT )
+      {
+        snapshot->existed = FALSE;
+        return TRUE;
+      }
+
+      saved_errno = errno;
     }
 
-    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 "open snapshot %s: %s", path, g_strerror(errno) );
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                 "open snapshot %s: %s", path, g_strerror(saved_errno) );
     rcl_file_snapshot_clear( snapshot );
     return FALSE;
   }
@@ -214,6 +234,41 @@ rcl_file_snapshot_take ( RclFileSnapshot *snapshot,
                  "file %s changed while its snapshot was being read", path );
     g_string_free( contents, TRUE );
     goto out;
+  }
+
+  /*
+   * fstat() above describes the opened inode, even if another process has
+   * atomically replaced the pathname.  Verify that the pathname still
+   * resolves to that inode before accepting the snapshot.
+   */
+  {
+    GStatBuf path_after;
+
+    if( g_stat( path, &path_after ) != 0 )
+    {
+      int saved_errno = errno;
+
+      if( saved_errno == ENOENT )
+        g_set_error( error, G_IO_ERROR, G_IO_ERROR_BUSY,
+                     "file %s was removed while its snapshot was being read",
+                     path );
+      else
+        g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                     "stat snapshot path %s: %s",
+                     path, g_strerror(saved_errno) );
+
+      g_string_free( contents, TRUE );
+      goto out;
+    }
+
+    if( st.st_dev != path_after.st_dev || st.st_ino != path_after.st_ino )
+    {
+      g_set_error( error, G_IO_ERROR, G_IO_ERROR_BUSY,
+                   "file %s was replaced while its snapshot was being read",
+                   path );
+      g_string_free( contents, TRUE );
+      goto out;
+    }
   }
 
   snapshot->length = contents->len;
