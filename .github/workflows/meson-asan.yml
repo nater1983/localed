@@ -27,12 +27,19 @@ jobs:
             pkg-config \
             dbus-daemon
 
+      - name: Configure isolated test paths
+        run: |
+          mkdir -p "$RUNNER_TEMP/localed-test-config"
+
       - name: Configure AddressSanitizer build
         run: |
           meson setup build-asan \
             --buildtype=debug \
             -Db_sanitize=address \
-            -Dtests=true
+            -Dtests=true \
+            -Dlang_sh="$RUNNER_TEMP/localed-test-config/lang.sh" \
+            -Drc_keymap="$RUNNER_TEMP/localed-test-config/rc.keymap" \
+            -Dx11_keyboard_conf="$RUNNER_TEMP/localed-test-config/00-keyboard.conf"
 
       - name: Validate Slackware integration harness syntax
         run: sh -n tests/test-slackware-dbus-restart.sh
