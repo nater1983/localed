@@ -2,6 +2,27 @@
 
 All notable changes to `localed` are documented in this file.
 
+## [0.2.3] - Unreleased
+
+### Fixed
+- Reconnect locale1 using a fresh private system-bus connection after a bus
+  restart or connection loss instead of relying on GLib's cached shared bus.
+- Retry initial system-bus connection failures and locale1 registration
+  failures through one reconnect scheduler attached to the daemon's main
+  context.
+- Retire the previous locale1 registration and connection before attempting
+  reacquisition, and suppress stale name-loss callbacks during teardown.
+- Cancel outstanding PolicyKit authorization checks when the daemon's D-Bus
+  registration is shut down or replaced. Retain each request's session
+  cancellable and check it again before applying privileged changes.
+- Hold an owned reference to each asynchronous D-Bus method invocation until
+  its authorization callback completes.
+
+### Tests
+- Regression testing for system-bus restart and pending PolicyKit cancellation
+  is required before the 0.2.3 maintenance release.
+
+
 ## [0.2.2] - 2026-11-02
 
 ### Fixed
