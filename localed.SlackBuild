@@ -54,7 +54,13 @@ set -e
 # share it with other package builds (or set TMP=/tmp).
 rm -rf "$PKG" "$SRC"
 mkdir -p "$TMP" "$PKG" "$SRC" "$OUTPUT"
-cp -R "$CWD"/* "$SRC"/
+# Copy source files but do not bundle local build trees or Git metadata.
+find "$CWD" -mindepth 1 -maxdepth 1 \\
+  ! -name '.git' \\
+  ! -name 'build' \\
+  ! -name 'build-*' \\
+  ! -name 'meson-build' \\
+  -exec cp -R -t "$SRC" -- {} +
 cd "$SRC"
 
 chown -R root:root "$SRC"
