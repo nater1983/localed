@@ -311,10 +311,10 @@ rcl_xkb_config_parse ( const gchar *contents,
   gboolean in_section = FALSE;
   gboolean in_input_class = FALSE;
   RclXkbSection current;
-  gchar *layout = g_strdup( "" );
-  gchar *model = g_strdup( "" );
-  gchar *variant = g_strdup( "" );
-  gchar *options = g_strdup( "" );
+  gchar *layout = NULL;
+  gchar *model = NULL;
+  gchar *variant = NULL;
+  gchar *options = NULL;
 
   g_return_val_if_fail( contents != NULL, FALSE );
   g_return_val_if_fail( out_layout != NULL, FALSE );
@@ -322,6 +322,15 @@ rcl_xkb_config_parse ( const gchar *contents,
   g_return_val_if_fail( out_variant != NULL, FALSE );
   g_return_val_if_fail( out_options != NULL, FALSE );
   g_return_val_if_fail( error == NULL || *error == NULL, FALSE );
+
+  /*
+   * Allocate parser-owned defaults only after validating the API arguments.
+   * Otherwise a failed precondition would leak these four strings.
+   */
+  layout = g_strdup( "" );
+  model = g_strdup( "" );
+  variant = g_strdup( "" );
+  options = g_strdup( "" );
 
   *out_layout = NULL;
   *out_model = NULL;
