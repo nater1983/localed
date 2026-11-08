@@ -160,6 +160,7 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   gchar *current_model = NULL;
   gchar *current_variant = NULL;
   gchar *current_options = NULL;
+  gsize n_layouts = 0, n_variants = 0;
   GError *error = NULL;
 
   snapshot = g_variant_parse(G_VARIANT_TYPE("(asasas)"), line, NULL, NULL,
