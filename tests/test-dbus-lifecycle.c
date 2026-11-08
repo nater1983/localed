@@ -234,6 +234,7 @@ typedef struct
   gchar *check_cancellation_id;
   gchar *cancel_cancellation_id;
   GError *client_error;
+  GVariant *client_reply;
   GDBusMethodInvocation *pending_check;
 } PolkitFixture;
 
@@ -328,8 +329,7 @@ polkit_client_call_done(GObject *source,
 
   reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source),
                                         result, &fixture->client_error);
-  if (reply)
-    g_variant_unref(reply);
+  fixture->client_reply = reply;
   fixture->client_done = TRUE;
 }
 
@@ -375,6 +375,7 @@ polkit_fixture_free(PolkitFixture *fixture)
   g_free(fixture->check_cancellation_id);
   g_free(fixture->cancel_cancellation_id);
   g_clear_error(&fixture->client_error);
+  g_clear_pointer(&fixture->client_reply, g_variant_unref);
   g_clear_object(&fixture->pending_check);
 }
 
@@ -480,17 +481,24 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_assert_nonnull(strstr(contents, "Option \"XkbModel\" \"pc105\""));
   g_free(contents);
 
-  reply = g_dbus_connection_call_sync(
+  /*
+   * Do not use call_sync() here: the daemon's object is dispatched by this
+   * same test thread's main context, so a synchronous call would deadlock
+   * while waiting for the property handler.
+   */
+  polkit_fixture.client_done = FALSE;
+  g_dbus_connection_call(
     fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
     "/org/freedesktop/locale1", "org.freedesktop.DBus.Properties", "Get",
     g_variant_new("(ss)", "org.freedesktop.locale1", "X11Layout"),
-    G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 3000, NULL, &error);
-  g_assert_no_error(error);
-  g_assert_nonnull(reply);
-  g_variant_get(reply, "(v)", &property);
+    G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 3000, NULL,
+    polkit_client_call_done, &polkit_fixture);
+  iterate_until(&polkit_fixture, polkit_condition, 5000);
+  g_assert_no_error(polkit_fixture.client_error);
+  g_assert_nonnull(polkit_fixture.client_reply);
+  g_variant_get(polkit_fixture.client_reply, "(v)", &property);
   g_assert_cmpstr(g_variant_get_string(property, NULL), ==, "us");
   g_variant_unref(property);
-  g_variant_unref(reply);
 
   polkit_fixture_free(&polkit_fixture);
   rcl_daemon_shutdown(daemon);
