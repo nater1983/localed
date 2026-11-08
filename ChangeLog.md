@@ -19,6 +19,8 @@ All notable changes to `localed` are documented in this file.
 ### Tests
 - Add a FIFO-based regression test that replaces a configuration pathname
   while the snapshot reader still holds the original inode open.
+- Exercise `localed --replace` through an isolated system-bus restart and
+  verify that locale1 ownership and the AccountsService watch are restored.
 - Run the complete Meson test suite with AddressSanitizer and leak detection
   in GitHub Actions; all four test targets pass.
 
