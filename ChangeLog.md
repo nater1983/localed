@@ -19,8 +19,11 @@ All notable changes to `localed` are documented in this file.
   its authorization callback completes.
 
 ### Tests
-- Regression testing for system-bus restart and pending PolicyKit cancellation
-  is required before the 0.2.3 maintenance release.
+- Add an isolated system-bus restart harness that verifies localed stays alive,
+  reacquires `org.freedesktop.locale1`, and re-establishes its AccountsService
+  name watch after the bus is restarted.
+- Pending PolicyKit cancellation still requires runtime regression testing
+  before the 0.2.3 maintenance release.
 
 
 ## [0.2.2] - 2026-11-02
