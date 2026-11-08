@@ -1402,7 +1402,7 @@ rcl_gnome_backend_stop(RclGnomeBackend *self)
 gboolean
 rcl_gnome_backend_start(RclGnomeBackend *self, GError **error)
 {
-  g_return_val_if_fail(RCL_IS_INPUT_SOURCES(self), FALSE);
+  g_return_val_if_fail(RCL_IS_GNOME_BACKEND(self), FALSE);
   (void) error;
 
   if (self->connection || self->reconnect_id)
@@ -1421,7 +1421,7 @@ rcl_gnome_backend_get_active_session(RclGnomeBackend *self,
                                      gchar **session_type,
                                      gchar **desktop)
 {
-  g_return_val_if_fail(RCL_IS_INPUT_SOURCES(self), FALSE);
+  g_return_val_if_fail(RCL_IS_GNOME_BACKEND(self), FALSE);
 
   if (!self->active)
     return FALSE;
