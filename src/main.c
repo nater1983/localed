@@ -241,6 +241,11 @@ rcl_main_name_acquired(GDBusConnection *connection,
 
   state->has_name = TRUE;
 
+  /* Start the GNOME input-source backend only after locale1 is registered. */
+  if (state->input_sources &&
+      !rcl_input_sources_start(state->input_sources, NULL))
+    g_warning("could not start GNOME input-sources session discovery");
+
   /*
    * --replace controls the initial name request only.  Once this instance
    * owns locale1, it must recover like any other daemon after a bus restart
@@ -629,15 +634,6 @@ gint main(gint argc, gchar **argv)
   if (!rcl_accounts_service_start(state->accounts_service, &error))
   {
     g_warning("could not start AccountsService integration: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
-  }
-
-  /* GNOME input-source session discovery is independent of locale1. */
-  state->input_sources = rcl_input_sources_new();
-  if (!rcl_input_sources_start(state->input_sources, &error))
-  {
-    g_warning("could not start GNOME input-sources session discovery: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
   }
