@@ -32,7 +32,7 @@ static void
 test_input_sources_start_stop(void)
 {
   GTestDBus *bus = g_test_dbus_new(G_TEST_DBUS_NONE);
-  RclGnomeBackend *backend;
+  RclBackend *backend;
   RclLocaleDaemon *daemon;
   GError *error = NULL;
   guint i;
@@ -56,9 +56,9 @@ test_input_sources_start_stop(void)
 
   for (i = 0; i < 2; i++)
   {
-    g_assert_true(rcl_gnome_backend_start(backend, &error));
+    g_assert_true(rcl_backend_start(backend, &error));
     g_assert_no_error(error);
-    rcl_gnome_backend_stop(backend);
+    rcl_backend_stop(backend);
   }
 
   g_object_unref(backend);

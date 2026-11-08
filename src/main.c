@@ -36,6 +36,9 @@
 
 #include "rcl-locale.h"
 #include "backends/backend-interface.h"
+#if HAVE_GNOME_BACKEND
+#include "backends/gnome/gnome-backend.h"
+#endif
 #include "rcl-accounts-service.h"
 #if HAVE_GNOME_BACKEND
 

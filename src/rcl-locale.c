@@ -1914,10 +1914,9 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
-/* Trusted in-process entry points used by desktop input-source backends.
- * These deliberately bypass D-Bus and Polkit: the caller runs inside the
- * privileged localed daemon. Public D-Bus requests continue through the
- * authorized Set* method handlers below. */
+#if HAVE_GNOME_BACKEND
+/* Trusted in-process keyboard entry points used by the GNOME input-source
+ * backend. Public D-Bus requests continue through authorized D-Bus handlers. */
 gboolean
 rcl_locale_daemon_set_vconsole_keyboard_internal(
     RclLocaleDaemon *daemon,
@@ -1980,6 +1979,7 @@ rcl_locale_daemon_set_x11_keyboard_internal(
   rcl_daemon_sync_dbus_properties(daemon);
   return TRUE;
 }
+#endif /* HAVE_GNOME_BACKEND */
 
 /* ---- asynchronous PolicyKit D-Bus authorization ---- */
 

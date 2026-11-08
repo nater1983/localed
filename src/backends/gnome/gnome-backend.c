@@ -1502,5 +1502,5 @@ rcl_gnome_backend_new(RclLocaleDaemon *daemon)
   g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
   self = g_object_new(RCL_TYPE_GNOME_BACKEND, NULL);
   self->daemon = daemon;
-  return self;
+  return RCL_BACKEND(self);
 }
