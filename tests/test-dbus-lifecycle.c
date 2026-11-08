@@ -5,8 +5,12 @@
  * Exercise AccountsService name monitoring and repeated lifecycle cleanup
  * against an isolated in-process D-Bus daemon. No host system bus is touched.
  */
+#include "config.h"
+
 #include <gio/gio.h>
 #include <glib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "rcl-accounts-service.h"
 #include "rcl-locale.h"
@@ -222,6 +226,7 @@ test_system_bus_restart(Fixture *fixture, gconstpointer user_data)
 typedef struct
 {
   gboolean hold_check;
+  gboolean authorized;
   gboolean check_seen;
   gboolean cancel_seen;
   gboolean client_done;
@@ -229,6 +234,7 @@ typedef struct
   gchar *check_cancellation_id;
   gchar *cancel_cancellation_id;
   GError *client_error;
+  GVariant *client_reply;
   GDBusMethodInvocation *pending_check;
 } PolkitFixture;
 
@@ -280,7 +286,7 @@ polkit_method_call(GDBusConnection *connection,
 
     g_dbus_method_invocation_return_value(
       invocation,
-      g_variant_new("((bb@a{ss}))", FALSE, FALSE,
+      g_variant_new("((bb@a{ss}))", fixture->authorized, FALSE,
                     g_variant_new_array(G_VARIANT_TYPE("{ss}"), NULL, 0)));
     return;
   }
@@ -323,8 +329,13 @@ polkit_client_call_done(GObject *source,
 
   reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source),
                                         result, &fixture->client_error);
-  if (reply)
-    g_variant_unref(reply);
+
+  /*
+   * Some tests reuse this fixture for sequential asynchronous calls.  Release
+   * the previous reply before storing the next one.
+   */
+  g_clear_pointer(&fixture->client_reply, g_variant_unref);
+  fixture->client_reply = reply;
   fixture->client_done = TRUE;
 }
 
@@ -370,7 +381,310 @@ polkit_fixture_free(PolkitFixture *fixture)
   g_free(fixture->check_cancellation_id);
   g_free(fixture->cancel_cancellation_id);
   g_clear_error(&fixture->client_error);
+  g_clear_pointer(&fixture->client_reply, g_variant_unref);
   g_clear_object(&fixture->pending_check);
+}
+
+static void
+test_invalid_x11_keyboard_rejected_before_polkit(Fixture *fixture,
+                                                  gconstpointer user_data)
+{
+  GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
+  PolkitFixture call = { 0 };
+  RclDaemon *daemon = rcl_daemon_new();
+
+  g_assert_true(rcl_daemon_startup(daemon, daemon_bus));
+
+  /*
+   * No PolicyKit authority is registered on this test bus.  The malformed
+   * layout must be rejected locally with InvalidArgs, rather than attempting
+   * an authorization call and failing with ServiceUnknown.
+   */
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetX11Keyboard",
+    g_variant_new("(ssssbb)", "us;touch", "pc105", "", "", FALSE, TRUE),
+    NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+    polkit_client_call_done, &call );
+
+  iterate_until(&call, polkit_condition, 5000);
+  g_assert_nonnull(call.client_error);
+  {
+    gchar *remote_error = g_dbus_error_get_remote_error(call.client_error);
+    g_assert_cmpstr(remote_error, ==, "org.freedesktop.DBus.Error.InvalidArgs");
+    g_free(remote_error);
+  }
+
+  polkit_fixture_free(&call);
+  rcl_daemon_shutdown(daemon);
+  g_object_unref(daemon);
+  g_dbus_connection_close_sync(daemon_bus, NULL, NULL);
+  g_object_unref(daemon_bus);
+}
+
+static gchar *
+get_locale_string_property ( Fixture *fixture,
+                             GDBusConnection *daemon_bus,
+                             PolkitFixture *polkit_fixture,
+                             const gchar *property_name )
+{
+  GVariant *value;
+  gchar *result;
+
+  polkit_fixture->client_done = FALSE;
+  g_clear_error( &polkit_fixture->client_error );
+
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.DBus.Properties", "Get",
+    g_variant_new("(ss)", "org.freedesktop.locale1", property_name),
+    G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 3000, NULL,
+    polkit_client_call_done, polkit_fixture );
+
+  iterate_until( polkit_fixture, polkit_condition, 5000 );
+  g_assert_no_error( polkit_fixture->client_error );
+  g_assert_nonnull( polkit_fixture->client_reply );
+
+  g_variant_get( polkit_fixture->client_reply, "(v)", &value );
+  result = g_variant_dup_string( value, NULL );
+  g_variant_unref( value );
+
+  return result;
+}
+
+static void
+test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
+{
+  GError *error = NULL;
+  GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
+  GDBusConnection *polkit_bus = connect_test_bus(fixture->address);
+  GDBusNodeInfo *node = g_dbus_node_info_new_for_xml(test_polkit_xml, &error);
+  PolkitFixture polkit_fixture = { .authorized = TRUE };
+  RclDaemon *daemon = rcl_daemon_new();
+  guint registration_id;
+  guint name_result;
+  GVariant *reply;
+  GVariant *property;
+  gchar *contents = NULL;
+  gsize contents_len = 0;
+  gchar *expected_path = g_strdup(RCL_X11_KEYBOARD_FILE);
+
+  /*
+   * This test writes a real configuration file.  Require an explicitly
+   * isolated Meson test path so a developer's /etc/X11 configuration can
+   * never be overwritten by the test.
+   */
+  g_assert_cmpstr(expected_path, !=, "/etc/X11/xorg.conf.d/00-keyboard.conf");
+  g_assert_cmpstr(RCL_RC_KEYMAP_FILE, !=, "/etc/rc.d/rc.keymap");
+  g_assert_cmpstr(RCL_RC_KEYMAP_TOGGLE_FILE, !=,
+                  "/etc/rc.d/rc.keymap.toggle");
+
+  g_assert_no_error(error);
+  g_assert_nonnull(node);
+  g_assert_true(rcl_daemon_startup(daemon, daemon_bus));
+
+  reply = g_dbus_connection_call_sync(
+    polkit_bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+    "org.freedesktop.DBus", "RequestName",
+    g_variant_new("(su)", TEST_POLKIT_NAME, 0u),
+    G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 3000, NULL, &error);
+  g_assert_no_error(error);
+  g_variant_get(reply, "(u)", &name_result);
+  g_variant_unref(reply);
+  g_assert_true(name_result == 1u || name_result == 4u);
+
+  registration_id = g_dbus_connection_register_object(
+    polkit_bus, TEST_POLKIT_PATH,
+    g_dbus_node_info_lookup_interface(node,
+                                      "org.freedesktop.PolicyKit1.Authority"),
+    &test_polkit_vtable, &polkit_fixture, NULL, &error);
+  g_assert_no_error(error);
+  g_assert_cmpuint(registration_id, >, 0);
+
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetX11Keyboard",
+    g_variant_new("(ssssbb)", "ch", "pc105", "fr", "", TRUE, TRUE),
+    NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+    polkit_client_call_done, &polkit_fixture);
+
+  iterate_until(&polkit_fixture, polkit_condition, 5000);
+  g_assert_true(polkit_fixture.check_seen);
+  g_assert_no_error(polkit_fixture.client_error);
+
+  g_assert_true(g_file_get_contents(expected_path, &contents,
+                                    &contents_len, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(contents, "Identifier \"system-keyboard\""));
+  g_assert_nonnull(strstr(contents, "Option \"XkbLayout\" \"ch\""));
+  g_assert_nonnull(strstr(contents, "Option \"XkbModel\" \"pc105\""));
+  g_assert_nonnull(strstr(contents, "Option \"XkbVariant\" \"fr\""));
+  g_free(contents);
+
+  /*
+   * Reverse conversion must respect the XKB variant: Swiss French maps to
+   * the Slackware console keymap ch-fr, not the generic ch keymap.
+   */
+  g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &contents,
+                                    &contents_len, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(contents, "loadkeys \"ch-fr\""));
+  g_free(contents);
+
+  /*
+   * Exercise the opposite direction as well: the Slackware "uk" keymap
+   * converts to X11 layout "gb".
+   */
+  polkit_fixture.client_done = FALSE;
+  g_clear_error(&polkit_fixture.client_error);
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetVConsoleKeyboard",
+    g_variant_new("(ssbb)", "uk", "", TRUE, TRUE),
+    NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+    polkit_client_call_done, &polkit_fixture);
+  iterate_until(&polkit_fixture, polkit_condition, 5000);
+  g_assert_no_error(polkit_fixture.client_error);
+
+  g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &contents,
+                                    &contents_len, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(contents, "loadkeys \"uk\""));
+  g_free(contents);
+
+  g_assert_true(g_file_get_contents(expected_path, &contents,
+                                    &contents_len, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(contents, "Option \"XkbLayout\" \"gb\""));
+  g_free(contents);
+
+  /*
+   * Do not use call_sync() here: the daemon's object is dispatched by this
+   * same test thread's main context, so a synchronous call would deadlock
+   * while waiting for the property handler.
+   */
+  polkit_fixture.client_done = FALSE;
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.DBus.Properties", "Get",
+    g_variant_new("(ss)", "org.freedesktop.locale1", "X11Layout"),
+    G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 3000, NULL,
+    polkit_client_call_done, &polkit_fixture);
+  iterate_until(&polkit_fixture, polkit_condition, 5000);
+  g_assert_no_error(polkit_fixture.client_error);
+  g_assert_nonnull(polkit_fixture.client_reply);
+  g_variant_get(polkit_fixture.client_reply, "(v)", &property);
+  g_assert_cmpstr(g_variant_get_string(property, NULL), ==, "gb");
+  g_variant_unref(property);
+
+  /*
+   * Failure injection: update both console files, then fail the Xorg rename.
+   * The transaction must restore the original keymap and toggle sidecar and
+   * leave the X11 file and all D-Bus properties at their pre-call values.
+   */
+  {
+    gchar *before_keymap = NULL;
+    gchar *before_toggle = NULL;
+    gchar *before_x11 = NULL;
+    gchar *after = NULL;
+
+    g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &before_keymap,
+                                      NULL, &error));
+    g_assert_no_error(error);
+    g_assert_true(g_file_set_contents(RCL_RC_KEYMAP_TOGGLE_FILE,
+                                      "old-toggle\n", -1, &error));
+    g_assert_no_error(error);
+
+    /* Refresh the daemon cache so the toggle property reflects the fixture. */
+    rcl_daemon_sync_dbus_properties(RCL_LOCALE_DAEMON(daemon));
+
+    g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_TOGGLE_FILE,
+                                      &before_toggle, NULL, &error));
+    g_assert_no_error(error);
+    g_assert_true(g_file_get_contents(expected_path, &before_x11,
+                                      NULL, &error));
+    g_assert_no_error(error);
+
+    {
+      const gchar *failure_paths[] = {
+        RCL_RC_KEYMAP_FILE,
+        RCL_RC_KEYMAP_TOGGLE_FILE,
+        expected_path
+      };
+      guint i;
+
+      for( i = 0; i < G_N_ELEMENTS(failure_paths); i++ )
+      {
+        rcl_locale_test_fail_rename_to( failure_paths[i] );
+        polkit_fixture.client_done = FALSE;
+        g_clear_error( &polkit_fixture.client_error );
+        g_dbus_connection_call(
+          fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+          "/org/freedesktop/locale1", "org.freedesktop.locale1",
+          "SetVConsoleKeyboard",
+          g_variant_new("(ssbb)", "de", "us", TRUE, TRUE),
+          NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+          polkit_client_call_done, &polkit_fixture );
+        iterate_until( &polkit_fixture, polkit_condition, 5000 );
+        rcl_locale_test_fail_rename_to( NULL );
+
+        g_assert_nonnull( polkit_fixture.client_error );
+        g_assert_nonnull( strstr( polkit_fixture.client_error->message,
+                                  "rename(" ) );
+
+        g_assert_true( g_file_get_contents(RCL_RC_KEYMAP_FILE, &after,
+                                           NULL, &error) );
+        g_assert_no_error( error );
+        g_assert_cmpstr( after, ==, before_keymap );
+        g_clear_pointer( &after, g_free );
+
+        g_assert_true( g_file_get_contents(RCL_RC_KEYMAP_TOGGLE_FILE, &after,
+                                           NULL, &error) );
+        g_assert_no_error( error );
+        g_assert_cmpstr( after, ==, before_toggle );
+        g_clear_pointer( &after, g_free );
+
+        g_assert_true( g_file_get_contents(expected_path, &after,
+                                           NULL, &error) );
+        g_assert_no_error( error );
+        g_assert_cmpstr( after, ==, before_x11 );
+        g_clear_pointer( &after, g_free );
+      }
+    }
+
+    after = get_locale_string_property(fixture, daemon_bus,
+                                       &polkit_fixture, "VConsoleKeymap");
+    g_assert_cmpstr(after, ==, "uk");
+    g_clear_pointer(&after, g_free);
+
+    after = get_locale_string_property(fixture, daemon_bus,
+                                       &polkit_fixture, "VConsoleKeymapToggle");
+    g_assert_cmpstr(after, ==, "old-toggle");
+    g_clear_pointer(&after, g_free);
+
+    after = get_locale_string_property(fixture, daemon_bus,
+                                       &polkit_fixture, "X11Layout");
+    g_assert_cmpstr(after, ==, "gb");
+    g_clear_pointer(&after, g_free);
+
+    g_free(before_keymap);
+    g_free(before_toggle);
+    g_free(before_x11);
+  }
+
+  polkit_fixture_free(&polkit_fixture);
+  rcl_daemon_shutdown(daemon);
+  g_object_unref(daemon);
+  g_dbus_connection_unregister_object(polkit_bus, registration_id);
+  g_dbus_node_info_unref(node);
+  g_dbus_connection_close_sync(polkit_bus, NULL, NULL);
+  g_dbus_connection_close_sync(daemon_bus, NULL, NULL);
+  g_object_unref(polkit_bus);
+  g_object_unref(daemon_bus);
+  unlink(expected_path);
+  unlink(RCL_RC_KEYMAP_FILE);
+  unlink(RCL_RC_KEYMAP_TOGGLE_FILE);
+  g_free(expected_path);
 }
 
 static void
@@ -515,6 +829,12 @@ main(int argc, char **argv)
              fixture_setup, test_repeated_start_stop_cleanup, fixture_teardown);
   g_test_add("/dbus/system-bus-restart", Fixture, NULL,
              fixture_setup, test_system_bus_restart, fixture_teardown);
+  g_test_add("/dbus/invalid-x11-before-polkit", Fixture, NULL,
+             fixture_setup, test_invalid_x11_keyboard_rejected_before_polkit,
+             fixture_teardown);
+  g_test_add("/dbus/authorized-x11-update", Fixture, NULL,
+             fixture_setup, test_authorized_x11_keyboard_update,
+             fixture_teardown);
   g_test_add("/polkit/denial", Fixture, NULL,
              fixture_setup, test_polkit_denial, fixture_teardown);
   g_test_add("/polkit/cancellation", Fixture, NULL,

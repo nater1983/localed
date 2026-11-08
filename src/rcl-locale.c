@@ -34,6 +34,39 @@
 #include "rcl-locale.h"
 #include "rcl-file-utils.h"
 #include "rcl-file-transaction.h"
+#include "rcl-xkb-config.h"
+
+#ifdef RCL_LOCALE_TESTING
+/*
+ * Fail one forward configuration rename in the D-Bus integration tests.
+ * Rollback uses rcl-file-transaction.c directly and is deliberately not
+ * intercepted, allowing the test to verify restoration after a partial
+ * multi-file update.
+ */
+static gchar *test_fail_rename_destination;
+
+void
+rcl_locale_test_fail_rename_to ( const gchar *destination )
+{
+  g_free( test_fail_rename_destination );
+  test_fail_rename_destination = g_strdup( destination );
+}
+
+static int
+rcl_locale_rename ( const gchar *source, const gchar *destination )
+{
+  if( test_fail_rename_destination &&
+      g_strcmp0( destination, test_fail_rename_destination ) == 0 )
+  {
+    errno = EIO;
+    return -1;
+  }
+
+  return g_rename( source, destination );
+}
+#else
+#define rcl_locale_rename g_rename
+#endif
 
 /* --------------------------------------------------------------------------
    The org.freedesktop.locale1 introspection XML.
@@ -283,13 +316,19 @@ rcl_keymap_to_x11( const gchar *keymap, gchar **out_layout, gchar **out_variant 
 }
 
 static gboolean
-rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
+rcl_x11_to_keymap( const gchar *layout,
+                   const gchar *variant,
+                   gchar **out_keymap )
 {
   guint i;
-  /* Match on layout alone (first component if a comma-separated list was
-     passed); this is a best-effort convenience, not an authoritative
-     mapping. */
+  /*
+   * Match the first layout and its corresponding first variant.  XKB uses
+   * positional correspondence between comma-separated layout and variant
+   * lists; ignoring the variant can select a different console map (for
+   * example, "ch" + "fr" must map to "ch-fr", not "ch").
+   */
   gchar *first_layout = NULL;
+  gchar *first_variant = NULL;
   const gchar *comma;
   gboolean found = FALSE;
 
@@ -300,9 +339,17 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
   first_layout = comma ? g_strndup( layout, (gsize)(comma - layout) )
                        : g_strdup( layout );
 
+  if( !variant )
+    variant = "";
+
+  comma = strchr( variant, ',' );
+  first_variant = comma ? g_strndup( variant, (gsize)(comma - variant) )
+                        : g_strdup( variant );
+
   for( i = 0; keymap_map[i].vconsole_keymap != NULL; i++ )
   {
-    if( g_strcmp0( first_layout, keymap_map[i].x11_layout ) == 0 )
+    if( g_strcmp0( first_layout, keymap_map[i].x11_layout ) == 0 &&
+        g_strcmp0( first_variant, keymap_map[i].x11_variant ) == 0 )
     {
       *out_keymap = g_strdup( keymap_map[i].vconsole_keymap );
       found = TRUE;
@@ -311,6 +358,7 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
   }
 
   g_free( first_layout );
+  g_free( first_variant );
   return found;
 }
 
@@ -336,100 +384,71 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
    with an empty value are still emitted (most tools treat a present-but-
    empty Option the same as an absent one).
    -------------------------------------------------------------------------- */
-/* Maximum length for any single XKB option value extracted from the config
-   file.  Values longer than this are almost certainly malformed or malicious
-   (real XKB layout/model/variant/options strings are well under 64 chars). */
-#define MAX_XKB_VALUE_LEN  256
-
-static gchar *
-extract_xkb_option( const gchar *contents, const gchar *option_name )
-{
-  gchar **lines = g_strsplit( contents, "\n", -1 );
-  gchar  *result = NULL;
-  guint   i;
-
-  /* Only match Option "Name" "value" lines, ignoring comments and unrelated
-     text that happens to mention the option name. */
-  for( i = 0; lines[i] != NULL && result == NULL; i++ )
-  {
-    gchar *line = g_strstrip( lines[i] );
-    gchar *q1, *q2, *q3, *q4;
-    gsize  nlen;
-
-    if( g_str_has_prefix( line, "#" ) ||
-        strncmp( line, "Option", 6 ) != 0 ||
-        ( line[6] != ' ' && line[6] != '\t' ) )
-      continue;
-
-    q1 = strchr( line + 6, '"' );
-    q2 = q1 ? strchr( q1 + 1, '"' ) : NULL;
-    q3 = q2 ? strchr( q2 + 1, '"' ) : NULL;
-    q4 = q3 ? strchr( q3 + 1, '"' ) : NULL;
-    if( !q1 || !q2 || !q3 || !q4 )
-      continue;
-
-    nlen = (gsize)( q2 - q1 - 1 );
-    if( nlen != strlen( option_name ) ||
-        strncmp( q1 + 1, option_name, nlen ) != 0 )
-      continue;
-
-    if( (gsize)( q4 - q3 - 1 ) <= MAX_XKB_VALUE_LEN )
-      result = g_strndup( q3 + 1, (gsize)( q4 - q3 - 1 ) );
-    else
-      g_warning( "extract_xkb_option: value for '%s' exceeds %d bytes, ignoring",
-                 option_name, MAX_XKB_VALUE_LEN );
-  }
-
-  g_strfreev( lines );
-  return result ? result : g_strdup( "" );
-}
-
 static void
 read_x11_keyboard_conf( const gchar *path,
                         gchar **out_layout, gchar **out_model,
                         gchar **out_variant, gchar **out_options )
 {
   gchar *contents = NULL;
+  gchar *layout = NULL, *model = NULL, *variant = NULL, *options = NULL;
+  GError *error = NULL;
 
   *out_layout  = g_strdup( "" );
   *out_model   = g_strdup( "" );
   *out_variant = g_strdup( "" );
   *out_options = g_strdup( "" );
 
-  if( !g_file_get_contents( path, &contents, NULL, NULL ) )
+  if( !g_file_get_contents( path, &contents, NULL, &error ) )
+  {
+    /*
+     * A missing Xorg snippet is a normal unconfigured state.  Other read
+     * failures must be visible in the journal rather than silently looking
+     * identical to a missing file.
+     */
+    if( !g_error_matches( error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
+      g_warning( "read_x11_keyboard_conf: cannot read %s: %s",
+                 path, error ? error->message : "unknown read error" );
+    g_clear_error( &error );
     return;
+  }
 
-  g_free( *out_layout );  *out_layout  = extract_xkb_option( contents, "XkbLayout" );
-  g_free( *out_model );   *out_model   = extract_xkb_option( contents, "XkbModel" );
-  g_free( *out_variant ); *out_variant = extract_xkb_option( contents, "XkbVariant" );
-  g_free( *out_options ); *out_options = extract_xkb_option( contents, "XkbOptions" );
+  if( !rcl_xkb_config_parse( contents, &layout, &model, &variant,
+                             &options, &error ) )
+  {
+    g_warning( "read_x11_keyboard_conf: cannot parse %s: %s",
+               path, error ? error->message : "unknown parser error" );
+    g_clear_error( &error );
+    g_free( contents );
+    return;
+  }
 
   g_free( contents );
 
+  g_free( *out_layout );  *out_layout = layout;
+  g_free( *out_model );   *out_model = model;
+  g_free( *out_variant ); *out_variant = variant;
+  g_free( *out_options ); *out_options = options;
+
   /* Validate values read from disk against the same allowlist used by
-   * SetX11Keyboard.  A manually-edited 00-keyboard.conf with characters
-   * outside [A-Za-z0-9\-_.,+:] is reset to empty rather than served as
-   * a D-Bus property, keeping the property consistent with what SetX11Keyboard
-   * would accept. */
-#define SANITISE_XKB(field, name)                                         \
-  do {                                                                    \
-    if( (*field)[0] != '\0' && !rcl_keyboard_value_is_safe( *field ) )   \
-    {                                                                     \
-      g_warning( "read_x11_keyboard_conf: unsafe value for %s, ignoring", \
-                 name );                                                  \
-      g_free( *field );                                                   \
-      *field = g_strdup( "" );                                            \
-    }                                                                     \
+   * SetX11Keyboard. Unsafe values are not exposed as D-Bus properties. */
+#define SANITISE_XKB(field, name, kind)                                  \
+  do {                                                                      \
+    if( (*field)[0] != '\0' && !rcl_xkb_value_is_valid( kind, *field ) )   \
+    {                                                                       \
+      g_warning( "read_x11_keyboard_conf: invalid value for %s, ignoring", \
+                 name );                                                    \
+      g_clear_pointer( field, g_free );                                     \
+      *field = g_strdup( "" );                                              \
+    }                                                                       \
   } while(0)
 
-  SANITISE_XKB( out_layout,  "XkbLayout" );
-  SANITISE_XKB( out_model,   "XkbModel" );
-  SANITISE_XKB( out_variant, "XkbVariant" );
-  SANITISE_XKB( out_options, "XkbOptions" );
+  SANITISE_XKB( out_layout,  "XkbLayout",  RCL_XKB_VALUE_LAYOUT );
+  SANITISE_XKB( out_model,   "XkbModel",   RCL_XKB_VALUE_MODEL );
+  SANITISE_XKB( out_variant, "XkbVariant", RCL_XKB_VALUE_VARIANT );
+  SANITISE_XKB( out_options, "XkbOptions", RCL_XKB_VALUE_OPTIONS );
 
 #undef SANITISE_XKB
 }
-
 
 static gboolean
 write_x11_keyboard_conf( const gchar *path,
@@ -496,7 +515,7 @@ write_x11_keyboard_conf( const gchar *path,
     if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
       ok = FALSE;
 
-    if( ok && g_rename( tmp_path, path ) != 0 )
+    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
     {
       int saved_errno = errno;
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
@@ -683,7 +702,7 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
       ok = FALSE;
     }
 
-    if( ok && g_rename( tmp_path, path ) != 0 )
+    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
@@ -781,7 +800,7 @@ rcl_write_rc_keymap_toggle( const gchar *path,
         ok = FALSE;
       }
 
-      if( ok && g_rename( tmp_path, path ) != 0 )
+      if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
       {
         g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                      "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
@@ -797,6 +816,9 @@ rcl_write_rc_keymap_toggle( const gchar *path,
     return ok;
   }
 }
+
+/* Maximum accepted length for locale and keyboard configuration values. */
+#define MAX_XKB_VALUE_LEN  256
 
 /* --------------------------------------------------------------------------
    Input validation
@@ -1142,7 +1164,7 @@ rcl_write_lang_sh( const gchar         *path,
       ok = FALSE;
     }
 
-    if( ok && g_rename( tmp_path, path ) != 0 )
+    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
@@ -1821,6 +1843,18 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
+static gboolean
+rcl_x11_keyboard_values_are_valid( const gchar *layout,
+                                   const gchar *model,
+                                   const gchar *variant,
+                                   const gchar *options )
+{
+  return rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, layout ) &&
+         rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, model ) &&
+         rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT, variant ) &&
+         rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, options );
+}
+
 static void
 do_set_x11_keyboard( RclLocaleDaemon *daemon,
                      const gchar *layout, const gchar *model,
@@ -1830,10 +1864,7 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
 {
   GError *error = NULL;
 
-  if( ( layout[0]  && !rcl_keyboard_value_is_safe(layout) )  ||
-      ( model[0]   && !rcl_keyboard_value_is_safe(model) )   ||
-      ( variant[0] && !rcl_keyboard_value_is_safe(variant) ) ||
-      ( options[0] && !rcl_keyboard_value_is_safe(options) ) )
+  if( !rcl_x11_keyboard_values_are_valid( layout, model, variant, options ) )
   {
     g_dbus_method_invocation_return_error( invocation,
       G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -1844,7 +1875,7 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   if( convert && layout[0] != '\0' )
   {
     gchar *vc_keymap = NULL;
-    if( rcl_x11_to_keymap( layout, &vc_keymap ) )
+    if( rcl_x11_to_keymap( layout, variant, &vc_keymap ) )
     {
       if( !rcl_write_x11_vconsole_files( layout, model, variant, options,
                                          vc_keymap, &error ) )
@@ -2156,13 +2187,12 @@ rcl_write_vconsole_x11_files( const gchar *keymap, const gchar *keymap_toggle,
                               const gchar *variant, const gchar *options,
                               GError **error )
 {
-  RclFileSnapshot vc = { 0 }, toggle = { 0 }, x11 = { 0 };
+  RclFileSnapshot vc = { 0 }, toggle = { 0 };
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean keymap_written = FALSE, toggle_written = FALSE, ok = FALSE;
 
   if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, &write_error ) ||
-      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) ||
-      !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, &write_error ) )
+      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) )
     goto fail;
   if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
     goto fail;
@@ -2187,7 +2217,6 @@ fail:
 out:
   rcl_file_snapshot_clear( &vc );
   rcl_file_snapshot_clear( &toggle );
-  rcl_file_snapshot_clear( &x11 );
   return ok;
 }
 
@@ -2305,6 +2334,18 @@ handle_method_call( GDBusConnection       *connection,
 
     g_variant_get( parameters, "(&s&s&s&sbb)", &layout, &model, &variant,
                    &options, &convert, &interactive );
+
+    /*
+     * Reject malformed values before contacting PolicyKit.  The operation
+     * handler repeats this validation after authorization as defense in depth.
+     */
+    if( !rcl_x11_keyboard_values_are_valid( layout, model, variant, options ) )
+    {
+      g_dbus_method_invocation_return_error( invocation,
+        G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+        "Invalid X11 keyboard configuration value" );
+      return;
+    }
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon      = g_object_ref( daemon );
