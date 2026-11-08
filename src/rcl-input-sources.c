@@ -151,7 +151,7 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   gchar *layout = NULL;
   gchar *variant = NULL;
   gchar *option = NULL;
-  gsize n_layouts = 0, n_variants = 0, n_options = 0;
+  gsize n_layouts = 0, n_variants = 0;
   GError *error = NULL;
 
   snapshot = g_variant_parse(G_VARIANT_TYPE("(asasas)"), line, NULL, NULL,
@@ -168,13 +168,15 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
                 &layouts_v, &variants_v, &options_v);
   layouts = g_variant_dup_strv(layouts_v, &n_layouts);
   variants = g_variant_dup_strv(variants_v, &n_variants);
-  options = g_variant_dup_strv(options_v, &n_options);
+  options = g_variant_dup_strv(options_v, NULL);
 
   if (n_layouts == 0 || n_layouts != n_variants)
     goto out;
 
   layout = g_strjoinv(",", layouts);
   variant = g_strjoinv(",", variants);
+  if (strspn(variant, ",") == strlen(variant))
+    variant[0] = '\0';
   option = g_strjoinv(",", options);
 
   if (!rcl_xkb_value_is_valid(RCL_XKB_VALUE_LAYOUT, layout) ||
@@ -335,10 +337,11 @@ start_settings_helper(RclInputSources *self)
   bus_path = g_build_filename(runtime_dir, "bus", NULL);
   bus_address = g_strdup_printf("unix:path=%s", bus_path);
 
-  if (g_stat(runtime_dir, &runtime_stat) != 0 ||
+  if (stat(runtime_dir, &runtime_stat) != 0 ||
       !S_ISDIR(runtime_stat.st_mode) ||
       runtime_stat.st_uid != self->active->uid ||
-      g_stat(bus_path, &bus_stat) != 0 ||
+      (runtime_stat.st_mode & 0077) != 0 ||
+      stat(bus_path, &bus_stat) != 0 ||
       !S_ISSOCK(bus_stat.st_mode) ||
       bus_stat.st_uid != self->active->uid)
   {
