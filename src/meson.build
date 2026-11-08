@@ -14,7 +14,7 @@ localed_deps = [
 
 localed_inc = [
   config_h_inc,
-  include_directories('.', 'backends/gnome'),
+  include_directories('.'),
 ]
 
 if get_option('backend') == 'gnome'
