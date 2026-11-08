@@ -83,7 +83,10 @@ PASS: AccountsService connection and name watch re-established
 ```
 
 The test requires `dbus-daemon` and `gdbus`. It starts localed with
-`--debug` and captures its output in a temporary directory.
+`--debug --replace` and captures its output in a temporary directory.
+This also verifies that `--replace` is treated as a startup-only instruction:
+after the initial name acquisition, the daemon must remain alive and reacquire
+locale1 when the system bus restarts.
 
 ## 3. AccountsService reconnection on the actual Slackware system bus
 
