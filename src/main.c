@@ -255,7 +255,7 @@ rcl_main_name_acquired(GDBusConnection *connection,
  *
  * If the name was never acquired, another instance is likely running and
  * startup fails. If it was lost after successful startup, retry after a
- * short delay unless this instance is exiting or was explicitly replaced.
+ * short delay unless this instance is exiting.
  */
 static void
 rcl_main_name_lost(GDBusConnection *connection,
