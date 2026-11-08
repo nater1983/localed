@@ -250,7 +250,7 @@ rcl_main_name_acquired(GDBusConnection *connection,
 #if HAVE_GNOME_BACKEND
   /* Start the selected GNOME backend only after locale1 is registered. */
   if (state->gnome_backend &&
-      !rcl_gnome_backend_start(state->input_sources, NULL))
+      !rcl_gnome_backend_start(state->gnome_backend, NULL))
     g_warning("could not start GNOME backend session discovery");
 #endif
 
@@ -648,7 +648,7 @@ gint main(gint argc, gchar **argv)
 
 #if HAVE_GNOME_BACKEND
   /* GNOME owns input-source discovery and synchronization. */
-  state->input_sources =
+  state->gnome_backend =
       rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
 #endif
 
