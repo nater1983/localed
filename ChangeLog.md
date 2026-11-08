@@ -9,6 +9,9 @@ All notable changes to `localed` are documented in this file.
   replaced while its original inode is being read. Confirm the opened inode
   still matches the path before accepting the snapshot, and detect a file
   appearing during an initially absent-file check.
+- Treat `--replace` as a startup-only instruction. After locale1 name
+  acquisition, the daemon follows the normal reconnect path after a system-bus
+  restart or subsequent name loss.
 - Keep the sanitizer CI D-Bus integration tests isolated from host
   configuration by supplying dedicated locale, console-keymap, and Xorg
   keyboard paths.
