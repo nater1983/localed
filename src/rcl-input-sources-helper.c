@@ -57,16 +57,17 @@ emit_settings(GSettings *settings)
   g_ptr_array_add(layouts, NULL);
   g_ptr_array_add(variants, NULL);
 
-  snapshot = g_variant_new("(^as^as^as)",
+  snapshot = g_variant_ref_sink(g_variant_new("(^as^as^as)",
                            (gchar **) layouts->pdata,
                            (gchar **) variants->pdata,
-                           option_strv);
+                           option_strv));
   printed = g_variant_print(snapshot, TRUE);
 
   g_print("%s\n", printed);
   fflush(stdout);
 
   g_free(printed);
+  g_variant_unref(snapshot);
   g_strfreev(option_strv);
   g_variant_unref(options);
   g_variant_unref(sources);
