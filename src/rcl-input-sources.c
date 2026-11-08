@@ -57,6 +57,7 @@ struct _RclInputSources
   GSubprocess *settings_helper;
   GDataInputStream *settings_stream;
   GCancellable *settings_cancellable;
+  GCancellable *settings_apply_cancellable;
 
   gboolean stopping;
   gboolean logind_available;
@@ -129,12 +130,15 @@ settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
                                         &error);
   if (!reply)
   {
-    g_warning("could not synchronize GNOME XKB settings with localed: %s",
-              error ? error->message : "unknown error");
+    if (!error || !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    {
+      g_warning("could not synchronize GNOME XKB settings with localed: %s",
+                error ? error->message : "unknown error");
+      if (!self->stopping && self->active && !self->helper_restart_id)
+        self->helper_restart_id =
+          g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
+    }
     g_clear_error(&error);
-    if (!self->stopping && self->active && !self->helper_restart_id)
-      self->helper_restart_id =
-        g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
   }
   else
     g_variant_unref(reply);
@@ -214,6 +218,9 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
 
   /* localed calls its own public method over the system bus. The call is
    * made by the privileged daemon, not by the untrusted session process. */
+  g_clear_object(&self->settings_apply_cancellable);
+  self->settings_apply_cancellable = g_cancellable_new();
+
   g_dbus_connection_call(self->connection,
                          "org.freedesktop.locale1",
                          "/org/freedesktop/locale1",
@@ -225,7 +232,7 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
                          NULL,
                          G_DBUS_CALL_FLAGS_NONE,
                          -1,
-                         NULL,
+                         self->settings_apply_cancellable,
                          settings_apply_done,
                          g_object_ref(self));
 
@@ -316,6 +323,9 @@ stop_settings_helper(RclInputSources *self)
 
   if (self->settings_cancellable)
     g_cancellable_cancel(self->settings_cancellable);
+  if (self->settings_apply_cancellable)
+    g_cancellable_cancel(self->settings_apply_cancellable);
+  g_clear_object(&self->settings_apply_cancellable);
 
   if (self->settings_helper)
     g_subprocess_force_exit(self->settings_helper);
