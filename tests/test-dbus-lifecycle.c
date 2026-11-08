@@ -5,6 +5,8 @@
  * Exercise AccountsService name monitoring and repeated lifecycle cleanup
  * against an isolated in-process D-Bus daemon. No host system bus is touched.
  */
+#include "config.h"
+
 #include <gio/gio.h>
 #include <glib.h>
 #include <string.h>
