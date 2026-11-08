@@ -55,16 +55,16 @@ set -e
 rm -rf "$PKG" "$SRC"
 mkdir -p "$TMP" "$PKG" "$SRC" "$OUTPUT"
 # Copy source files but do not bundle local build trees or Git metadata.
-find "$CWD" -mindepth 1 -maxdepth 1 \\
-  ! -name '.git' \\
-  ! -name 'build' \\
-  ! -name 'build-*' \\
-  ! -name 'meson-build' \\
+find "$CWD" -mindepth 1 -maxdepth 1 \
+  ! -name '.git' \
+  ! -name 'build' \
+  ! -name 'build-*' \
+  ! -name 'meson-build' \
   -exec cp -R -t "$SRC" -- {} +
 cd "$SRC"
 
 chown -R root:root "$SRC"
-find . -type f \\( -perm -4000 -o -perm -2000 \\) -exec chmod -s {} +
+find . -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} +
 find . ! -type l -type d ! -perm 755 -exec chmod -f 755 {} +
 find . ! -type l -type f -perm /111 ! -perm 755 -exec chmod -f 755 {} +
 find . ! -type l -type f ! -perm /111 ! -perm 644 -exec chmod -f 644 {} +
