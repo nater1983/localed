@@ -5,6 +5,27 @@ All notable changes to `localed` are documented in this file.
 ## [0.3.0] - Unreleased
 
 ### Fixed
+- Reject configuration snapshots when the file pathname is removed or atomically
+  replaced while its original inode is being read. Confirm the opened inode
+  still matches the path before accepting the snapshot, and detect a file
+  appearing during an initially absent-file check.
+- Keep the sanitizer CI D-Bus integration tests isolated from host
+  configuration by supplying dedicated locale, console-keymap, and Xorg
+  keyboard paths.
+
+### Tests
+- Add a FIFO-based regression test that replaces a configuration pathname
+  while the snapshot reader still holds the original inode open.
+- Run the complete Meson test suite with AddressSanitizer and leak detection
+  in GitHub Actions; all four test targets pass.
+
+### Build
+- Enable GLib deprecation diagnostics for the daemon instead of suppressing
+  them at the target level.
+- Run sanitizer CI on Phase 7 branch pushes and correct the stale Meson
+  option documentation for the Slackware console-keymap path.
+
+### Fixed
 - Reject `TMP=/` in the SlackBuild before any cleanup operation, preventing
   package-specific staging paths from being rooted directly under the
   filesystem root.
