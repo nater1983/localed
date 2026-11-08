@@ -23,7 +23,7 @@ test_input_sources_snapshot_format(void)
   g_assert_no_error(error);
   g_assert_nonnull(snapshot);
   g_assert_true(g_variant_is_of_type(
-      snapshot, G_VARIANT_TYPE(RCL_INPUT_SOURCES_SNAPSHOT_TYPE)));
+      snapshot, G_VARIANT_TYPE(RCL_GNOME_BACKEND_SNAPSHOT_TYPE)));
 
   g_variant_unref(snapshot);
 }
@@ -56,9 +56,9 @@ test_input_sources_start_stop(void)
 
   for (i = 0; i < 2; i++)
   {
-    g_assert_true(rcl_input_sources_start(backend, &error));
+    g_assert_true(rcl_gnome_backend_start(backend, &error));
     g_assert_no_error(error);
-    rcl_input_sources_stop(backend);
+    rcl_gnome_backend_stop(backend);
   }
 
   g_object_unref(backend);
