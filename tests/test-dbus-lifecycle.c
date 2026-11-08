@@ -7,6 +7,7 @@
  */
 #include <gio/gio.h>
 #include <glib.h>
+#include <string.h>
 
 #include "rcl-accounts-service.h"
 #include "rcl-locale.h"
@@ -427,6 +428,13 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   gchar *contents = NULL;
   gsize contents_len = 0;
   gchar *expected_path = g_strdup(RCL_X11_KEYBOARD_FILE);
+
+  /*
+   * This test writes a real configuration file.  Require an explicitly
+   * isolated Meson test path so a developer's /etc/X11 configuration can
+   * never be overwritten by the test.
+   */
+  g_assert_cmpstr(expected_path, !=, "/etc/X11/xorg.conf.d/00-keyboard.conf");
 
   g_assert_no_error(error);
   g_assert_nonnull(node);
