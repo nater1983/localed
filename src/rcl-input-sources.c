@@ -3,13 +3,9 @@
  *
  * Licensed under the GNU General Public License Version 2 or later.
  *
- * GNOME session discovery for the per-user input-sources backend.
- *
- * This module deliberately does not read GSettings or write system
- * configuration yet. It discovers and tracks the active, local GNOME
- * graphical session through logind/elogind. The next backend stage can use
- * the selected session's UID and session metadata to establish a correctly
- * credentialed per-user settings monitor.
+ * GNOME input-source backend. It discovers the active local GNOME session,
+ * launches a per-user GSettings monitor, validates its XKB snapshot, and
+ * synchronizes the resulting configuration through localed D-Bus methods.
  */
 
 #include "config.h"
@@ -120,6 +116,7 @@ uid_in_privileged_group(guint uid, gid_t *primary_gid, gchar **home)
 
 static void settings_helper_read_next(RclInputSources *self);
 static gboolean helper_restart_cb(gpointer user_data);
+static void restart_settings_helper(RclInputSources *self);
 
 static void
 settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
@@ -415,8 +412,9 @@ helper_restart_cb(gpointer user_data)
   RclInputSources *self = RCL_INPUT_SOURCES(user_data);
 
   self->helper_restart_id = 0;
-  if (!self->stopping && self->active)
-    start_settings_helper(self);
+  if (!self->stopping && self->active && !start_settings_helper(self))
+    self->helper_restart_id =
+      g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
 
   return G_SOURCE_REMOVE;
 }
@@ -425,8 +423,9 @@ static void
 restart_settings_helper(RclInputSources *self)
 {
   stop_settings_helper(self);
-  if (self->active && !self->stopping)
-    start_settings_helper(self);
+  if (self->active && !self->stopping && !start_settings_helper(self))
+    self->helper_restart_id =
+      g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
 }
 
 static void
