@@ -67,14 +67,14 @@ static void
 test_unrelated_input_class_is_ignored ( void )
 {
   assert_parse(
-    "Section \"InputClass\"\\n"
-    "Option \"NoAccel\" \"on\" \"unexpected\"\\n"
-    "Identifier \"other-keyboard\"\\n"
-    "EndSection\\n"
-    "Section \"InputClass\"\\n"
-    "Identifier \"system-keyboard\"\\n"
-    "Option \"XkbLayout\" \"us\"\\n"
-    "EndSection\\n",
+    "Section \"InputClass\"\n"
+    "Option \"NoAccel\" \"on\" \"unexpected\"\n"
+    "Identifier \"other-keyboard\"\n"
+    "EndSection\n"
+    "Section \"InputClass\"\n"
+    "Identifier \"system-keyboard\"\n"
+    "Option \"XkbLayout\" \"us\"\n"
+    "EndSection\n",
     "us", "", "", "" );
 }
 
@@ -82,10 +82,10 @@ static void
 test_owned_identifier_after_malformed_option ( void )
 {
   assert_invalid(
-    "Section \"InputClass\"\\n"
-    "Option \"XkbLayout\"\\n"
-    "Identifier \"system-keyboard\"\\n"
-    "EndSection\\n" );
+    "Section \"InputClass\"\n"
+    "Option \"XkbLayout\"\n"
+    "Identifier \"system-keyboard\"\n"
+    "EndSection\n" );
 }
 
 static void
