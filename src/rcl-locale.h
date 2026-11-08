@@ -130,6 +130,11 @@ void rcl_daemon_sync_dbus_properties ( RclLocaleDaemon *daemon );
 gboolean rcl_locale_daemon_set_language_from_accounts (
     RclLocaleDaemon *daemon, const gchar *language, GError **error );
 
+#ifdef RCL_LOCALE_TESTING
+/* Inject a failure for the next matching configuration-file rename. */
+void rcl_locale_test_fail_rename_to ( const gchar *destination );
+#endif
+
 /*---------------------------------------------------------------------------
   Polkit action IDs used when authorising Set* method calls.
   Defined here so both the daemon implementation and any test harness can
