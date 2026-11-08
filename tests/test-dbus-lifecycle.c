@@ -445,6 +445,9 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
    * never be overwritten by the test.
    */
   g_assert_cmpstr(expected_path, !=, "/etc/X11/xorg.conf.d/00-keyboard.conf");
+  g_assert_cmpstr(RCL_RC_KEYMAP_FILE, !=, "/etc/rc.d/rc.keymap");
+  g_assert_cmpstr(RCL_RC_KEYMAP_TOGGLE_FILE, !=,
+                  "/etc/rc.d/rc.keymap.toggle");
 
   g_assert_no_error(error);
   g_assert_nonnull(node);
