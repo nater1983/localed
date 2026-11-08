@@ -95,7 +95,7 @@ conf.set_quoted('RCL_RC_KEYMAP_TOGGLE_FILE',
 conf.set_quoted('RCL_X11_KEYBOARD_FILE', get_option('x11_keyboard_conf'))
 
 desktop_backend = get_option('desktop-backend')
-conf.set('HAVE_GNOME_BACKEND', desktop_backend == 'gnome')
+conf.set10('HAVE_GNOME_BACKEND', desktop_backend == 'gnome')
 
 if desktop_backend == 'gnome'
   input_sources_helper_dir = get_option('libexecdir')
