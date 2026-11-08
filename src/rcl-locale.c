@@ -759,6 +759,9 @@ rcl_write_rc_keymap_toggle( const gchar *path,
   }
 }
 
+/* Maximum accepted length for locale and keyboard configuration values. */
+#define MAX_XKB_VALUE_LEN  256
+
 /* --------------------------------------------------------------------------
    Input validation
    -------------------------------------------------------------------------- */
