@@ -22,6 +22,16 @@ test_input_sources_start_stop(void)
 
   daemon = g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
   g_assert_nonnull(daemon);
+
+  /* The desktop backend must write through the in-process API without
+   * requiring a locale1 D-Bus method call or Polkit authorization. */
+  g_assert_true(rcl_locale_daemon_set_x11_keyboard_internal(
+      daemon, "us,fr", "", "", "", &error));
+  g_assert_no_error(error);
+  g_assert_true(rcl_locale_daemon_set_vconsole_keyboard_internal(
+      daemon, "fr", "", &error));
+  g_assert_no_error(error);
+
   backend = rcl_input_sources_new(daemon);
 
   for (i = 0; i < 2; i++)
