@@ -60,6 +60,8 @@ find "$CWD" -mindepth 1 -maxdepth 1 \
   ! -name 'build' \
   ! -name 'build-*' \
   ! -name 'meson-build' \
+  ! -name 'meson-test' \
+  ! -name 'test-config' \
   -exec cp -R -t "$SRC" -- {} +
 cd "$SRC"
 
@@ -71,29 +73,49 @@ find . ! -type l -type f ! -perm /111 ! -perm 644 -exec chmod -f 644 {} +
 
 export CFLAGS="$SLKCFLAGS"
 export CXXFLAGS="$SLKCFLAGS"
+# Keep test-only paths out of the installed daemon. The integration tests
+# deliberately refuse to write to the host's /etc configuration files.
+mkdir -p "$SRC/test-config"
+
+MESON_ARGS=(
+  --prefix=/usr
+  --libdir=lib${LIBDIRSUFFIX}
+  --libexecdir=/usr/libexec
+  --bindir=/usr/bin
+  --sbindir=/usr/sbin
+  --includedir=/usr/include
+  --datadir=/usr/share
+  --sysconfdir=/etc
+  --localstatedir=/var
+  --mandir=/usr/man
+  --buildtype=release
+  -Dprivileged-group=wheel
+)
+
+# First build and run the tests with isolated configuration paths.
+mkdir meson-test
+cd meson-test
+meson setup "${MESON_ARGS[@]}" \
+  -Dtests=true \
+  -Dlang_sh="$SRC/test-config/lang.sh" \
+  -Drc_keymap="$SRC/test-config/rc.keymap" \
+  -Dx11_keyboard_conf="$SRC/test-config/00-keyboard.conf" \
+  .. || exit 1
+"${NINJA:=ninja}" $NUMJOBS || exit 1
+meson test --print-errorlogs || exit 1
+
+# Build the package separately with the real Slackware configuration paths.
+cd "$SRC"
 mkdir meson-build
 cd meson-build
-meson setup \
-  --prefix=/usr \
-  --libdir=lib${LIBDIRSUFFIX} \
-  --libexecdir=/usr/libexec \
-  --bindir=/usr/bin \
-  --sbindir=/usr/sbin \
-  --includedir=/usr/include \
-  --datadir=/usr/share \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --buildtype=release \
-  -Dtests=true \
+meson setup "${MESON_ARGS[@]}" \
+  -Dtests=false \
   -Drc_keymap=/etc/rc.d/rc.keymap \
   -Dlang_sh=/etc/profile.d/lang.sh \
-  -Dprivileged-group=wheel \
   -Dx11_keyboard_conf=/etc/X11/xorg.conf.d/00-keyboard.conf \
   .. || exit 1
-  "${NINJA:=ninja}" $NUMJOBS || exit 1
-  meson test --print-errorlogs || exit 1
-  DESTDIR="$PKG" "$NINJA" install || exit 1
+"${NINJA:=ninja}" $NUMJOBS || exit 1
+DESTDIR="$PKG" "$NINJA" install || exit 1
 cd "$SRC"
 
 # localectl is installed by meson (install_data).
