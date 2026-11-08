@@ -51,7 +51,7 @@ option(
 )
 
 option(
-  'backend',
+  'desktop-backend',
   type        : 'combo',
   choices     : ['none', 'gnome'],
   value       : 'none',
