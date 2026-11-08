@@ -116,7 +116,10 @@ settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
     g_clear_error(&error);
   }
   else
+  {
+    g_debug("GNOME XKB settings synchronized with localed");
     g_variant_unref(reply);
+  }
 
   g_object_unref(user_data);
 }
@@ -412,7 +415,8 @@ start_settings_helper(RclInputSources *self)
   self->settings_cancellable = g_cancellable_new();
   settings_helper_read_next(self);
 
-  g_debug("monitoring GNOME input sources for uid %u", self->active->uid);
+  g_debug("monitoring GNOME input sources for uid %u (%s)",
+          self->active->uid, pw->pw_name);
   ok = TRUE;
 
 out:
