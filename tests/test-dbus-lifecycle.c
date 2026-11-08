@@ -374,6 +374,45 @@ polkit_fixture_free(PolkitFixture *fixture)
 }
 
 static void
+test_invalid_x11_keyboard_rejected_before_polkit(Fixture *fixture,
+                                                  gconstpointer user_data)
+{
+  GError *error = NULL;
+  GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
+  PolkitFixture call = { 0 };
+  RclDaemon *daemon = rcl_daemon_new();
+
+  g_assert_true(rcl_daemon_startup(daemon, daemon_bus));
+
+  /*
+   * No PolicyKit authority is registered on this test bus.  The malformed
+   * layout must be rejected locally with InvalidArgs, rather than attempting
+   * an authorization call and failing with ServiceUnknown.
+   */
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetX11Keyboard",
+    g_variant_new("(ssssbb)", "us;touch", "pc105", "", "", FALSE, TRUE),
+    NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+    polkit_client_call_done, &call );
+
+  iterate_until(&call, polkit_condition, 5000);
+  g_assert_nonnull(call.client_error);
+  {
+    gchar *remote_error = g_dbus_error_get_remote_error(call.client_error);
+    g_assert_cmpstr(remote_error, ==, "org.freedesktop.DBus.Error.InvalidArgs");
+    g_free(remote_error);
+  }
+
+  polkit_fixture_free(&call);
+  rcl_daemon_shutdown(daemon);
+  g_object_unref(daemon);
+  g_dbus_connection_close_sync(daemon_bus, NULL, NULL);
+  g_object_unref(daemon_bus);
+  (void) error;
+}
+
+static void
 test_polkit_denial(Fixture *fixture, gconstpointer user_data)
 {
   GError *error = NULL;
@@ -515,6 +554,9 @@ main(int argc, char **argv)
              fixture_setup, test_repeated_start_stop_cleanup, fixture_teardown);
   g_test_add("/dbus/system-bus-restart", Fixture, NULL,
              fixture_setup, test_system_bus_restart, fixture_teardown);
+  g_test_add("/dbus/invalid-x11-before-polkit", Fixture, NULL,
+             fixture_setup, test_invalid_x11_keyboard_rejected_before_polkit,
+             fixture_teardown);
   g_test_add("/polkit/denial", Fixture, NULL,
              fixture_setup, test_polkit_denial, fixture_teardown);
   g_test_add("/polkit/cancellation", Fixture, NULL,
