@@ -605,37 +605,52 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
                                       NULL, &error));
     g_assert_no_error(error);
 
-    rcl_locale_test_fail_rename_to(expected_path);
-    polkit_fixture.client_done = FALSE;
-    g_clear_error(&polkit_fixture.client_error);
-    g_dbus_connection_call(
-      fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
-      "/org/freedesktop/locale1", "org.freedesktop.locale1",
-      "SetVConsoleKeyboard",
-      g_variant_new("(ssbb)", "de", "us", TRUE, TRUE),
-      NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
-      polkit_client_call_done, &polkit_fixture);
-    iterate_until(&polkit_fixture, polkit_condition, 5000);
-    rcl_locale_test_fail_rename_to(NULL);
+    {
+      const gchar *failure_paths[] = {
+        RCL_RC_KEYMAP_FILE,
+        RCL_RC_KEYMAP_TOGGLE_FILE,
+        expected_path
+      };
+      guint i;
 
-    g_assert_nonnull(polkit_fixture.client_error);
-    g_assert_nonnull(strstr(polkit_fixture.client_error->message, "rename("));
-    g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &after,
-                                      NULL, &error));
-    g_assert_no_error(error);
-    g_assert_cmpstr(after, ==, before_keymap);
-    g_clear_pointer(&after, g_free);
+      for( i = 0; i < G_N_ELEMENTS(failure_paths); i++ )
+      {
+        rcl_locale_test_fail_rename_to( failure_paths[i] );
+        polkit_fixture.client_done = FALSE;
+        g_clear_error( &polkit_fixture.client_error );
+        g_dbus_connection_call(
+          fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+          "/org/freedesktop/locale1", "org.freedesktop.locale1",
+          "SetVConsoleKeyboard",
+          g_variant_new("(ssbb)", "de", "us", TRUE, TRUE),
+          NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+          polkit_client_call_done, &polkit_fixture );
+        iterate_until( &polkit_fixture, polkit_condition, 5000 );
+        rcl_locale_test_fail_rename_to( NULL );
 
-    g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_TOGGLE_FILE, &after,
-                                      NULL, &error));
-    g_assert_no_error(error);
-    g_assert_cmpstr(after, ==, before_toggle);
-    g_clear_pointer(&after, g_free);
+        g_assert_nonnull( polkit_fixture.client_error );
+        g_assert_nonnull( strstr( polkit_fixture.client_error->message,
+                                  "rename(" ) );
 
-    g_assert_true(g_file_get_contents(expected_path, &after, NULL, &error));
-    g_assert_no_error(error);
-    g_assert_cmpstr(after, ==, before_x11);
-    g_clear_pointer(&after, g_free);
+        g_assert_true( g_file_get_contents(RCL_RC_KEYMAP_FILE, &after,
+                                           NULL, &error) );
+        g_assert_no_error( error );
+        g_assert_cmpstr( after, ==, before_keymap );
+        g_clear_pointer( &after, g_free );
+
+        g_assert_true( g_file_get_contents(RCL_RC_KEYMAP_TOGGLE_FILE, &after,
+                                           NULL, &error) );
+        g_assert_no_error( error );
+        g_assert_cmpstr( after, ==, before_toggle );
+        g_clear_pointer( &after, g_free );
+
+        g_assert_true( g_file_get_contents(expected_path, &after,
+                                           NULL, &error) );
+        g_assert_no_error( error );
+        g_assert_cmpstr( after, ==, before_x11 );
+        g_clear_pointer( &after, g_free );
+      }
+    }
 
     after = get_locale_string_property(fixture, daemon_bus,
                                        &polkit_fixture, "VConsoleKeymap");
