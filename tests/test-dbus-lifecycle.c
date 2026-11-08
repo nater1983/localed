@@ -471,7 +471,7 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_dbus_connection_call(
     fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
     "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetX11Keyboard",
-    g_variant_new("(ssssbb)", "us", "pc105", "", "", FALSE, TRUE),
+    g_variant_new("(ssssbb)", "ch", "pc105", "fr", "", TRUE, TRUE),
     NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
     polkit_client_call_done, &polkit_fixture);
 
@@ -483,8 +483,46 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
                                     &contents_len, &error));
   g_assert_no_error(error);
   g_assert_nonnull(strstr(contents, "Identifier \"system-keyboard\""));
-  g_assert_nonnull(strstr(contents, "Option \"XkbLayout\" \"us\""));
+  g_assert_nonnull(strstr(contents, "Option \"XkbLayout\" \"ch\""));
   g_assert_nonnull(strstr(contents, "Option \"XkbModel\" \"pc105\""));
+  g_assert_nonnull(strstr(contents, "Option \"XkbVariant\" \"fr\""));
+  g_free(contents);
+
+  /*
+   * Reverse conversion must respect the XKB variant: Swiss French maps to
+   * the Slackware console keymap ch-fr, not the generic ch keymap.
+   */
+  g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &contents,
+                                    &contents_len, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(contents, "loadkeys \"ch-fr\""));
+  g_free(contents);
+
+  /*
+   * Exercise the opposite direction as well: the Slackware "uk" keymap
+   * converts to X11 layout "gb".
+   */
+  polkit_fixture.client_done = FALSE;
+  g_clear_error(&polkit_fixture.client_error);
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetVConsoleKeyboard",
+    g_variant_new("(ssbb)", "uk", "", TRUE, TRUE),
+    NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+    polkit_client_call_done, &polkit_fixture);
+  iterate_until(&polkit_fixture, polkit_condition, 5000);
+  g_assert_no_error(polkit_fixture.client_error);
+
+  g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &contents,
+                                    &contents_len, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(contents, "loadkeys \"uk\""));
+  g_free(contents);
+
+  g_assert_true(g_file_get_contents(expected_path, &contents,
+                                    &contents_len, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(contents, "Option \"XkbLayout\" \"gb\""));
   g_free(contents);
 
   /*
@@ -503,7 +541,7 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_assert_no_error(polkit_fixture.client_error);
   g_assert_nonnull(polkit_fixture.client_reply);
   g_variant_get(polkit_fixture.client_reply, "(v)", &property);
-  g_assert_cmpstr(g_variant_get_string(property, NULL), ==, "us");
+  g_assert_cmpstr(g_variant_get_string(property, NULL), ==, "gb");
   g_variant_unref(property);
 
   polkit_fixture_free(&polkit_fixture);
