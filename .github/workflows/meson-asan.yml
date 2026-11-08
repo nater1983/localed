@@ -41,11 +41,14 @@ jobs:
             -Drc_keymap="$RUNNER_TEMP/localed-test-config/rc.keymap" \
             -Dx11_keyboard_conf="$RUNNER_TEMP/localed-test-config/00-keyboard.conf"
 
-      - name: Validate Slackware integration harness syntax
-        run: sh -n tests/test-slackware-dbus-restart.sh
-
       - name: Compile
         run: meson compile -C build-asan
+
+      - name: Exercise D-Bus reconnect and --replace on a private bus
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
+          G_SLICE: always-malloc
+        run: sh tests/test-slackware-dbus-restart.sh "$PWD/build-asan/src/localed"
 
       - name: Run tests with leak detection
         env:
