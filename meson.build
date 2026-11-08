@@ -85,7 +85,7 @@ conf.set_quoted('SYSCONFDIR',      sysconfdir)
 #   (/etc/profile.d/lang.sh; sourced at login via /etc/profile;
 #    uses "export KEY=value" syntax, not the KEY=value format of
 #    /etc/locale.conf).  localed reads and writes this file directly.
-# vconsole_conf:    path to the virtual console keyboard config file.
+# rc_keymap:        path to Slackware's virtual console keyboard script.
 # x11_keyboard_conf: path to the Xorg input class keyboard config file.
 conf.set_quoted('PRIVILEGED_GROUP',     get_option('privileged-group'))
 conf.set_quoted('RCL_LANG_SH_FILE',     get_option('lang_sh'))
