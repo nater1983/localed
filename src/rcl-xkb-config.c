@@ -415,10 +415,16 @@ rcl_xkb_config_parse ( const gchar *contents,
       if( n != 2 )
       {
         /*
-         * As with Option, defer validation until the final Identifier is
-         * known so malformed directives in unrelated InputClass sections
-         * do not make this parser reject configuration it does not own.
+         * Retain the candidate identifier when present.  It is needed to
+         * decide at EndSection whether this malformed directive belongs to
+         * the InputClass managed by localed.  A later valid Identifier
+         * replaces it and clears the deferred error (last one wins).
          */
+        if( n >= 2 )
+        {
+          g_free( current.identifier );
+          current.identifier = g_strdup( tokens[1] );
+        }
         malformed_identifier = TRUE;
       }
       else
