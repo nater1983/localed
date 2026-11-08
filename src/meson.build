@@ -1,13 +1,15 @@
 localed_sources = files(
   'main.c',
-  'rcl-accounts-service.c',
   'rcl-file-transaction.c',
   'rcl-xkb-config.c',
   'rcl-locale.c',
 )
 
 if get_option('backend') == 'gnome'
-  localed_sources += files('rcl-input-sources.c')
+  localed_sources += files(
+    'rcl-accounts-service.c',
+    'rcl-input-sources.c',
+  )
 endif
 
 localed_deps = [
