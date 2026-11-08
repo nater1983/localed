@@ -2282,7 +2282,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon         = g_object_ref( daemon );
-    ctx->invocation     = invocation;
+    ctx->invocation     = g_object_ref( invocation );
     ctx->op             = OP_SET_VCONSOLE_KEYBOARD;
     ctx->keymap         = g_strdup( keymap );
     ctx->keymap_toggle  = g_strdup( keymap_toggle );
@@ -2302,7 +2302,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon      = g_object_ref( daemon );
-    ctx->invocation  = invocation;
+    ctx->invocation  = g_object_ref( invocation );
     ctx->op          = OP_SET_X11_KEYBOARD;
     ctx->x11_layout  = g_strdup( layout );
     ctx->x11_model   = g_strdup( model );
