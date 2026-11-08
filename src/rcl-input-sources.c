@@ -317,7 +317,7 @@ stop_settings_helper(RclInputSources *self)
 static gboolean
 start_settings_helper(RclInputSources *self)
 {
-  struct stat runtime_stat, bus_stat;
+  struct stat runtime_stat;
   struct passwd *pw;
   gid_t primary_gid = 0;
   gchar *home = NULL;
@@ -326,7 +326,6 @@ start_settings_helper(RclInputSources *self)
   gchar *uid_text = NULL;
   gchar *gid_text = NULL;
   gchar *runtime_dir = NULL;
-  gchar *bus_path = NULL;
   gchar *bus_address = NULL;
   gchar *setpriv = NULL;
   const gchar *argv[12];
@@ -352,19 +351,23 @@ start_settings_helper(RclInputSources *self)
   uid_text = g_strdup_printf("%u", self->active->uid);
   gid_text = g_strdup_printf("%u", (guint) primary_gid);
   runtime_dir = g_strdup_printf("/run/user/%u", self->active->uid);
-  bus_path = g_build_filename(runtime_dir, "bus", NULL);
-  bus_address = g_strdup_printf("unix:path=%s", bus_path);
 
   if (stat(runtime_dir, &runtime_stat) != 0 ||
       !S_ISDIR(runtime_stat.st_mode) ||
       runtime_stat.st_uid != self->active->uid ||
-      (runtime_stat.st_mode & 0077) != 0 ||
-      stat(bus_path, &bus_stat) != 0 ||
-      !S_ISSOCK(bus_stat.st_mode) ||
-      bus_stat.st_uid != self->active->uid)
+      (runtime_stat.st_mode & 0077) != 0)
   {
-    g_debug("GNOME session uid %u has no owned runtime D-Bus socket",
+    g_debug("GNOME session uid %u has no secure owned runtime directory",
             self->active->uid);
+    goto out;
+  }
+
+  bus_address = find_session_bus_address(self, self->active->uid,
+                                         self->active->object_path);
+  if (!bus_address)
+  {
+    g_debug("could not find a verified D-Bus socket for GNOME session %s",
+            self->active->id);
     goto out;
   }
 
@@ -427,7 +430,6 @@ out:
   g_free(config_home);
   g_free(data_home);
   g_free(bus_address);
-  g_free(bus_path);
   g_free(runtime_dir);
   g_free(uid_text);
   g_free(gid_text);
@@ -681,6 +683,150 @@ session_has_gnome_process(RclInputSources *self,
 
   g_dir_close(proc_dir);
   return found;
+}
+
+
+/*
+ * Slackware's session bus may be started at a private path in /tmp rather
+ * than /run/user/$UID/bus. Find the address from a GNOME process that elogind
+ * confirms belongs to the active session. Never trust an arbitrary process
+ * environment or an address that points to another user's socket.
+ */
+static gchar *
+find_session_bus_address(RclInputSources *self,
+                         guint uid,
+                         const gchar *session_path)
+{
+  GDir *proc_dir;
+  const gchar *entry;
+  gchar *result = NULL;
+  GError *error = NULL;
+
+  proc_dir = g_dir_open("/proc", 0, &error);
+  if (!proc_dir)
+  {
+    g_debug("could not scan /proc for the GNOME session bus: %s",
+            error ? error->message : "unknown error");
+    g_clear_error(&error);
+    return NULL;
+  }
+
+  while (!result && (entry = g_dir_read_name(proc_dir)) != NULL)
+  {
+    gchar *endptr = NULL;
+    guint64 pid_value;
+    gchar *proc_path;
+    gchar *environment_path;
+    gchar *environment = NULL;
+    gsize environment_length = 0;
+    struct stat st;
+    GVariant *reply;
+    const gchar *process_session_path = NULL;
+    gsize offset = 0;
+    gchar *address = NULL;
+
+    if (!g_ascii_isdigit(entry[0]))
+      continue;
+
+    errno = 0;
+    pid_value = g_ascii_strtoull(entry, &endptr, 10);
+    if (errno || !endptr || *endptr || pid_value == 0 ||
+        pid_value > G_MAXUINT)
+      continue;
+
+    proc_path = g_build_filename("/proc", entry, NULL);
+    if (stat(proc_path, &st) != 0 || st.st_uid != (uid_t) uid)
+    {
+      g_free(proc_path);
+      continue;
+    }
+
+    environment_path = g_build_filename(proc_path, "environ", NULL);
+    g_free(proc_path);
+    if (!g_file_get_contents(environment_path, &environment,
+                             &environment_length, NULL))
+    {
+      g_free(environment_path);
+      continue;
+    }
+    g_free(environment_path);
+
+    if (!process_environment_is_gnome(environment, environment_length))
+      goto next_process;
+
+    while (offset < environment_length)
+    {
+      const gchar *item = environment + offset;
+      const gchar *end = memchr(item, '\0', environment_length - offset);
+      gsize item_length = end ? (gsize) (end - item) :
+                                environment_length - offset;
+
+      if (g_str_has_prefix(item, "DBUS_SESSION_BUS_ADDRESS="))
+      {
+        address = g_strndup(item + strlen("DBUS_SESSION_BUS_ADDRESS="),
+                            item_length -
+                            strlen("DBUS_SESSION_BUS_ADDRESS="));
+        break;
+      }
+
+      offset += item_length + (end ? 1 : 0);
+    }
+
+    if (!address || !g_str_has_prefix(address, "unix:path="))
+      goto next_process;
+
+    reply = g_dbus_connection_call_sync(
+        self->connection,
+        LOGIND_NAME,
+        LOGIND_MANAGER_PATH,
+        LOGIND_MANAGER_IFACE,
+        "GetSessionByPID",
+        g_variant_new("(u)", (guint) pid_value),
+        G_VARIANT_TYPE("(o)"),
+        G_DBUS_CALL_FLAGS_NONE,
+        2000,
+        NULL,
+        NULL);
+    if (!reply)
+      goto next_process;
+
+    g_variant_get(reply, "(&o)", &process_session_path);
+    if (g_strcmp0(process_session_path, session_path) == 0)
+    {
+      const gchar *path_start = address + strlen("unix:path=");
+      const gchar *path_end = strpbrk(path_start, ",;");
+      gchar *socket_path = path_end ?
+          g_strndup(path_start, (gsize) (path_end - path_start)) :
+          g_strdup(path_start);
+      struct stat socket_stat;
+
+      if (g_path_is_absolute(socket_path) &&
+          stat(socket_path, &socket_stat) == 0 &&
+          S_ISSOCK(socket_stat.st_mode) &&
+          socket_stat.st_uid == (uid_t) uid)
+      {
+        result = g_strdup(address);
+        g_debug("using GNOME session bus from process %u: %s",
+                (guint) pid_value, socket_path);
+      }
+      else
+      {
+        g_debug("ignoring GNOME session bus from process %u: socket is "
+                "missing, not a Unix socket, or not owned by uid %u",
+                (guint) pid_value, uid);
+      }
+
+      g_free(socket_path);
+    }
+    g_variant_unref(reply);
+
+next_process:
+    g_free(address);
+    g_free(environment);
+  }
+
+  g_dir_close(proc_dir);
+  return result;
 }
 
 static gboolean
