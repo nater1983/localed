@@ -155,7 +155,11 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   gchar *layout = NULL;
   gchar *variant = NULL;
   gchar *option = NULL;
-  gsize n_layouts = 0, n_variants = 0;
+  gchar *contents = NULL;
+  gchar *current_layout = NULL;
+  gchar *current_model = NULL;
+  gchar *current_variant = NULL;
+  gchar *current_options = NULL;
   GError *error = NULL;
 
   snapshot = g_variant_parse(G_VARIANT_TYPE("(asasas)"), line, NULL, NULL,
@@ -191,6 +195,19 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
     goto out;
   }
 
+  /* GNOME does not expose an XKB model setting. Preserve the model already
+   * configured by localed instead of clearing it on every source update. */
+  if (g_file_get_contents(RCL_X11_KEYBOARD_FILE, &contents, NULL, NULL))
+  {
+    if (!rcl_xkb_config_parse(contents, &current_layout, &current_model,
+                              &current_variant, &current_options, &error))
+    {
+      g_debug("could not read existing XKB model: %s",
+              error ? error->message : "invalid Xorg configuration");
+      g_clear_error(&error);
+    }
+  }
+
   g_debug("synchronizing GNOME input sources: layouts=%s variants=%s",
           layout, variant);
 
@@ -201,8 +218,9 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
                          "/org/freedesktop/locale1",
                          "org.freedesktop.locale1",
                          "SetX11Keyboard",
-                         g_variant_new("(ssssbb)", layout, "", variant,
-                                       option, FALSE, FALSE),
+                         g_variant_new("(ssssbb)", layout,
+                                       current_model ? current_model : "",
+                                       variant, option, FALSE, FALSE),
                          NULL,
                          G_DBUS_CALL_FLAGS_NONE,
                          -1,
@@ -214,6 +232,11 @@ out:
   g_free(layout);
   g_free(variant);
   g_free(option);
+  g_free(contents);
+  g_free(current_layout);
+  g_free(current_model);
+  g_free(current_variant);
+  g_free(current_options);
   g_strfreev(layouts);
   g_strfreev(variants);
   g_strfreev(options);
@@ -375,8 +398,7 @@ start_settings_helper(RclInputSources *self)
   argv[argc++] = RCL_INPUT_SOURCES_HELPER;
   argv[argc] = NULL;
 
-  launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE |
-                                        G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+  launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE);
   config_home = g_build_filename(home, ".config", NULL);
   data_home = g_build_filename(home, ".local", "share", NULL);
   g_subprocess_launcher_setenv(launcher, "HOME", home, TRUE);
