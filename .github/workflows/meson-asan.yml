@@ -2,7 +2,9 @@ name: Meson tests and memory checks
 
 on:
   push:
-    branches: [ "0.3.0" ]
+    branches:
+      - "0.3.0"
+      - "phase-7-final-stability-cleanup"
   pull_request:
     branches: [ "0.3.0" ]
 
