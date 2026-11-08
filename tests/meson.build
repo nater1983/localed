@@ -64,7 +64,7 @@ if get_option('backend') == 'gnome'
       '../src/rcl-locale.c',
     ],
     dependencies        : [glib_dep, gio_dep, gio_unix],
-    include_directories : [config_h_inc, include_directories('../src')],
+    include_directories : [config_h_inc, include_directories('../src', '../src/backends/gnome')],
   )
   
   test(
