@@ -59,6 +59,7 @@ if get_option('desktop-backend') == 'gnome'
     [
       'backends/gnome/test-input-sources.c',
       '../src/backends/gnome/gnome-backend.c',
+      '../src/backends/backend-interface.c',
       '../src/rcl-file-transaction.c',
       '../src/rcl-xkb-config.c',
       '../src/rcl-locale.c',
