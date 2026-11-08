@@ -128,6 +128,53 @@ settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
   g_object_unref(user_data);
 }
 
+typedef struct
+{
+  const gchar *layout;
+  const gchar *variant;
+  const gchar *keymap;
+} GnomeConsoleKeymap;
+
+static const GnomeConsoleKeymap gnome_console_keymaps[] =
+{
+  { "us", "", "us" },
+  { "gb", "", "uk" },
+  { "de", "", "de" },
+  { "fr", "", "fr" },
+  { "es", "", "es" },
+  { "it", "", "it" },
+  { "pt", "", "pt-latin1" },
+  { "ru", "", "ru" },
+  { "se", "", "se-latin1" },
+  { "no", "", "no-latin1" },
+  { "dk", "", "dk-latin1" },
+  { "nl", "", "nl" },
+  { "tr", "", "trq" },
+  { "pl", "", "pl" },
+  { "cz", "", "cz-lat2" },
+  { "fi", "", "fi" },
+  { "gr", "", "gr" },
+  { "il", "", "il" },
+  { "jp", "", "jp106" },
+  { "ua", "", "ua" },
+  { "ch", "de_nodeadkeys", "ch" },
+  { "ch", "fr", "ch-fr" },
+  { NULL, NULL, NULL }
+};
+
+static const gchar *
+gnome_console_keymap_lookup(const gchar *layout, const gchar *variant)
+{
+  guint i;
+
+  for (i = 0; gnome_console_keymaps[i].layout != NULL; i++)
+    if (g_strcmp0(layout, gnome_console_keymaps[i].layout) == 0 &&
+        g_strcmp0(variant ? variant : "", gnome_console_keymaps[i].variant) == 0)
+      return gnome_console_keymaps[i].keymap;
+
+  return NULL;
+}
+
 static void
 apply_gnome_settings(RclInputSources *self, const gchar *line)
 {
@@ -135,6 +182,9 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   GVariant *layouts_v = NULL;
   GVariant *variants_v = NULL;
   GVariant *options_v = NULL;
+  const gchar *active_layout = NULL;
+  const gchar *active_variant = NULL;
+  const gchar *console_keymap = NULL;
   gchar **layouts = NULL;
   gchar **variants = NULL;
   gchar **options = NULL;
@@ -149,7 +199,7 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   gsize n_layouts = 0, n_variants = 0;
   GError *error = NULL;
 
-  snapshot = g_variant_parse(G_VARIANT_TYPE("(asasas)"), line, NULL, NULL,
+  snapshot = g_variant_parse(G_VARIANT_TYPE("(asasass)"), line, NULL, NULL,
                              &error);
   if (!snapshot)
   {
@@ -159,8 +209,9 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
     return;
   }
 
-  g_variant_get(snapshot, "(@as@as@as)",
-                &layouts_v, &variants_v, &options_v);
+  g_variant_get(snapshot, "(@as@as@as&s&s)",
+                &layouts_v, &variants_v, &options_v,
+                &active_layout, &active_variant);
   layouts = g_variant_dup_strv(layouts_v, &n_layouts);
   variants = g_variant_dup_strv(variants_v, &n_variants);
   options = g_variant_dup_strv(options_v, NULL);
@@ -217,6 +268,32 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
                          self->settings_apply_cancellable,
                          settings_apply_done,
                          g_object_ref(self));
+
+  /* The X11 source list is the complete GNOME list. The console keymap,
+   * however, follows only the currently selected XKB source. Do not ask
+   * localed to convert this call: that conversion would rewrite X11 settings
+   * and lose the complete per-user source list. */
+  console_keymap = gnome_console_keymap_lookup(active_layout, active_variant);
+  if (console_keymap)
+  {
+    g_debug("synchronizing active GNOME input source: %s+%s -> console keymap %s",
+            active_layout, active_variant, console_keymap);
+    g_dbus_connection_call(self->connection,
+                           "org.freedesktop.locale1",
+                           "/org/freedesktop/locale1",
+                           "org.freedesktop.locale1",
+                           "SetVConsoleKeyboard",
+                           g_variant_new("(ssbb)", console_keymap, "", FALSE, FALSE),
+                           NULL,
+                           G_DBUS_CALL_FLAGS_NONE,
+                           -1,
+                           self->settings_apply_cancellable,
+                           settings_apply_done,
+                           g_object_ref(self));
+  }
+  else if (active_layout && *active_layout)
+    g_debug("no console keymap mapping for active GNOME source %s+%s; "
+            "leaving rc.keymap unchanged", active_layout, active_variant);
 
 out:
   g_free(layout);
