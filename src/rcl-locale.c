@@ -1929,8 +1929,8 @@ rcl_locale_daemon_set_vconsole_keyboard_internal(
   g_return_val_if_fail(keymap != NULL, FALSE);
   g_return_val_if_fail(keymap_toggle != NULL, FALSE);
 
-  if ((keymap[0] != '\\0' && !rcl_keyboard_value_is_safe(keymap)) ||
-      (keymap_toggle[0] != '\\0' &&
+  if ((keymap[0] != '\0' && !rcl_keyboard_value_is_safe(keymap)) ||
+      (keymap_toggle[0] != '\0' &&
        !rcl_keyboard_value_is_safe(keymap_toggle)))
   {
     g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
