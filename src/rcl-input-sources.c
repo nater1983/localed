@@ -207,7 +207,7 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
                          "SetX11Keyboard",
                          g_variant_new("(ssssbb)", layout,
                                        current_model ? current_model : "",
-                                       variant, option, FALSE, FALSE),
+                                       variant, option, TRUE, FALSE),
                          NULL,
                          G_DBUS_CALL_FLAGS_NONE,
                          -1,
