@@ -15,11 +15,16 @@
 #include "config.h"
 
 #include <string.h>
+#include <grp.h>
+#include <pwd.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <gio/gio.h>
 #include <glib.h>
 
 #include "rcl-input-sources.h"
+#include "rcl-xkb-config.h"
 
 #define LOGIND_NAME             "org.freedesktop.login1"
 #define LOGIND_MANAGER_PATH     "/org/freedesktop/login1"
@@ -28,6 +33,7 @@
 #define DBUS_PROPERTIES_IFACE   "org.freedesktop.DBus.Properties"
 #define RECONNECT_DELAY_MS      2500
 #define REFRESH_DELAY_MS        100
+#define HELPER_RESTART_DELAY_MS 2500
 
 typedef struct
 {
@@ -50,6 +56,11 @@ struct _RclInputSources
   gulong connection_closed_id;
   guint reconnect_id;
   guint refresh_id;
+  guint helper_restart_id;
+
+  GSubprocess *settings_helper;
+  GDataInputStream *settings_stream;
+  GCancellable *settings_cancellable;
 
   gboolean stopping;
   gboolean logind_available;
@@ -66,6 +77,356 @@ enum
 };
 
 static guint signals[N_SIGNALS];
+
+static gboolean
+uid_in_privileged_group(guint uid, gid_t *primary_gid, gchar **home)
+{
+  struct passwd *pw = getpwuid((uid_t) uid);
+  struct group *gr = getgrnam(PRIVILEGED_GROUP);
+  gid_t *groups;
+  int ngroups = 16;
+  gboolean found = FALSE;
+  int i;
+
+  if (!pw || !gr)
+    return FALSE;
+
+  if (primary_gid)
+    *primary_gid = pw->pw_gid;
+  if (home)
+    *home = g_strdup(pw->pw_dir);
+
+  groups = g_new(gid_t, ngroups);
+  if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
+  {
+    groups = g_renew(gid_t, groups, ngroups);
+    if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
+    {
+      g_free(groups);
+      return FALSE;
+    }
+  }
+
+  for (i = 0; i < ngroups; i++)
+    if (groups[i] == gr->gr_gid)
+    {
+      found = TRUE;
+      break;
+    }
+
+  g_free(groups);
+  return found;
+}
+
+static void settings_helper_read_next(RclInputSources *self);
+
+static void
+settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+  GError *error = NULL;
+  GVariant *reply;
+
+  reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), result,
+                                        &error);
+  if (!reply)
+  {
+    g_warning("could not synchronize GNOME XKB settings with localed: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+  }
+  else
+    g_variant_unref(reply);
+
+  g_object_unref(user_data);
+}
+
+static void
+apply_gnome_settings(RclInputSources *self, const gchar *line)
+{
+  GVariant *snapshot;
+  GVariant *layouts_v = NULL;
+  GVariant *variants_v = NULL;
+  GVariant *options_v = NULL;
+  gchar **layouts = NULL;
+  gchar **variants = NULL;
+  gchar **options = NULL;
+  gchar *layout = NULL;
+  gchar *variant = NULL;
+  gchar *option = NULL;
+  gsize n_layouts = 0, n_variants = 0, n_options = 0;
+  GError *error = NULL;
+
+  snapshot = g_variant_parse(G_VARIANT_TYPE("(asasas)"), line, NULL, NULL,
+                             &error);
+  if (!snapshot)
+  {
+    g_warning("invalid GNOME input-sources helper output: %s",
+              error ? error->message : "invalid GVariant");
+    g_clear_error(&error);
+    return;
+  }
+
+  g_variant_get(snapshot, "(@as@as@as)",
+                &layouts_v, &variants_v, &options_v);
+  layouts = g_variant_dup_strv(layouts_v, &n_layouts);
+  variants = g_variant_dup_strv(variants_v, &n_variants);
+  options = g_variant_dup_strv(options_v, &n_options);
+
+  if (n_layouts == 0 || n_layouts != n_variants)
+    goto out;
+
+  layout = g_strjoinv(",", layouts);
+  variant = g_strjoinv(",", variants);
+  option = g_strjoinv(",", options);
+
+  if (!rcl_xkb_value_is_valid(RCL_XKB_VALUE_LAYOUT, layout) ||
+      !rcl_xkb_value_is_valid(RCL_XKB_VALUE_VARIANT, variant) ||
+      !rcl_xkb_value_is_valid(RCL_XKB_VALUE_OPTIONS, option))
+  {
+    g_warning("ignoring invalid XKB values from GNOME input-sources");
+    goto out;
+  }
+
+  g_debug("synchronizing GNOME input sources: layouts=%s variants=%s",
+          layout, variant);
+
+  /* localed calls its own public method over the system bus. The call is
+   * made by the privileged daemon, not by the untrusted session process. */
+  g_dbus_connection_call(self->connection,
+                         "org.freedesktop.locale1",
+                         "/org/freedesktop/locale1",
+                         "org.freedesktop.locale1",
+                         "SetX11Keyboard",
+                         g_variant_new("(ssssbb)", layout, "", variant,
+                                       option, FALSE, FALSE),
+                         NULL,
+                         G_DBUS_CALL_FLAGS_NONE,
+                         -1,
+                         NULL,
+                         settings_apply_done,
+                         g_object_ref(self));
+
+out:
+  g_free(layout);
+  g_free(variant);
+  g_free(option);
+  g_strfreev(layouts);
+  g_strfreev(variants);
+  g_strfreev(options);
+  g_clear_pointer(&layouts_v, g_variant_unref);
+  g_clear_pointer(&variants_v, g_variant_unref);
+  g_clear_pointer(&options_v, g_variant_unref);
+  g_variant_unref(snapshot);
+}
+
+static void
+settings_helper_read_cb(GObject *source, GAsyncResult *result,
+                        gpointer user_data)
+{
+  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  GDataInputStream *stream = G_DATA_INPUT_STREAM(source);
+  gsize length = 0;
+  GError *error = NULL;
+  gchar *line = g_data_input_stream_read_line_finish(stream, result,
+                                                      &length, &error);
+
+  if (self->stopping || stream != self->settings_stream)
+    goto out;
+
+  if (line)
+  {
+    if (length > 0)
+      apply_gnome_settings(self, line);
+    settings_helper_read_next(self);
+  }
+  else
+  {
+    if (error && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+      g_warning("GNOME input-sources helper stopped: %s", error->message);
+
+    if (self->settings_helper)
+      g_subprocess_force_exit(self->settings_helper);
+
+    g_clear_object(&self->settings_stream);
+    g_clear_object(&self->settings_helper);
+    g_clear_object(&self->settings_cancellable);
+
+    if (!self->stopping && self->active && !self->helper_restart_id)
+      self->helper_restart_id =
+        g_timeout_add(HELPER_RESTART_DELAY_MS,
+                      (GSourceFunc) settings_helper_read_next, self);
+  }
+
+out:
+  g_free(line);
+  g_clear_error(&error);
+  g_object_unref(self);
+}
+
+static void
+settings_helper_read_next(RclInputSources *self)
+{
+  if (!self->settings_stream || !self->settings_cancellable ||
+      self->stopping)
+    return;
+
+  g_data_input_stream_read_line_async(self->settings_stream,
+                                      G_PRIORITY_DEFAULT,
+                                      self->settings_cancellable,
+                                      settings_helper_read_cb,
+                                      g_object_ref(self));
+}
+
+static void
+stop_settings_helper(RclInputSources *self)
+{
+  if (self->helper_restart_id)
+  {
+    g_source_remove(self->helper_restart_id);
+    self->helper_restart_id = 0;
+  }
+
+  if (self->settings_cancellable)
+    g_cancellable_cancel(self->settings_cancellable);
+
+  if (self->settings_helper)
+    g_subprocess_force_exit(self->settings_helper);
+
+  g_clear_object(&self->settings_stream);
+  g_clear_object(&self->settings_helper);
+  g_clear_object(&self->settings_cancellable);
+}
+
+static gboolean
+start_settings_helper(RclInputSources *self)
+{
+  struct stat runtime_stat, bus_stat;
+  struct passwd *pw;
+  gid_t primary_gid = 0;
+  gchar *home = NULL;
+  gchar *uid_text = NULL;
+  gchar *gid_text = NULL;
+  gchar *runtime_dir = NULL;
+  gchar *bus_path = NULL;
+  gchar *bus_address = NULL;
+  gchar *setpriv = NULL;
+  const gchar *argv[12];
+  guint argc = 0;
+  GSubprocessLauncher *launcher = NULL;
+  GError *error = NULL;
+  gboolean ok = FALSE;
+
+  if (!self->active || self->stopping || !self->connection)
+    return FALSE;
+
+  if (!uid_in_privileged_group(self->active->uid, &primary_gid, &home))
+  {
+    g_debug("not monitoring GNOME input sources for uid %u: account is not "
+            "in privileged group '%s'", self->active->uid, PRIVILEGED_GROUP);
+    g_free(home);
+    return FALSE;
+  }
+
+  pw = getpwuid((uid_t) self->active->uid);
+  if (!pw)
+    goto out;
+
+  uid_text = g_strdup_printf("%u", self->active->uid);
+  gid_text = g_strdup_printf("%u", (guint) primary_gid);
+  runtime_dir = g_strdup_printf("/run/user/%u", self->active->uid);
+  bus_path = g_build_filename(runtime_dir, "bus", NULL);
+  bus_address = g_strdup_printf("unix:path=%s", bus_path);
+
+  if (g_stat(runtime_dir, &runtime_stat) != 0 ||
+      !S_ISDIR(runtime_stat.st_mode) ||
+      runtime_stat.st_uid != self->active->uid ||
+      g_stat(bus_path, &bus_stat) != 0 ||
+      !S_ISSOCK(bus_stat.st_mode) ||
+      bus_stat.st_uid != self->active->uid)
+  {
+    g_debug("GNOME session uid %u has no owned runtime D-Bus socket",
+            self->active->uid);
+    goto out;
+  }
+
+  setpriv = g_find_program_in_path("setpriv");
+  if (!setpriv)
+  {
+    g_warning("setpriv is required to run the GNOME input-sources helper "
+              "as the logged-in user");
+    goto out;
+  }
+
+  argv[argc++] = setpriv;
+  argv[argc++] = "--reuid";
+  argv[argc++] = uid_text;
+  argv[argc++] = "--regid";
+  argv[argc++] = gid_text;
+  argv[argc++] = "--init-groups";
+  argv[argc++] = "--no-new-privs";
+  argv[argc++] = "--";
+  argv[argc++] = RCL_INPUT_SOURCES_HELPER;
+  argv[argc] = NULL;
+
+  launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE |
+                                        G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+  g_subprocess_launcher_setenv(launcher, "HOME", home, TRUE);
+  g_subprocess_launcher_setenv(launcher, "USER", pw->pw_name, TRUE);
+  g_subprocess_launcher_setenv(launcher, "LOGNAME", pw->pw_name, TRUE);
+  g_subprocess_launcher_setenv(launcher, "XDG_RUNTIME_DIR", runtime_dir, TRUE);
+  g_subprocess_launcher_setenv(launcher, "DBUS_SESSION_BUS_ADDRESS",
+                               bus_address, TRUE);
+  g_subprocess_launcher_unsetenv(launcher, "DBUS_SYSTEM_BUS_ADDRESS");
+
+  self->settings_helper = g_subprocess_launcher_spawnv(launcher, argv, &error);
+  if (!self->settings_helper)
+  {
+    g_warning("could not start GNOME input-sources helper: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+    goto out;
+  }
+
+  self->settings_stream = g_data_input_stream_new(
+      g_subprocess_get_stdout_pipe(self->settings_helper));
+  self->settings_cancellable = g_cancellable_new();
+  settings_helper_read_next(self);
+
+  g_debug("monitoring GNOME input sources for uid %u", self->active->uid);
+  ok = TRUE;
+
+out:
+  if (launcher)
+    g_object_unref(launcher);
+  g_free(setpriv);
+  g_free(bus_address);
+  g_free(bus_path);
+  g_free(runtime_dir);
+  g_free(uid_text);
+  g_free(gid_text);
+  g_free(home);
+  return ok;
+}
+
+static gboolean
+helper_restart_cb(gpointer user_data)
+{
+  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+
+  self->helper_restart_id = 0;
+  if (!self->stopping && self->active)
+    start_settings_helper(self);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+restart_settings_helper(RclInputSources *self)
+{
+  stop_settings_helper(self);
+  if (self->active && !self->stopping)
+    start_settings_helper(self);
+}
 
 static void
 active_session_free(ActiveSession *session)
@@ -325,6 +686,8 @@ refresh_sessions(RclInputSources *self)
               self->active->session_type, self->active->desktop);
     else
       g_debug("no unambiguous active local GNOME session");
+
+    restart_settings_helper(self);
   }
 
   active_session_free(candidate);
@@ -475,6 +838,7 @@ name_vanished_cb(GDBusConnection *connection,
     return;
 
   self->logind_available = FALSE;
+  stop_settings_helper(self);
   unsubscribe_signals(self);
 
   if (self->refresh_id)
@@ -531,6 +895,7 @@ connection_closed_cb(GDBusConnection *connection,
 
   unsubscribe_signals(self);
   self->logind_available = FALSE;
+  stop_settings_helper(self);
   self->connection_closed_id = 0;
   g_clear_object(&self->connection);
 
@@ -601,6 +966,7 @@ rcl_input_sources_stop(RclInputSources *self)
   g_return_if_fail(RCL_IS_INPUT_SOURCES(self));
 
   self->stopping = TRUE;
+  stop_settings_helper(self);
 
   if (self->reconnect_id)
   {
