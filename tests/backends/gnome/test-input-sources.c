@@ -6,7 +6,7 @@
 #include <gio/gio.h>
 #include <glib.h>
 
-#include "rcl-input-sources.h"
+#include "gnome-backend.h"
 
 static void
 test_input_sources_snapshot_format(void)
@@ -17,7 +17,7 @@ test_input_sources_snapshot_format(void)
   GVariant *snapshot;
 
   snapshot = g_variant_parse(
-      G_VARIANT_TYPE(RCL_INPUT_SOURCES_SNAPSHOT_TYPE),
+      G_VARIANT_TYPE(RCL_GNOME_BACKEND_SNAPSHOT_TYPE),
       output, NULL, NULL, &error);
 
   g_assert_no_error(error);
@@ -32,7 +32,7 @@ static void
 test_input_sources_start_stop(void)
 {
   GTestDBus *bus = g_test_dbus_new(G_TEST_DBUS_NONE);
-  RclInputSources *backend;
+  RclGnomeBackend *backend;
   RclLocaleDaemon *daemon;
   GError *error = NULL;
   guint i;
@@ -52,7 +52,7 @@ test_input_sources_start_stop(void)
       daemon, "fr", "", &error));
   g_assert_no_error(error);
 
-  backend = rcl_input_sources_new(daemon);
+  backend = rcl_gnome_backend_new(daemon);
 
   for (i = 0; i < 2; i++)
   {

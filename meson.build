@@ -102,8 +102,8 @@ if backend == 'gnome'
   if not input_sources_helper_dir.startswith('/')
     input_sources_helper_dir = join_paths(prefix, input_sources_helper_dir)
   endif
-  conf.set_quoted('RCL_INPUT_SOURCES_HELPER',
-                  join_paths(input_sources_helper_dir, 'localed-input-sources-helper'))
+  conf.set_quoted('RCL_GNOME_INPUT_SOURCES_HELPER',
+                  join_paths(input_sources_helper_dir, 'localed-gnome-input-sources-helper'))
 endif
 
 conf.set('GLIB_VERSION_MIN_REQUIRED', 'GLIB_VERSION_2_56')

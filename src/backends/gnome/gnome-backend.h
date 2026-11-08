@@ -10,12 +10,12 @@
 #include "rcl-locale.h"
 
 /* Helper snapshot: layouts, variants, options, active layout, active variant. */
-#define RCL_INPUT_SOURCES_SNAPSHOT_TYPE "(asasasss)"
+#define RCL_GNOME_BACKEND_SNAPSHOT_TYPE "(asasasss)"
 
 G_BEGIN_DECLS
 
-#define RCL_TYPE_INPUT_SOURCES (rcl_input_sources_get_type())
-G_DECLARE_FINAL_TYPE(RclInputSources, rcl_input_sources,
+#define RCL_TYPE_GNOME_BACKEND (rcl_gnome_backend_get_type())
+G_DECLARE_FINAL_TYPE(RclGnomeBackend, rcl_input_sources,
                      RCL, INPUT_SOURCES, GObject)
 
 RclInputSources *rcl_input_sources_new(RclLocaleDaemon *daemon);

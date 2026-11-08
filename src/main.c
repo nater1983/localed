@@ -37,7 +37,7 @@
 #include "rcl-locale.h"
 #include "rcl-accounts-service.h"
 #if HAVE_GNOME_BACKEND
-#include "rcl-input-sources.h"
+#include "backends/gnome/gnome-backend.h"
 #endif
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
@@ -81,7 +81,7 @@ typedef struct RclState
   guint       sync_id;
   RclAccountsService *accounts_service;
 #if HAVE_GNOME_BACKEND
-  RclInputSources *input_sources;
+  RclGnomeBackend *gnome_backend;
 #endif
 } RclState;
 
@@ -103,7 +103,7 @@ rcl_state_free(RclState *state)
   }
 
 #if HAVE_GNOME_BACKEND
-  g_clear_object(&state->input_sources);
+  g_clear_object(&state->gnome_backend);
 #endif
   g_clear_object(&state->accounts_service);
 
@@ -250,8 +250,8 @@ rcl_main_name_acquired(GDBusConnection *connection,
 #if HAVE_GNOME_BACKEND
   /* Start the selected GNOME backend only after locale1 is registered. */
   if (state->input_sources &&
-      !rcl_input_sources_start(state->input_sources, NULL))
-    g_warning("could not start GNOME input-sources session discovery");
+      !rcl_gnome_backend_start(state->input_sources, NULL))
+    g_warning("could not start GNOME backend session discovery");
 #endif
 
   /*
@@ -649,7 +649,7 @@ gint main(gint argc, gchar **argv)
 #if HAVE_GNOME_BACKEND
   /* GNOME owns input-source discovery and synchronization. */
   state->input_sources =
-      rcl_input_sources_new(RCL_LOCALE_DAEMON(state->daemon));
+      rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
 #endif
 
   /* Acquire the D-Bus name for the first time */

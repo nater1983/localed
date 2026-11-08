@@ -20,7 +20,7 @@
 #include <gio/gio.h>
 #include <glib.h>
 
-#include "rcl-input-sources.h"
+#include "gnome-backend.h"
 #include "rcl-locale.h"
 #include "rcl-xkb-config.h"
 
@@ -43,7 +43,7 @@ typedef struct
   guint uid;
 } ActiveSession;
 
-struct _RclInputSources
+struct _RclGnomeBackend
 {
   GObject parent_instance;
 
@@ -67,7 +67,7 @@ struct _RclInputSources
   ActiveSession *active;
 };
 
-G_DEFINE_TYPE(RclInputSources, rcl_input_sources, G_TYPE_OBJECT)
+G_DEFINE_TYPE(RclInputSources, rcl_gnome_backend, G_TYPE_OBJECT)
 
 enum
 {
@@ -174,7 +174,7 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
 
   g_debug("received GNOME input-sources snapshot: %s", line);
 
-  snapshot = g_variant_parse(G_VARIANT_TYPE(RCL_INPUT_SOURCES_SNAPSHOT_TYPE),
+  snapshot = g_variant_parse(G_VARIANT_TYPE(RCL_GNOME_BACKEND_SNAPSHOT_TYPE),
                              line, NULL, NULL,
                              &error);
   if (!snapshot)
@@ -1482,7 +1482,7 @@ rcl_input_sources_new(RclLocaleDaemon *daemon)
   RclInputSources *self;
 
   g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
-  self = g_object_new(RCL_TYPE_INPUT_SOURCES, NULL);
+  self = g_object_new(RCL_TYPE_GNOME_BACKEND, NULL);
   self->daemon = daemon;
   return self;
 }

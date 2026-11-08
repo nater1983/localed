@@ -2,7 +2,7 @@ file_mode_test = executable(
   'test-file-mode',
   'test-file-mode.c',
   dependencies        : [glib_dep, gio_dep],
-  include_directories : include_directories('../src'),
+  include_directories : include_directories('../src', '../src/backends/gnome'),
 )
 
 test('configuration file mode preservation', file_mode_test)
@@ -57,8 +57,8 @@ if get_option('backend') == 'gnome'
   input_sources_test = executable(
     'test-input-sources',
     [
-      'test-input-sources.c',
-      '../src/rcl-input-sources.c',
+      'backends/gnome/test-input-sources.c',
+      '../src/backends/gnome/gnome-backend.c',
       '../src/rcl-file-transaction.c',
       '../src/rcl-xkb-config.c',
       '../src/rcl-locale.c',
