@@ -12,7 +12,6 @@ dbus_lifecycle_test = executable(
   [
     'test-dbus-lifecycle.c',
     '../src/rcl-accounts-service.c',
-    '../src/rcl-input-sources.c',
     '../src/rcl-file-transaction.c',
     '../src/rcl-xkb-config.c',
     '../src/rcl-locale.c',
@@ -54,6 +53,7 @@ xkb_config_test = executable(
 
 test('Xorg XKB configuration parsing', xkb_config_test)
 
+if get_option('backend') == 'gnome'
 input_sources_test = executable(
   'test-input-sources',
   [
@@ -73,3 +73,5 @@ test(
   timeout : 30,
   env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
 )
+
+endif
