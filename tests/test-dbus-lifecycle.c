@@ -436,7 +436,7 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
    * isolated Meson test path so a developer's /etc/X11 configuration can
    * never be overwritten by the test.
    */
-  g_assert_cmpstr(expected_path, !=, "/etc/X11/xorg.conf.d/00-keyboard.conf");
+  g_assert_cmpstr(g_getenv("RCL_TEST_X11_KEYBOARD_FILE"), ==, expected_path);
 
   g_assert_no_error(error);
   g_assert_nonnull(node);
