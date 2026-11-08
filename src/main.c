@@ -40,9 +40,6 @@
 #include "backends/gnome/gnome-backend.h"
 #endif
 #include "rcl-accounts-service.h"
-#if HAVE_GNOME_BACKEND
-
-#endif
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
 
