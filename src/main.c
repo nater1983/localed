@@ -638,6 +638,9 @@ gint main(gint argc, gchar **argv)
     g_clear_error(&error);
   }
 
+  /* The backend owns all GNOME input-source discovery and synchronization. */
+  state->input_sources = rcl_input_sources_new();
+
   /* Acquire the D-Bus name for the first time */
   rcl_acquire_name(state);
 
