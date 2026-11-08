@@ -131,6 +131,11 @@ settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
     g_warning("could not synchronize GNOME XKB settings with localed: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
+    if (!RCL_INPUT_SOURCES(user_data)->stopping &&
+        RCL_INPUT_SOURCES(user_data)->active &&
+        !RCL_INPUT_SOURCES(user_data)->helper_restart_id)
+      RCL_INPUT_SOURCES(user_data)->helper_restart_id =
+        g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, user_data);
   }
   else
     g_variant_unref(reply);
@@ -372,6 +377,12 @@ start_settings_helper(RclInputSources *self)
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE |
                                         G_SUBPROCESS_FLAGS_STDERR_SILENCE);
   g_subprocess_launcher_setenv(launcher, "HOME", home, TRUE);
+  g_subprocess_launcher_setenv(launcher, "XDG_CONFIG_HOME",
+                               g_build_filename(home, ".config", NULL), TRUE);
+  g_subprocess_launcher_setenv(launcher, "XDG_DATA_HOME",
+                               g_build_filename(home, ".local", "share", NULL), TRUE);
+  g_subprocess_launcher_setenv(launcher, "GSETTINGS_BACKEND", "dconf", TRUE);
+  g_subprocess_launcher_unsetenv(launcher, "GSETTINGS_SCHEMA_DIR");
   g_subprocess_launcher_setenv(launcher, "USER", pw->pw_name, TRUE);
   g_subprocess_launcher_setenv(launcher, "LOGNAME", pw->pw_name, TRUE);
   g_subprocess_launcher_setenv(launcher, "XDG_RUNTIME_DIR", runtime_dir, TRUE);
@@ -415,9 +426,13 @@ helper_restart_cb(gpointer user_data)
   RclInputSources *self = RCL_INPUT_SOURCES(user_data);
 
   self->helper_restart_id = 0;
-  if (!self->stopping && self->active && !start_settings_helper(self))
-    self->helper_restart_id =
-      g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
+  if (!self->stopping && self->active)
+  {
+    stop_settings_helper(self);
+    if (!start_settings_helper(self))
+      self->helper_restart_id =
+        g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
+  }
 
   return G_SOURCE_REMOVE;
 }
