@@ -182,7 +182,7 @@ request_accounts_name
 # The same log text may already exist from before the restart. Require the
 # subscription message to occur at least twice to prove the second bus attach.
 i=0
-while [ "$(grep -c 'subscribed to AccountsService' "$log" || :)" -lt 2 ]; do
+while [ "$(grep -c 'AccountsService appeared; language monitoring enabled' "$log" || :)" -lt 2 ]; do
   i=$((i + 1))
   if [ "$i" -ge 100 ]; then
     echo "AccountsService did not reconnect after the bus restart" >&2
