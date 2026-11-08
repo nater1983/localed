@@ -7,7 +7,7 @@
  * This process is launched by localed after dropping to the selected
  * session user's UID and GID. It never writes system configuration. It
  * emits a single GVariant tuple per settings update on stdout:
- *   (as layouts, as variants, as options)
+ *   (as layouts, as variants, as options, s active_layout, s active_variant)
  */
 
 #include <gio/gio.h>
@@ -22,6 +22,10 @@ emit_settings(GSettings *settings)
   GVariantIter iter;
   const gchar *type;
   const gchar *id;
+  guint current;
+  guint source_index = 0;
+  gchar *active_layout = g_strdup("");
+  gchar *active_variant = g_strdup("");
   GPtrArray *layouts = g_ptr_array_new_with_free_func(g_free);
   GPtrArray *variants = g_ptr_array_new_with_free_func(g_free);
   gchar **option_strv;
@@ -29,26 +33,37 @@ emit_settings(GSettings *settings)
   gchar *printed;
 
   sources = g_settings_get_value(settings, "sources");
+  current = g_settings_get_uint(settings, "current");
   g_variant_iter_init(&iter, sources);
 
   while (g_variant_iter_next(&iter, "(&s&s)", &type, &id))
   {
-    if (g_strcmp0(type, "xkb") != 0)
-      continue;
+    gchar **parts = NULL;
+    gchar *layout = NULL;
+    gchar *variant = NULL;
 
-    g_ptr_array_add(layouts, g_strdup(id));
-    /* GNOME stores layout and variant together in the source identifier:
-     * a source ID may be "layout+variant". */
+    /* current indexes the complete sources array, including non-XKB
+     * sources. Keep that index separate from the filtered XKB arrays. */
+    if (g_strcmp0(type, "xkb") == 0)
     {
-      gchar **parts = g_strsplit(id, "+", 2);
-      gchar *layout = g_strdup(parts[0]);
-      gchar *variant = g_strdup(parts[1] ? parts[1] : "");
+      parts = g_strsplit(id, "+", 2);
+      layout = g_strdup(parts[0]);
+      variant = g_strdup(parts[1] ? parts[1] : "");
 
-      g_free(g_ptr_array_index(layouts, layouts->len - 1));
-      g_ptr_array_index(layouts, layouts->len - 1) = layout;
+      if (source_index == current)
+      {
+        g_free(active_layout);
+        g_free(active_variant);
+        active_layout = g_strdup(layout);
+        active_variant = g_strdup(variant);
+      }
+
+      g_ptr_array_add(layouts, layout);
       g_ptr_array_add(variants, variant);
       g_strfreev(parts);
     }
+
+    source_index++;
   }
 
   options = g_settings_get_value(settings, "xkb-options");
@@ -57,10 +72,12 @@ emit_settings(GSettings *settings)
   g_ptr_array_add(layouts, NULL);
   g_ptr_array_add(variants, NULL);
 
-  snapshot = g_variant_ref_sink(g_variant_new("(^as^as^as)",
+  snapshot = g_variant_ref_sink(g_variant_new("(^as^as^as&s&s)",
                            (gchar **) layouts->pdata,
                            (gchar **) variants->pdata,
-                           option_strv));
+                           option_strv,
+                           active_layout,
+                           active_variant));
   printed = g_variant_print(snapshot, TRUE);
 
   g_print("%s\n", printed);
@@ -69,6 +86,8 @@ emit_settings(GSettings *settings)
   g_free(printed);
   g_variant_unref(snapshot);
   g_strfreev(option_strv);
+  g_free(active_layout);
+  g_free(active_variant);
   g_variant_unref(options);
   g_variant_unref(sources);
   g_ptr_array_unref(layouts);
@@ -81,6 +100,7 @@ settings_changed(GSettings *settings, const gchar *key, gpointer user_data)
   (void) user_data;
 
   if (g_strcmp0(key, "sources") == 0 ||
+      g_strcmp0(key, "current") == 0 ||
       g_strcmp0(key, "xkb-options") == 0)
     emit_settings(settings);
 }
