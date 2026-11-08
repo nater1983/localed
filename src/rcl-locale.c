@@ -1785,6 +1785,18 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
+static gboolean
+rcl_x11_keyboard_values_are_valid( const gchar *layout,
+                                   const gchar *model,
+                                   const gchar *variant,
+                                   const gchar *options )
+{
+  return rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, layout ) &&
+         rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, model ) &&
+         rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT, variant ) &&
+         rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, options );
+}
+
 static void
 do_set_x11_keyboard( RclLocaleDaemon *daemon,
                      const gchar *layout, const gchar *model,
@@ -1794,10 +1806,7 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
 {
   GError *error = NULL;
 
-  if( !rcl_xkb_value_is_valid( RCL_XKB_VALUE_LAYOUT, layout ) ||
-      !rcl_xkb_value_is_valid( RCL_XKB_VALUE_MODEL, model ) ||
-      !rcl_xkb_value_is_valid( RCL_XKB_VALUE_VARIANT, variant ) ||
-      !rcl_xkb_value_is_valid( RCL_XKB_VALUE_OPTIONS, options ) )
+  if( !rcl_x11_keyboard_values_are_valid( layout, model, variant, options ) )
   {
     g_dbus_method_invocation_return_error( invocation,
       G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -2269,6 +2278,18 @@ handle_method_call( GDBusConnection       *connection,
 
     g_variant_get( parameters, "(&s&s&s&sbb)", &layout, &model, &variant,
                    &options, &convert, &interactive );
+
+    /*
+     * Reject malformed values before contacting PolicyKit.  The operation
+     * handler repeats this validation after authorization as defense in depth.
+     */
+    if( !rcl_x11_keyboard_values_are_valid( layout, model, variant, options ) )
+    {
+      g_dbus_method_invocation_return_error( invocation,
+        G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+        "Invalid X11 keyboard configuration value" );
+      return;
+    }
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon      = g_object_ref( daemon );
