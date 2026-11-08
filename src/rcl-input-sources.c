@@ -119,6 +119,7 @@ uid_in_privileged_group(guint uid, gid_t *primary_gid, gchar **home)
 }
 
 static void settings_helper_read_next(RclInputSources *self);
+static gboolean helper_restart_cb(gpointer user_data);
 
 static void
 settings_apply_done(GObject *source, GAsyncResult *result, gpointer user_data)
@@ -254,7 +255,7 @@ settings_helper_read_cb(GObject *source, GAsyncResult *result,
     if (!self->stopping && self->active && !self->helper_restart_id)
       self->helper_restart_id =
         g_timeout_add(HELPER_RESTART_DELAY_MS,
-                      (GSourceFunc) settings_helper_read_next, self);
+                      helper_restart_cb, self);
   }
 
 out:
