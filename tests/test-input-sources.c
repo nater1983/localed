@@ -13,13 +13,16 @@ test_input_sources_start_stop(void)
 {
   GTestDBus *bus = g_test_dbus_new(G_TEST_DBUS_NONE);
   RclInputSources *backend;
+  RclLocaleDaemon *daemon;
   GError *error = NULL;
   guint i;
 
   g_test_dbus_up(bus);
   g_setenv("DBUS_SYSTEM_BUS_ADDRESS", g_test_dbus_get_bus_address(bus), TRUE);
 
-  backend = rcl_input_sources_new();
+  daemon = g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
+  g_assert_nonnull(daemon);
+  backend = rcl_input_sources_new(daemon);
 
   for (i = 0; i < 2; i++)
   {
@@ -29,6 +32,7 @@ test_input_sources_start_stop(void)
   }
 
   g_object_unref(backend);
+  g_object_unref(daemon);
 
   g_unsetenv("DBUS_SYSTEM_BUS_ADDRESS");
   g_test_dbus_down(bus);
