@@ -329,6 +329,12 @@ polkit_client_call_done(GObject *source,
 
   reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source),
                                         result, &fixture->client_error);
+
+  /*
+   * Some tests reuse this fixture for sequential asynchronous calls.  Release
+   * the previous reply before storing the next one.
+   */
+  g_clear_pointer(&fixture->client_reply, g_variant_unref);
   fixture->client_reply = reply;
   fixture->client_done = TRUE;
 }
