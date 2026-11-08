@@ -1,11 +1,14 @@
 localed_sources = files(
   'main.c',
   'rcl-accounts-service.c',
-  'rcl-input-sources.c',
   'rcl-file-transaction.c',
   'rcl-xkb-config.c',
   'rcl-locale.c',
 )
+
+if get_option('backend') == 'gnome'
+  localed_sources += files('rcl-input-sources.c')
+endif
 
 localed_deps = [
   glib_dep,
@@ -28,10 +31,13 @@ executable(
   gnu_symbol_visibility : 'hidden',
 )
 
-executable(
-  'localed-input-sources-helper',
-  'rcl-input-sources-helper.c',
-  dependencies : [glib_dep, gio_dep],
-  install      : true,
-  install_dir  : get_option('libexecdir'),
-)
+
+if get_option('backend') == 'gnome'
+  executable(
+    'localed-input-sources-helper',
+    'rcl-input-sources-helper.c',
+    dependencies : [glib_dep, gio_dep],
+    install      : true,
+    install_dir  : get_option('libexecdir'),
+  )
+endif
