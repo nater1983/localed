@@ -18,7 +18,7 @@ localed_inc = [
   include_directories('.'),
 ]
 
-if get_option('backend') == 'gnome'
+if get_option('desktop-backend') == 'gnome'
   localed_sources += files('backends/gnome/gnome-backend.c')
 endif
 
@@ -32,7 +32,7 @@ executable(
   gnu_symbol_visibility : 'hidden',
 )
 
-if get_option('backend') == 'gnome'
+if get_option('desktop-backend') == 'gnome'
   executable(
     'localed-gnome-input-sources-helper',
     'backends/gnome/gnome-input-sources-helper.c',
