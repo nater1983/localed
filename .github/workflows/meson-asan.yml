@@ -41,6 +41,9 @@ jobs:
             -Drc_keymap="$RUNNER_TEMP/localed-test-config/rc.keymap" \
             -Dx11_keyboard_conf="$RUNNER_TEMP/localed-test-config/00-keyboard.conf"
 
+      - name: Validate SlackBuild shell syntax
+        run: bash -n localed.SlackBuild
+
       - name: Compile
         run: meson compile -C build-asan
 
