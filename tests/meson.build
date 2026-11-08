@@ -53,7 +53,7 @@ xkb_config_test = executable(
 
 test('Xorg XKB configuration parsing', xkb_config_test)
 
-if get_option('backend') == 'gnome'
+if get_option('desktop-backend') == 'gnome'
   input_sources_test = executable(
     'test-input-sources',
     [
