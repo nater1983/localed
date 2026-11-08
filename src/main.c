@@ -36,6 +36,7 @@
 
 #include "rcl-locale.h"
 #include "rcl-accounts-service.h"
+#include "rcl-input-sources.h"
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
 
@@ -77,6 +78,7 @@ typedef struct RclState
   gboolean    exiting;
   guint       sync_id;
   RclAccountsService *accounts_service;
+  RclInputSources *input_sources;
 } RclState;
 
 /* ───────────────────────────────────────────── */
@@ -96,6 +98,7 @@ rcl_state_free(RclState *state)
     state->reconnect_id = 0;
   }
 
+  g_clear_object(&state->input_sources);
   g_clear_object(&state->accounts_service);
 
   if (state->watch_id)
@@ -626,6 +629,15 @@ gint main(gint argc, gchar **argv)
   if (!rcl_accounts_service_start(state->accounts_service, &error))
   {
     g_warning("could not start AccountsService integration: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+  }
+
+  /* GNOME input-source session discovery is independent of locale1. */
+  state->input_sources = rcl_input_sources_new();
+  if (!rcl_input_sources_start(state->input_sources, &error))
+  {
+    g_warning("could not start GNOME input-sources session discovery: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
   }
