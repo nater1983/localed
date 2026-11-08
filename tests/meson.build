@@ -12,6 +12,7 @@ dbus_lifecycle_test = executable(
   [
     'test-dbus-lifecycle.c',
     '../src/rcl-accounts-service.c',
+    '../src/rcl-input-sources.c',
     '../src/rcl-file-transaction.c',
     '../src/rcl-xkb-config.c',
     '../src/rcl-locale.c',
