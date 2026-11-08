@@ -133,6 +133,39 @@ test_empty_values_and_crlf ( void )
     "", "pc105", "", "" );
 }
 static void
+test_duplicate_identifier_last_wins ( void )
+{
+  assert_parse(
+    "Section \"InputClass\"\n"
+    "Identifier \"system-keyboard\"\n"
+    "Option \"XkbLayout\" \"us\"\n"
+    "Identifier \"other-keyboard\"\n"
+    "EndSection\n",
+    "", "", "", "" );
+}
+
+static void
+test_empty_identifier_is_not_owned ( void )
+{
+  assert_parse(
+    "Section \"InputClass\"\n"
+    "Identifier \"\"\n"
+    "Option \"XkbLayout\" \"us\"\n"
+    "EndSection\n",
+    "", "", "", "" );
+}
+
+static void
+test_extra_option_arguments_are_rejected ( void )
+{
+  assert_invalid(
+    "Section \"InputClass\"\n"
+    "Identifier \"system-keyboard\"\n"
+    "Option \"NoAccel\" \"on\" \"unexpected\"\n"
+    "EndSection\n" );
+}
+
+static void
 test_valueless_unrelated_option ( void )
 {
   assert_parse(
@@ -255,6 +288,9 @@ main ( int argc, char **argv )
   g_test_add_func( "/xkb-config/backslash-literal", test_backslash_is_literal_data );
   g_test_add_func( "/xkb-config/quoted-token-suffix", test_quoted_token_suffix_is_rejected );
   g_test_add_func( "/xkb-config/empty-values-crlf", test_empty_values_and_crlf );
+  g_test_add_func( "/xkb-config/duplicate-identifier", test_duplicate_identifier_last_wins );
+  g_test_add_func( "/xkb-config/empty-identifier", test_empty_identifier_is_not_owned );
+  g_test_add_func( "/xkb-config/extra-option-arguments", test_extra_option_arguments_are_rejected );
   g_test_add_func( "/xkb-config/valueless-unrelated-option", test_valueless_unrelated_option );
   g_test_add_func( "/xkb-config/unterminated-quote", test_unterminated_quote );
   g_test_add_func( "/xkb-config/unbalanced-section", test_unbalanced_section );
