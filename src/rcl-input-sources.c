@@ -385,22 +385,26 @@ properties_changed_cb(GDBusConnection *connection,
 {
   RclInputSources *self = RCL_INPUT_SOURCES(user_data);
   const gchar *changed_interface;
+  GVariant *changed = NULL;
+  GVariant *invalidated = NULL;
 
   (void) connection;
   (void) sender_name;
   (void) interface_name;
   (void) signal_name;
-  (void) parameters;
 
   if (!object_path ||
       !g_variant_is_of_type(parameters, G_VARIANT_TYPE("(sa{sv}as)")))
     return;
 
   g_variant_get(parameters, "(&s@a{sv}@as)",
-                &changed_interface, NULL, NULL);
+                &changed_interface, &changed, &invalidated);
 
   if (g_strcmp0(changed_interface, LOGIND_SESSION_IFACE) == 0)
     schedule_refresh(self);
+
+  g_clear_pointer(&changed, g_variant_unref);
+  g_clear_pointer(&invalidated, g_variant_unref);
 }
 
 static void
