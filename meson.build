@@ -93,12 +93,18 @@ conf.set_quoted('RCL_RC_KEYMAP_FILE',    get_option('rc_keymap'))
 conf.set_quoted('RCL_RC_KEYMAP_TOGGLE_FILE',
                 get_option('rc_keymap') + '.toggle')
 conf.set_quoted('RCL_X11_KEYBOARD_FILE', get_option('x11_keyboard_conf'))
-input_sources_helper_dir = get_option('libexecdir')
-if not input_sources_helper_dir.startswith('/')
-  input_sources_helper_dir = join_paths(prefix, input_sources_helper_dir)
+
+backend = get_option('backend')
+conf.set('HAVE_GNOME_BACKEND', backend == 'gnome')
+
+if backend == 'gnome'
+  input_sources_helper_dir = get_option('libexecdir')
+  if not input_sources_helper_dir.startswith('/')
+    input_sources_helper_dir = join_paths(prefix, input_sources_helper_dir)
+  endif
+  conf.set_quoted('RCL_INPUT_SOURCES_HELPER',
+                  join_paths(input_sources_helper_dir, 'localed-input-sources-helper'))
 endif
-conf.set_quoted('RCL_INPUT_SOURCES_HELPER',
-                join_paths(input_sources_helper_dir, 'localed-input-sources-helper'))
 
 conf.set('GLIB_VERSION_MIN_REQUIRED', 'GLIB_VERSION_2_56')
 conf.set('GLIB_VERSION_MAX_ALLOWED',  'GLIB_VERSION_2_56')
@@ -130,4 +136,5 @@ summary({
   'console keymap': get_option('rc_keymap'),
   'X11 keyboard'  : get_option('x11_keyboard_conf'),
   'privileged group': get_option('privileged-group'),
+  'backend'          : backend,
 }, section : 'Configuration')
