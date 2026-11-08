@@ -36,6 +36,38 @@
 #include "rcl-file-transaction.h"
 #include "rcl-xkb-config.h"
 
+#ifdef RCL_LOCALE_TESTING
+/*
+ * Fail one forward configuration rename in the D-Bus integration tests.
+ * Rollback uses rcl-file-transaction.c directly and is deliberately not
+ * intercepted, allowing the test to verify restoration after a partial
+ * multi-file update.
+ */
+static gchar *test_fail_rename_destination;
+
+void
+rcl_locale_test_fail_rename_to ( const gchar *destination )
+{
+  g_free( test_fail_rename_destination );
+  test_fail_rename_destination = g_strdup( destination );
+}
+
+static int
+rcl_locale_rename ( const gchar *source, const gchar *destination )
+{
+  if( test_fail_rename_destination &&
+      g_strcmp0( destination, test_fail_rename_destination ) == 0 )
+  {
+    errno = EIO;
+    return -1;
+  }
+
+  return g_rename( source, destination );
+}
+#else
+#define rcl_locale_rename g_rename
+#endif
+
 /* --------------------------------------------------------------------------
    The org.freedesktop.locale1 introspection XML.
 
@@ -483,7 +515,7 @@ write_x11_keyboard_conf( const gchar *path,
     if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
       ok = FALSE;
 
-    if( ok && g_rename( tmp_path, path ) != 0 )
+    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
     {
       int saved_errno = errno;
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
@@ -670,7 +702,7 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
       ok = FALSE;
     }
 
-    if( ok && g_rename( tmp_path, path ) != 0 )
+    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
@@ -768,7 +800,7 @@ rcl_write_rc_keymap_toggle( const gchar *path,
         ok = FALSE;
       }
 
-      if( ok && g_rename( tmp_path, path ) != 0 )
+      if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
       {
         g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                      "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
@@ -1132,7 +1164,7 @@ rcl_write_lang_sh( const gchar         *path,
       ok = FALSE;
     }
 
-    if( ok && g_rename( tmp_path, path ) != 0 )
+    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
     {
       g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
                    "rename(%s, %s): %s", tmp_path, path, g_strerror(errno) );
