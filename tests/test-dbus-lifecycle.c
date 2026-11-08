@@ -422,6 +422,36 @@ test_invalid_x11_keyboard_rejected_before_polkit(Fixture *fixture,
   g_object_unref(daemon_bus);
 }
 
+static gchar *
+get_locale_string_property ( Fixture *fixture,
+                             GDBusConnection *daemon_bus,
+                             PolkitFixture *polkit_fixture,
+                             const gchar *property_name )
+{
+  GVariant *value;
+  gchar *result;
+
+  polkit_fixture->client_done = FALSE;
+  g_clear_error( &polkit_fixture->client_error );
+
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.DBus.Properties", "Get",
+    g_variant_new("(ss)", "org.freedesktop.locale1", property_name),
+    G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 3000, NULL,
+    polkit_client_call_done, polkit_fixture );
+
+  iterate_until( polkit_fixture, polkit_condition, 5000 );
+  g_assert_no_error( polkit_fixture->client_error );
+  g_assert_nonnull( polkit_fixture->client_reply );
+
+  g_variant_get( polkit_fixture->client_reply, "(v)", &value );
+  result = g_variant_dup_string( value, NULL );
+  g_variant_unref( value );
+
+  return result;
+}
+
 static void
 test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
 {
@@ -546,6 +576,85 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_variant_get(polkit_fixture.client_reply, "(v)", &property);
   g_assert_cmpstr(g_variant_get_string(property, NULL), ==, "gb");
   g_variant_unref(property);
+
+  /*
+   * Failure injection: update both console files, then fail the Xorg rename.
+   * The transaction must restore the original keymap and toggle sidecar and
+   * leave the X11 file and all D-Bus properties at their pre-call values.
+   */
+  {
+    gchar *before_keymap = NULL;
+    gchar *before_toggle = NULL;
+    gchar *before_x11 = NULL;
+    gchar *after = NULL;
+
+    g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &before_keymap,
+                                      NULL, &error));
+    g_assert_no_error(error);
+    g_assert_true(g_file_set_contents(RCL_RC_KEYMAP_TOGGLE_FILE,
+                                      "old-toggle\n", -1, &error));
+    g_assert_no_error(error);
+
+    /* Refresh the daemon cache so the toggle property reflects the fixture. */
+    rcl_daemon_sync_dbus_properties(RCL_LOCALE_DAEMON(daemon));
+
+    g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_TOGGLE_FILE,
+                                      &before_toggle, NULL, &error));
+    g_assert_no_error(error);
+    g_assert_true(g_file_get_contents(expected_path, &before_x11,
+                                      NULL, &error));
+    g_assert_no_error(error);
+
+    rcl_locale_test_fail_rename_to(expected_path);
+    polkit_fixture.client_done = FALSE;
+    g_clear_error(&polkit_fixture.client_error);
+    g_dbus_connection_call(
+      fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+      "/org/freedesktop/locale1", "org.freedesktop.locale1",
+      "SetVConsoleKeyboard",
+      g_variant_new("(ssbb)", "de", "us", TRUE, TRUE),
+      NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+      polkit_client_call_done, &polkit_fixture);
+    iterate_until(&polkit_fixture, polkit_condition, 5000);
+    rcl_locale_test_fail_rename_to(NULL);
+
+    g_assert_nonnull(polkit_fixture.client_error);
+    g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &after,
+                                      NULL, &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(after, ==, before_keymap);
+    g_clear_pointer(&after, g_free);
+
+    g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_TOGGLE_FILE, &after,
+                                      NULL, &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(after, ==, before_toggle);
+    g_clear_pointer(&after, g_free);
+
+    g_assert_true(g_file_get_contents(expected_path, &after, NULL, &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(after, ==, before_x11);
+    g_clear_pointer(&after, g_free);
+
+    after = get_locale_string_property(fixture, daemon_bus,
+                                       &polkit_fixture, "VConsoleKeymap");
+    g_assert_cmpstr(after, ==, "uk");
+    g_clear_pointer(&after, g_free);
+
+    after = get_locale_string_property(fixture, daemon_bus,
+                                       &polkit_fixture, "VConsoleKeymapToggle");
+    g_assert_cmpstr(after, ==, "old-toggle");
+    g_clear_pointer(&after, g_free);
+
+    after = get_locale_string_property(fixture, daemon_bus,
+                                       &polkit_fixture, "X11Layout");
+    g_assert_cmpstr(after, ==, "gb");
+    g_clear_pointer(&after, g_free);
+
+    g_free(before_keymap);
+    g_free(before_toggle);
+    g_free(before_x11);
+  }
 
   polkit_fixture_free(&polkit_fixture);
   rcl_daemon_shutdown(daemon);
