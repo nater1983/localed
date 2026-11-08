@@ -67,7 +67,7 @@ struct _RclGnomeBackend
   ActiveSession *active;
 };
 
-G_DEFINE_TYPE(RclInputSources, rcl_gnome_backend, G_TYPE_OBJECT)
+G_DEFINE_TYPE(RclGnomeBackend, rcl_gnome_backend, G_TYPE_OBJECT)
 
 enum
 {
@@ -93,12 +93,12 @@ lookup_session_user(guint uid, gid_t *primary_gid, gchar **home)
   return TRUE;
 }
 
-static gchar *find_session_bus_address(RclInputSources *self,
+static gchar *find_session_bus_address(RclGnomeBackend *self,
                                        guint uid,
                                        const gchar *session_path);
-static void settings_helper_read_next(RclInputSources *self);
+static void settings_helper_read_next(RclGnomeBackend *self);
 static gboolean helper_restart_cb(gpointer user_data);
-static void restart_settings_helper(RclInputSources *self);
+static void restart_settings_helper(RclGnomeBackend *self);
 
 
 typedef struct
@@ -149,7 +149,7 @@ gnome_console_keymap_lookup(const gchar *layout, const gchar *variant)
 }
 
 static void
-apply_gnome_settings(RclInputSources *self, const gchar *line)
+apply_gnome_settings(RclGnomeBackend *self, const gchar *line)
 {
   GVariant *snapshot;
   GVariant *layouts_v = NULL;
@@ -281,7 +281,7 @@ static void
 settings_helper_read_cb(GObject *source, GAsyncResult *result,
                         gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
   GDataInputStream *stream = G_DATA_INPUT_STREAM(source);
   gsize length = 0;
   GError *error = NULL;
@@ -322,7 +322,7 @@ out:
 }
 
 static void
-settings_helper_read_next(RclInputSources *self)
+settings_helper_read_next(RclGnomeBackend *self)
 {
   if (!self->settings_stream || !self->settings_cancellable ||
       self->stopping)
@@ -336,7 +336,7 @@ settings_helper_read_next(RclInputSources *self)
 }
 
 static void
-stop_settings_helper(RclInputSources *self)
+stop_settings_helper(RclGnomeBackend *self)
 {
   if (self->helper_restart_id)
   {
@@ -356,7 +356,7 @@ stop_settings_helper(RclInputSources *self)
 }
 
 static gboolean
-start_settings_helper(RclInputSources *self)
+start_settings_helper(RclGnomeBackend *self)
 {
   struct stat runtime_stat;
   struct passwd *pw;
@@ -428,7 +428,7 @@ start_settings_helper(RclInputSources *self)
   argv[argc++] = "--init-groups";
   argv[argc++] = "--no-new-privs";
   argv[argc++] = "--";
-  argv[argc++] = RCL_INPUT_SOURCES_HELPER;
+  argv[argc++] = RCL_GNOME_INPUT_SOURCES_HELPER;
   argv[argc] = NULL;
 
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE);
@@ -481,7 +481,7 @@ out:
 static gboolean
 helper_restart_cb(gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
   self->helper_restart_id = 0;
   if (!self->stopping && self->active)
@@ -496,7 +496,7 @@ helper_restart_cb(gpointer user_data)
 }
 
 static void
-restart_settings_helper(RclInputSources *self)
+restart_settings_helper(RclGnomeBackend *self)
 {
   stop_settings_helper(self);
   if (self->active && !self->stopping && !start_settings_helper(self))
@@ -633,7 +633,7 @@ process_environment_is_gnome(const gchar *environment, gsize length)
  * session object path.
  */
 static gboolean
-session_has_gnome_process(RclInputSources *self,
+session_has_gnome_process(RclGnomeBackend *self,
                           guint uid,
                           const gchar *session_path)
 {
@@ -734,7 +734,7 @@ session_has_gnome_process(RclInputSources *self,
  * environment or an address that points to another user's socket.
  */
 static gchar *
-find_session_bus_address(RclInputSources *self,
+find_session_bus_address(RclGnomeBackend *self,
                          guint uid,
                          const gchar *session_path)
 {
@@ -871,7 +871,7 @@ next_process:
 }
 
 static gboolean
-session_properties_are_eligible(RclInputSources *self,
+session_properties_are_eligible(RclGnomeBackend *self,
                                 GVariant *properties,
                                 const gchar *seat_from_manager,
                                 const gchar *session_path,
@@ -927,7 +927,7 @@ session_properties_are_eligible(RclInputSources *self,
 }
 
 static ActiveSession *
-query_session(RclInputSources *self,
+query_session(RclGnomeBackend *self,
               const gchar *id,
               guint uid,
               const gchar *seat,
@@ -979,7 +979,7 @@ query_session(RclInputSources *self,
 }
 
 static void
-emit_active_session_changed(RclInputSources *self)
+emit_active_session_changed(RclGnomeBackend *self)
 {
   if (self->active)
   {
@@ -1000,7 +1000,7 @@ emit_active_session_changed(RclInputSources *self)
 }
 
 static void
-refresh_sessions(RclInputSources *self)
+refresh_sessions(RclGnomeBackend *self)
 {
   GVariant *reply = NULL;
   GVariant *sessions = NULL;
@@ -1093,7 +1093,7 @@ refresh_sessions(RclInputSources *self)
 static gboolean
 refresh_timeout_cb(gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
   self->refresh_id = 0;
   refresh_sessions(self);
@@ -1101,7 +1101,7 @@ refresh_timeout_cb(gpointer user_data)
 }
 
 static void
-schedule_refresh(RclInputSources *self)
+schedule_refresh(RclGnomeBackend *self)
 {
   if (self->stopping || self->refresh_id)
     return;
@@ -1119,7 +1119,7 @@ manager_signal_cb(GDBusConnection *connection,
                   GVariant *parameters,
                   gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
   (void) connection;
   (void) sender_name;
@@ -1141,7 +1141,7 @@ properties_changed_cb(GDBusConnection *connection,
                       GVariant *parameters,
                       gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
   const gchar *changed_interface;
   GVariant *changed = NULL;
   GVariant *invalidated = NULL;
@@ -1166,7 +1166,7 @@ properties_changed_cb(GDBusConnection *connection,
 }
 
 static void
-unsubscribe_signals(RclInputSources *self)
+unsubscribe_signals(RclGnomeBackend *self)
 {
   if (!self->connection)
     return;
@@ -1192,7 +1192,7 @@ name_appeared_cb(GDBusConnection *connection,
                  const gchar *owner,
                  gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
   (void) name;
   (void) owner;
@@ -1225,7 +1225,7 @@ name_vanished_cb(GDBusConnection *connection,
                  const gchar *name,
                  gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
   (void) name;
 
@@ -1252,16 +1252,16 @@ name_vanished_cb(GDBusConnection *connection,
   g_debug("logind disappeared; waiting for it to return");
 }
 
-static gboolean rcl_input_sources_connect(RclInputSources *self);
+static gboolean rcl_gnome_backend_connect(RclGnomeBackend *self);
 
 static gboolean
 reconnect_timeout_cb(gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
   self->reconnect_id = 0;
   if (!self->stopping)
-    rcl_input_sources_connect(self);
+    rcl_gnome_backend_connect(self);
 
   return G_SOURCE_REMOVE;
 }
@@ -1272,7 +1272,7 @@ connection_closed_cb(GDBusConnection *connection,
                      GError *error,
                      gpointer user_data)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(user_data);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
   (void) remote_peer_vanished;
 
@@ -1307,7 +1307,7 @@ connection_closed_cb(GDBusConnection *connection,
 }
 
 static gboolean
-rcl_input_sources_connect(RclInputSources *self)
+rcl_gnome_backend_connect(RclGnomeBackend *self)
 {
   gchar *address;
   GError *error = NULL;
@@ -1356,7 +1356,7 @@ failed:
 }
 
 void
-rcl_input_sources_stop(RclInputSources *self)
+rcl_gnome_backend_stop(RclGnomeBackend *self)
 {
   g_return_if_fail(RCL_IS_INPUT_SOURCES(self));
 
@@ -1397,7 +1397,7 @@ rcl_input_sources_stop(RclInputSources *self)
 }
 
 gboolean
-rcl_input_sources_start(RclInputSources *self, GError **error)
+rcl_gnome_backend_start(RclGnomeBackend *self, GError **error)
 {
   g_return_val_if_fail(RCL_IS_INPUT_SOURCES(self), FALSE);
   (void) error;
@@ -1406,11 +1406,11 @@ rcl_input_sources_start(RclInputSources *self, GError **error)
     return TRUE;
 
   self->stopping = FALSE;
-  return rcl_input_sources_connect(self);
+  return rcl_gnome_backend_connect(self);
 }
 
 gboolean
-rcl_input_sources_get_active_session(RclInputSources *self,
+rcl_gnome_backend_get_active_session(RclGnomeBackend *self,
                                      guint *uid,
                                      gchar **session_id,
                                      gchar **object_path,
@@ -1440,20 +1440,20 @@ rcl_input_sources_get_active_session(RclInputSources *self,
 }
 
 static void
-rcl_input_sources_dispose(GObject *object)
+rcl_gnome_backend_dispose(GObject *object)
 {
-  RclInputSources *self = RCL_INPUT_SOURCES(object);
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(object);
 
-  rcl_input_sources_stop(self);
-  G_OBJECT_CLASS(rcl_input_sources_parent_class)->dispose(object);
+  rcl_gnome_backend_stop(self);
+  G_OBJECT_CLASS(rcl_gnome_backend_parent_class)->dispose(object);
 }
 
 static void
-rcl_input_sources_class_init(RclInputSourcesClass *klass)
+rcl_gnome_backend_class_init(RclGnomeBackendClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
-  object_class->dispose = rcl_input_sources_dispose;
+  object_class->dispose = rcl_gnome_backend_dispose;
 
   signals[SIGNAL_ACTIVE_SESSION_CHANGED] =
     g_signal_new("active-session-changed",
@@ -1471,15 +1471,15 @@ rcl_input_sources_class_init(RclInputSourcesClass *klass)
 }
 
 static void
-rcl_input_sources_init(RclInputSources *self)
+rcl_gnome_backend_init(RclGnomeBackend *self)
 {
   (void) self;
 }
 
-RclInputSources *
-rcl_input_sources_new(RclLocaleDaemon *daemon)
+RclGnomeBackend *
+rcl_gnome_backend_new(RclLocaleDaemon *daemon)
 {
-  RclInputSources *self;
+  RclGnomeBackend *self;
 
   g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
   self = g_object_new(RCL_TYPE_GNOME_BACKEND, NULL);
