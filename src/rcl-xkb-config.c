@@ -311,6 +311,7 @@ rcl_xkb_config_parse ( const gchar *contents,
   gboolean in_section = FALSE;
   gboolean in_input_class = FALSE;
   gboolean malformed_option = FALSE;
+  gboolean malformed_identifier = FALSE;
   RclXkbSection current;
   gchar *layout = NULL;
   gchar *model = NULL;
@@ -373,6 +374,7 @@ rcl_xkb_config_parse ( const gchar *contents,
       in_section = TRUE;
       in_input_class = g_ascii_strcasecmp( tokens[1], "InputClass" ) == 0;
       malformed_option = FALSE;
+      malformed_identifier = FALSE;
       rcl_xkb_section_clear( &current );
       rcl_xkb_section_init( &current );
     }
@@ -389,10 +391,10 @@ rcl_xkb_config_parse ( const gchar *contents,
       if( in_input_class &&
           g_strcmp0( current.identifier, "system-keyboard" ) == 0 )
       {
-        if( malformed_option )
+        if( malformed_identifier || malformed_option )
         {
           g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                               "malformed Option in owned Xorg InputClass" );
+                               "malformed Identifier or Option in owned Xorg InputClass" );
           g_strfreev( tokens );
           goto fail;
         }
@@ -412,13 +414,19 @@ rcl_xkb_config_parse ( const gchar *contents,
     {
       if( n != 2 )
       {
-        g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                             "malformed Identifier in Xorg InputClass" );
-        g_strfreev( tokens );
-        goto fail;
+        /*
+         * As with Option, defer validation until the final Identifier is
+         * known so malformed directives in unrelated InputClass sections
+         * do not make this parser reject configuration it does not own.
+         */
+        malformed_identifier = TRUE;
       }
-      g_free( current.identifier );
-      current.identifier = g_strdup( tokens[1] );
+      else
+      {
+        g_free( current.identifier );
+        current.identifier = g_strdup( tokens[1] );
+        malformed_identifier = FALSE;
+      }
     }
     else if( in_section && in_input_class &&
              g_ascii_strcasecmp( tokens[0], "Option" ) == 0 )
