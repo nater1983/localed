@@ -25,7 +25,8 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
 fi
 
 TMP=${TMP:-/tmp/rdlnx}
-PKG=$TMP/package-$PRGNAM
+PKG="$TMP/package-$PRGNAM"
+SRC="$TMP/$PRGNAM-$VERSION-src"
 OUTPUT=${OUTPUT:-/tmp}
 
 if [ "$ARCH" = "i586" ]; then
@@ -79,27 +80,27 @@ meson setup \
   .. || exit 1
   "${NINJA:=ninja}" $NUMJOBS || exit 1
   meson test --print-errorlogs || exit 1
-  DESTDIR=$PKG $NINJA install || exit 1
-cd ..
+  DESTDIR="$PKG" "$NINJA" install || exit 1
+cd "$SRC"
 
 # localectl is installed by meson (install_data).
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+find "$PKG" | xargs file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
 
-find $PKG/usr/man -type f -exec gzip -9 {} \+
-for i in $( find $PKG/usr/man -type l ) ; do
-  ln -s $( readlink $i ).gz $i.gz
-  rm $i
+find "$PKG/usr/man" -type f -exec gzip -9 {} \+
+for i in $( find "$PKG/usr/man" -type l ) ; do
+  ln -s "$( readlink "$i" ).gz" "$i.gz"
+  rm "$i"
 done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README.md AUTHORS ChangeLog.md COPYING $PKG/usr/doc/$PRGNAM-$VERSION 2>/dev/null || true
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-"$VERSION"/$PRGNAM.SlackBuild
+mkdir -p "$PKG/usr/doc/$PRGNAM-$VERSION"
+cp -a README.md AUTHORS ChangeLog.md COPYING "$PKG/usr/doc/$PRGNAM-$VERSION" 2>/dev/null || true
+cat "$CWD/$PRGNAM.SlackBuild" > "$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild"
 
-mkdir -p $PKG/install
-cat $CWD/slack/slack-desc > $PKG/install/slack-desc
+mkdir -p "$PKG/install"
+cat "$CWD/slack/slack-desc" > "$PKG/install/slack-desc"
 
-cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+cd "$PKG"
+/sbin/makepkg -l y -c n "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
 sleep 1
-sbopkglint $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+sbopkglint "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
