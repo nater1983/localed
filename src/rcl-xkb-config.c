@@ -310,6 +310,7 @@ rcl_xkb_config_parse ( const gchar *contents,
   guint i;
   gboolean in_section = FALSE;
   gboolean in_input_class = FALSE;
+  gboolean malformed_option = FALSE;
   RclXkbSection current;
   gchar *layout = NULL;
   gchar *model = NULL;
@@ -371,6 +372,7 @@ rcl_xkb_config_parse ( const gchar *contents,
       }
       in_section = TRUE;
       in_input_class = g_ascii_strcasecmp( tokens[1], "InputClass" ) == 0;
+      malformed_option = FALSE;
       rcl_xkb_section_clear( &current );
       rcl_xkb_section_init( &current );
     }
@@ -387,6 +389,14 @@ rcl_xkb_config_parse ( const gchar *contents,
       if( in_input_class &&
           g_strcmp0( current.identifier, "system-keyboard" ) == 0 )
       {
+        if( malformed_option )
+        {
+          g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                               "malformed Option in owned Xorg InputClass" );
+          g_strfreev( tokens );
+          goto fail;
+        }
+
         g_free( layout );  layout = g_strdup( current.layout );
         g_free( model );   model = g_strdup( current.model );
         g_free( variant ); variant = g_strdup( current.variant );
@@ -414,14 +424,16 @@ rcl_xkb_config_parse ( const gchar *contents,
              g_ascii_strcasecmp( tokens[0], "Option" ) == 0 )
     {
       if( n < 2 || n > 3 ||
-          ( rcl_xkb_option_is_managed( tokens[1] ) && n != 3 ) )
+          ( n >= 2 && rcl_xkb_option_is_managed( tokens[1] ) && n != 3 ) )
       {
-        g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                             "malformed Option in Xorg InputClass" );
-        g_strfreev( tokens );
-        goto fail;
+        /*
+         * The parser owns only the system-keyboard InputClass.  Identifier
+         * may appear after Option, so defer this error until EndSection,
+         * when the final Identifier (last one wins) is known.
+         */
+        malformed_option = TRUE;
       }
-      if( n == 3 )
+      else if( n == 3 )
         rcl_xkb_section_set_option( &current, tokens[1], tokens[2] );
     }
 
