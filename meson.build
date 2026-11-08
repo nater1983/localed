@@ -85,7 +85,7 @@ conf.set_quoted('SYSCONFDIR',      sysconfdir)
 #   (/etc/profile.d/lang.sh; sourced at login via /etc/profile;
 #    uses "export KEY=value" syntax, not the KEY=value format of
 #    /etc/locale.conf).  localed reads and writes this file directly.
-# vconsole_conf:    path to the virtual console keyboard config file.
+# rc_keymap:        path to Slackware's virtual console keyboard script.
 # x11_keyboard_conf: path to the Xorg input class keyboard config file.
 conf.set_quoted('PRIVILEGED_GROUP',     get_option('privileged-group'))
 conf.set_quoted('RCL_LANG_SH_FILE',     get_option('lang_sh'))
@@ -93,6 +93,16 @@ conf.set_quoted('RCL_RC_KEYMAP_FILE',    get_option('rc_keymap'))
 conf.set_quoted('RCL_RC_KEYMAP_TOGGLE_FILE',
                 get_option('rc_keymap') + '.toggle')
 conf.set_quoted('RCL_X11_KEYBOARD_FILE', get_option('x11_keyboard_conf'))
+
+desktop_backend = get_option('desktop-backend')
+conf.set10('HAVE_GNOME_BACKEND', desktop_backend == 'gnome')
+
+input_sources_helper_dir = get_option('libexecdir')
+if not input_sources_helper_dir.startswith('/')
+  input_sources_helper_dir = join_paths(prefix, input_sources_helper_dir)
+endif
+conf.set_quoted('RCL_INPUT_SOURCES_HELPER',
+                join_paths(input_sources_helper_dir, 'localed-input-sources-helper'))
 
 conf.set('GLIB_VERSION_MIN_REQUIRED', 'GLIB_VERSION_2_56')
 conf.set('GLIB_VERSION_MAX_ALLOWED',  'GLIB_VERSION_2_56')
@@ -124,4 +134,5 @@ summary({
   'console keymap': get_option('rc_keymap'),
   'X11 keyboard'  : get_option('x11_keyboard_conf'),
   'privileged group': get_option('privileged-group'),
+  'desktop backend'  : desktop_backend,
 }, section : 'Configuration')

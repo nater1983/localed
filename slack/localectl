@@ -34,6 +34,12 @@ locale_value_is_safe() {
   [[ "$1" =~ ^[A-Za-z0-9_.@:,-]+$ ]]
 }
 
+keyboard_value_is_safe() {
+  # Match rcl_keyboard_value_is_safe() in src/rcl-locale.c.
+  # XKB identifiers use ASCII alphanumerics and - _ . , + :.
+  [[ "$1" =~ ^[A-Za-z0-9_.+,:-]{0,256}$ ]]
+}
+
 # ---------------------------------------------------------------------------
 # Pager support
 # ---------------------------------------------------------------------------

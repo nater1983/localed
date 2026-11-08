@@ -35,6 +35,10 @@
 #include <locale.h>
 
 #include "rcl-locale.h"
+#include "backends/backend-interface.h"
+#if HAVE_GNOME_BACKEND
+#include "backends/gnome/gnome-backend.h"
+#endif
 #include "rcl-accounts-service.h"
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
@@ -77,6 +81,9 @@ typedef struct RclState
   gboolean    exiting;
   guint       sync_id;
   RclAccountsService *accounts_service;
+#if HAVE_GNOME_BACKEND
+  RclBackend *backend;
+#endif
 } RclState;
 
 /* ───────────────────────────────────────────── */
@@ -96,6 +103,9 @@ rcl_state_free(RclState *state)
     state->reconnect_id = 0;
   }
 
+#if HAVE_GNOME_BACKEND
+  g_clear_object(&state->backend);
+#endif
   g_clear_object(&state->accounts_service);
 
   if (state->watch_id)
@@ -145,7 +155,7 @@ static gboolean rcl_main_reconnect_cb(gpointer user_data); /* forward */
 static void
 rcl_schedule_reconnect(RclState *state, const gchar *reason)
 {
-  if (state->exiting || state->replace || state->reconnecting)
+  if (state->exiting || state->reconnecting)
     return;
 
   if (state->reconnect_id)
@@ -238,6 +248,20 @@ rcl_main_name_acquired(GDBusConnection *connection,
 
   state->has_name = TRUE;
 
+#if HAVE_GNOME_BACKEND
+  /* Start the selected GNOME backend only after locale1 is registered. */
+  if (state->backend &&
+      !rcl_backend_start(state->backend, NULL))
+    g_warning("could not start GNOME backend session discovery");
+#endif
+
+  /*
+   * --replace controls the initial name request only.  Once this instance
+   * owns locale1, it must recover like any other daemon after a bus restart
+   * or a later name loss.
+   */
+  state->replace = FALSE;
+
   LOG(state, "name acquired: %s", name);
 }
 
@@ -248,7 +272,7 @@ rcl_main_name_acquired(GDBusConnection *connection,
  *
  * If the name was never acquired, another instance is likely running and
  * startup fails. If it was lost after successful startup, retry after a
- * short delay unless this instance is exiting or was explicitly replaced.
+ * short delay unless this instance is exiting.
  */
 static void
 rcl_main_name_lost(GDBusConnection *connection,
@@ -276,13 +300,6 @@ rcl_main_name_lost(GDBusConnection *connection,
     }
 
     g_warning("could not acquire %s – is another instance running?", name);
-    g_main_loop_quit(state->loop);
-    return;
-  }
-
-  if (state->replace)
-  {
-    LOG(state, "replaced by another instance, exiting");
     g_main_loop_quit(state->loop);
     return;
   }
@@ -629,6 +646,12 @@ gint main(gint argc, gchar **argv)
               error ? error->message : "unknown error");
     g_clear_error(&error);
   }
+
+#if HAVE_GNOME_BACKEND
+  /* GNOME owns input-source discovery and synchronization. */
+  state->backend =
+      rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
+#endif
 
   /* Acquire the D-Bus name for the first time */
   rcl_acquire_name(state);

@@ -2,7 +2,9 @@ name: Meson tests and memory checks
 
 on:
   push:
-    branches: [ "0.3.0" ]
+    branches:
+      - "0.3.0"
+      - "phase-7-final-stability-cleanup"
   pull_request:
     branches: [ "0.3.0" ]
 
@@ -25,18 +27,31 @@ jobs:
             pkg-config \
             dbus-daemon
 
+      - name: Configure isolated test paths
+        run: |
+          mkdir -p "$RUNNER_TEMP/localed-test-config"
+
       - name: Configure AddressSanitizer build
         run: |
           meson setup build-asan \
             --buildtype=debug \
             -Db_sanitize=address \
-            -Dtests=true
+            -Dtests=true \
+            -Dlang_sh="$RUNNER_TEMP/localed-test-config/lang.sh" \
+            -Drc_keymap="$RUNNER_TEMP/localed-test-config/rc.keymap" \
+            -Dx11_keyboard_conf="$RUNNER_TEMP/localed-test-config/00-keyboard.conf"
 
-      - name: Validate Slackware integration harness syntax
-        run: sh -n tests/test-slackware-dbus-restart.sh
+      - name: Validate SlackBuild shell syntax
+        run: bash -n localed.SlackBuild
 
       - name: Compile
         run: meson compile -C build-asan
+
+      - name: Exercise D-Bus reconnect and --replace on a private bus
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
+          G_SLICE: always-malloc
+        run: sh tests/test-slackware-dbus-restart.sh "$PWD/build-asan/src/localed"
 
       - name: Run tests with leak detection
         env:

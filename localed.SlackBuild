@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# This SlackBuild builds the master branch of localed.
+# This SlackBuild builds the localed source tree.
 
 
-cd $(dirname $0) ; CWD=$(pwd)
+cd "$(dirname "$0")" ; CWD=$(pwd)
 
 PRGNAM=localed
 VERSION=${VERSION:-0.3.0}
@@ -25,8 +25,14 @@ if [ ! -z "${PRINT_PACKAGE_NAME}" ]; then
 fi
 
 TMP=${TMP:-/tmp/rdlnx}
-PKG=$TMP/package-$PRGNAM
+PKG="$TMP/package-$PRGNAM"
+SRC="$TMP/$PRGNAM-$VERSION-src"
 OUTPUT=${OUTPUT:-/tmp}
+
+if [ "$TMP" = "/" ]; then
+  echo "TMP must not be /" >&2
+  exit 1
+fi
 
 if [ "$ARCH" = "i586" ]; then
   SLKCFLAGS="-O2 -march=i586 -mtune=i686"
@@ -44,12 +50,22 @@ fi
 
 set -e
 
-rm -rf $PKG $TMP
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-cp -R $CWD/* .
+# Keep the build tree isolated. Never remove TMP itself: Slackware users may
+# share it with other package builds (or set TMP=/tmp).
+rm -rf "$PKG" "$SRC"
+mkdir -p "$TMP" "$PKG" "$SRC" "$OUTPUT"
+# Copy source files but do not bundle local build trees or Git metadata.
+find "$CWD" -mindepth 1 -maxdepth 1 \
+  ! -name '.git' \
+  ! -name 'build' \
+  ! -name 'build-*' \
+  ! -name 'meson-build' \
+  ! -name 'meson-test' \
+  ! -name 'test-config' \
+  -exec cp -R -t "$SRC" -- {} +
+cd "$SRC"
 
-chown -R root:root .
+chown -R root:root "$SRC"
 find . -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} +
 find . ! -type l -type d ! -perm 755 -exec chmod -f 755 {} +
 find . ! -type l -type f -perm /111 ! -perm 755 -exec chmod -f 755 {} +
@@ -57,49 +73,77 @@ find . ! -type l -type f ! -perm /111 ! -perm 644 -exec chmod -f 644 {} +
 
 export CFLAGS="$SLKCFLAGS"
 export CXXFLAGS="$SLKCFLAGS"
+# Keep test-only paths out of the installed daemon. The integration tests
+# deliberately refuse to write to the host's /etc configuration files.
+mkdir -p "$SRC/test-config"
+
+MESON_ARGS=(
+  --prefix=/usr
+  --libdir=lib${LIBDIRSUFFIX}
+  --libexecdir=/usr/libexec
+  --bindir=/usr/bin
+  --sbindir=/usr/sbin
+  --includedir=/usr/include
+  --datadir=/usr/share
+  --sysconfdir=/etc
+  --localstatedir=/var
+  --mandir=/usr/man
+  --buildtype=release
+  -Dprivileged-group=wheel
+)
+
+# First build and run the tests with isolated configuration paths.
+mkdir meson-test
+cd meson-test
+meson setup "${MESON_ARGS[@]}" \
+  -Dtests=true \
+  -Dlang_sh="$SRC/test-config/lang.sh" \
+  -Drc_keymap="$SRC/test-config/rc.keymap" \
+  -Dx11_keyboard_conf="$SRC/test-config/00-keyboard.conf" \
+  .. || exit 1
+"${NINJA:=ninja}" $NUMJOBS || exit 1
+meson test --print-errorlogs || exit 1
+
+# Build the package separately with the real Slackware configuration paths.
+cd "$SRC"
 mkdir meson-build
 cd meson-build
-meson setup \
-  --prefix=/usr \
-  --libdir=lib${LIBDIRSUFFIX} \
-  --libexecdir=/usr/libexec \
-  --bindir=/usr/bin \
-  --sbindir=/usr/sbin \
-  --includedir=/usr/include \
-  --datadir=/usr/share \
-  --sysconfdir=/etc \
-  --localstatedir=/var \
-  --mandir=/usr/man \
-  --buildtype=release \
-  -Dtests=true \
+meson setup "${MESON_ARGS[@]}" \
+  -Dtests=false \
   -Drc_keymap=/etc/rc.d/rc.keymap \
   -Dlang_sh=/etc/profile.d/lang.sh \
-  -Dprivileged-group=wheel \
   -Dx11_keyboard_conf=/etc/X11/xorg.conf.d/00-keyboard.conf \
   .. || exit 1
-  "${NINJA:=ninja}" $NUMJOBS || exit 1
-  meson test --print-errorlogs || exit 1
-  DESTDIR=$PKG $NINJA install || exit 1
-cd ..
+"${NINJA:=ninja}" $NUMJOBS || exit 1
+DESTDIR="$PKG" "$NINJA" install || exit 1
+cd "$SRC"
 
 # localectl is installed by meson (install_data).
 
-find $PKG | xargs file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
-
-find $PKG/usr/man -type f -exec gzip -9 {} \+
-for i in $( find $PKG/usr/man -type l ) ; do
-  ln -s $( readlink $i ).gz $i.gz
-  rm $i
+# Strip ELF binaries without splitting package paths containing whitespace.
+find "$PKG" -type f -print0 |
+while IFS= read -r -d '' file_path; do
+  if file -b "$file_path" | grep -qE 'ELF .* (executable|shared object)'; then
+    strip --strip-unneeded "$file_path" 2>/dev/null || true
+  fi
 done
 
-mkdir -p $PKG/usr/doc/$PRGNAM-$VERSION
-cp -a README.md AUTHORS ChangeLog.md COPYING $PKG/usr/doc/$PRGNAM-$VERSION 2>/dev/null || true
-cat $CWD/$PRGNAM.SlackBuild > $PKG/usr/doc/$PRGNAM-"$VERSION"/$PRGNAM.SlackBuild
+find "$PKG/usr/man" -type f -exec gzip -9 {} +
+find "$PKG/usr/man" -type l -print0 |
+while IFS= read -r -d '' link_path; do
+  target=$(readlink "$link_path")
+  ln -s "$target.gz" "$link_path.gz"
+  rm "$link_path"
+done
 
-mkdir -p $PKG/install
-cat $CWD/slack/slack-desc > $PKG/install/slack-desc
+mkdir -p "$PKG/usr/doc/$PRGNAM-$VERSION"
+cp -a README.md AUTHORS ChangeLog.md COPYING "$PKG/usr/doc/$PRGNAM-$VERSION" 2>/dev/null || true
+cat "$CWD/$PRGNAM.SlackBuild" > "$PKG/usr/doc/$PRGNAM-$VERSION/$PRGNAM.SlackBuild"
 
-cd $PKG
-/sbin/makepkg -l y -c n $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+mkdir -p "$PKG/install"
+cat "$CWD/slack/slack-desc" > "$PKG/install/slack-desc"
+
+cd "$PKG"
+/sbin/makepkg -l y -c n "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"
 sleep 1
-sbopkglint $OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE
+sbopkglint "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.$PKGTYPE"

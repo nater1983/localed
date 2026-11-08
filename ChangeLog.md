@@ -5,6 +5,80 @@ All notable changes to `localed` are documented in this file.
 ## [0.3.0] - Unreleased
 
 ### Fixed
+- Reject configuration snapshots when the file pathname is removed or atomically
+  replaced while its original inode is being read. Confirm the opened inode
+  still matches the path before accepting the snapshot, and detect a file
+  appearing during an initially absent-file check.
+- Treat `--replace` as a startup-only instruction. After locale1 name
+  acquisition, the daemon follows the normal reconnect path after a system-bus
+  restart or subsequent name loss.
+- Keep the sanitizer CI D-Bus integration tests isolated from host
+  configuration by supplying dedicated locale, console-keymap, and Xorg
+  keyboard paths.
+
+### Tests
+- Add a FIFO-based regression test that replaces a configuration pathname
+  while the snapshot reader still holds the original inode open.
+- Exercise `localed --replace` through an isolated system-bus restart and
+  verify that locale1 ownership and the AccountsService watch are restored.
+- Run the complete Meson test suite with AddressSanitizer and leak detection
+  in GitHub Actions; all four test targets pass.
+
+### Build
+- Run SlackBuild tests in a separate Meson build configured with isolated
+  temporary paths, then create the package from a second production build
+  configured with the real Slackware paths. Test-only paths are not compiled
+  into the installed daemon.
+- Enable GLib deprecation diagnostics for the daemon instead of suppressing
+  them at the target level.
+- Run sanitizer CI on Phase 7 branch pushes and correct the stale Meson
+  option documentation for the Slackware console-keymap path.
+
+### Fixed
+- Reject `TMP=/` in the SlackBuild before any cleanup operation, preventing
+  package-specific staging paths from being rooted directly under the
+  filesystem root.
+- Handle whitespace in package paths while identifying ELF files for
+  stripping and while compressing manual-page symlinks.
+- Exclude local Meson build directories and Git metadata when staging
+  SlackBuild sources, preventing test and debug build artifacts from being
+  copied into the package build tree.
+- Isolate the SlackBuild source staging directory beneath `TMP` and remove
+  only that package-specific directory and its staging package. The build no
+  longer deletes the entire caller-supplied `TMP` directory, which could
+  otherwise remove unrelated package build trees or even all of `/tmp` when
+  `TMP=/tmp`.
+- Quote the SlackBuild staging, installation, documentation, and package
+  paths so build paths containing whitespace are handled consistently.
+
+### Changed
+- Parse Xorg keyboard configuration through a dedicated XKB configuration
+  parser. Only the `system-keyboard` InputClass contributes the XKB values
+  exposed by localed; malformed owned sections are rejected while unrelated
+  InputClass sections are ignored.
+- Validate XKB layout, model, variant, and options values with field-specific
+  rules and a shared 256-byte maximum. Use the same validation for D-Bus
+  updates and values read from the Xorg configuration file.
+- Match console-to-X11 keyboard conversion using both the first layout and
+  its corresponding first variant, preserving positional layout/variant
+  semantics instead of matching on layout alone.
+
+### Fixed
+- Reject invalid X11 keyboard values before starting PolicyKit authorization,
+  avoiding unnecessary authorization requests for malformed method arguments.
+- Report Xorg keyboard configuration read and parse failures in the journal
+  instead of silently treating every read failure as an unconfigured file.
+
+### Tests
+- Add dedicated Xorg XKB parser tests for owned and unrelated InputClass
+  sections, malformed directives, quoting, duplicate entries, CRLF input,
+  and XKB field validation.
+- Add D-Bus integration coverage for invalid X11 keyboard updates and
+  transactional keyboard conversion, including failures at each forward
+  configuration rename and verification that files and D-Bus properties
+  retain their original values after rollback.
+
+### Fixed
 - Restore configuration snapshots through a sibling temporary file, apply the
   original mode before replacement, and atomically rename the restored file
   into place. Rollback no longer truncates the live destination while

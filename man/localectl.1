@@ -48,9 +48,8 @@ Keymap names are derived by stripping the directory path and
 extension from each file found.
 The optional
 .I FILTER
-argument is passed to
-.BR grep (1)
-as a case-insensitive pattern.
+argument is matched as a case-insensitive fixed string; regular-expression
+metacharacters have no special meaning.
 Does not require root.
 .TP
 .BI list-locales " [FILTER]"
@@ -58,9 +57,8 @@ List all locales available to the C library via
 .BR "locale -a" .
 The optional
 .I FILTER
-argument is passed to
-.BR grep (1)
-as a case-insensitive pattern, so
+argument is matched as a case-insensitive fixed string; regular-expression
+metacharacters have no special meaning. For example,
 .B "localectl list-locales en_US"
 narrows the output to en_US locales only.
 Does not require root.
@@ -233,6 +231,9 @@ installed data and do not require elevated privileges.
 .I /etc/profile.d/lang.sh
 Slackware locale shell script managed through the locale1 D-Bus service.
 .TP
+.I /etc/profile.d/lang.csh
+C-shell companion locale script updated alongside
+.IR lang.sh .
 .TP
 .I /etc/rc.d/rc.keymap
 Slackware console keyboard script. Regenerated atomically on every

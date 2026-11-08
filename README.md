@@ -36,13 +36,17 @@ meson setup build
 ninja -C build
 ```
 
-Automated tests are optional and disabled in normal package builds:
+Automated tests are disabled by default and can be enabled for development
+or package validation:
 
 ```sh
 meson setup build-tests -Dtests=true
 meson compile -C build-tests
 meson test -C build-tests --print-errorlogs
 ```
+
+The SlackBuild enables the test targets and runs the suite before installing
+the package. Test executables are not installed into the resulting package.
 
 Common configure options:
 
@@ -78,9 +82,18 @@ sudo ninja -C build install     # for system-wide install
 │   ├── meson.build         # compiles the localed binary
 │   ├── main.c              # GMainLoop, D-Bus name ownership, inotify watches
 │   ├── rcl-locale.h        # locale daemon interface and path constants
-│   ├── rcl-locale.c        # D-Bus skeleton, Polkit, validation, file I/O
+│   ├── rcl-locale.c        # D-Bus methods, Polkit, validation, configuration I/O
+│   ├── rcl-file-transaction.h # configuration snapshot and rollback interface
+│   ├── rcl-file-transaction.c # transactional multi-file updates
+│   ├── rcl-xkb-config.h    # Xorg XKB parser and value-validation interface
+│   ├── rcl-xkb-config.c    # Xorg InputClass parser and XKB validation
 │   ├── rcl-accounts-service.h # AccountsService integration interface
 │   └── rcl-accounts-service.c # optional AccountsService D-Bus monitor
+├── tests/
+│   ├── test-file-mode.c       # configuration file mode preservation
+│   ├── test-file-transaction.c # transactional write and rollback tests
+│   ├── test-dbus-lifecycle.c  # D-Bus, PolicyKit, and integration tests
+│   └── test-xkb-config.c      # Xorg XKB parser and validation tests
 ├── data/
 │   ├── meson.build                                  # installs D-Bus and polkit data files
 │   ├── org.freedesktop.locale1.service.in           # D-Bus activation

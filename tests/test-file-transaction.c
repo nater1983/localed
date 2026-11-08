@@ -4,6 +4,7 @@
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -326,6 +327,69 @@ test_report_rollback_failure_preserves_both_errors (
   g_clear_error(&primary_error);
 }
 
+typedef struct
+{
+  const gchar *path;
+  RclFileSnapshot snapshot;
+  GError *error;
+  gboolean result;
+} SnapshotRace;
+
+static gpointer
+snapshot_race_worker ( gpointer user_data )
+{
+  SnapshotRace *race = user_data;
+
+  race->result = rcl_file_snapshot_take( &race->snapshot,
+                                         race->path, &race->error );
+  return NULL;
+}
+
+static void
+test_snapshot_path_replacement ( Fixture *fixture, gconstpointer user_data )
+{
+  SnapshotRace race = { 0 };
+  gchar *replacement = g_build_filename( fixture->directory,
+                                         "replacement", NULL );
+  GThread *thread;
+  int writer_fd;
+  GError *error = NULL;
+
+  /*
+   * A FIFO lets the test hold the snapshot read open while replacing the
+   * pathname.  The snapshot thread opens the FIFO first; opening the writer
+   * synchronizes with that open, then the replacement occurs before EOF.
+   */
+  g_assert_cmpint( mkfifo( fixture->first, 0600 ), ==, 0 );
+  g_assert_true( g_file_set_contents( replacement, "replacement", -1,
+                                      &error ) );
+  g_assert_no_error( error );
+
+  race.path = fixture->first;
+  thread = g_thread_new( "snapshot-path-race", snapshot_race_worker, &race );
+
+  writer_fd = open( fixture->first, O_WRONLY | O_CLOEXEC );
+  g_assert_cmpint( writer_fd, >=, 0 );
+  /*
+   * Keep the FIFO empty so its timestamps do not change.  The reader still
+   * blocks until this writer closes, allowing the path replacement to happen
+   * while the original inode remains open.
+   */
+  g_assert_cmpint( g_rename( replacement, fixture->first ), ==, 0 );
+  g_assert_cmpint( close( writer_fd ), ==, 0 );
+
+  g_thread_join( thread );
+
+  g_assert_false( race.result );
+  g_assert_error( race.error, G_IO_ERROR, G_IO_ERROR_BUSY );
+  g_assert_nonnull( strstr( race.error->message,
+                            "was replaced while its snapshot was being read" ) );
+
+  g_clear_error( &race.error );
+  rcl_file_snapshot_clear( &race.snapshot );
+  g_free( replacement );
+}
+
 static void
 test_snapshot_read_error ( Fixture *fixture, gconstpointer user_data )
 {
@@ -461,6 +525,8 @@ main ( int argc, char **argv )
               fixture_teardown );
   g_test_add( "/file-transaction/snapshot-read-error", Fixture, NULL,
               fixture_setup, test_snapshot_read_error, fixture_teardown );
+  g_test_add( "/file-transaction/snapshot-path-replacement", Fixture, NULL,
+              fixture_setup, test_snapshot_path_replacement, fixture_teardown );
   g_test_add( "/file-transaction/restore-rename-failure-cleans-temp", Fixture, NULL,
               fixture_setup, test_restore_rename_failure_cleans_temporary_file,
               fixture_teardown );
