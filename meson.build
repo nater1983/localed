@@ -93,6 +93,8 @@ conf.set_quoted('RCL_RC_KEYMAP_FILE',    get_option('rc_keymap'))
 conf.set_quoted('RCL_RC_KEYMAP_TOGGLE_FILE',
                 get_option('rc_keymap') + '.toggle')
 conf.set_quoted('RCL_X11_KEYBOARD_FILE', get_option('x11_keyboard_conf'))
+conf.set_quoted('RCL_INPUT_SOURCES_HELPER',
+                join_paths(get_option('libexecdir'), 'localed-input-sources-helper'))
 
 conf.set('GLIB_VERSION_MIN_REQUIRED', 'GLIB_VERSION_2_56')
 conf.set('GLIB_VERSION_MAX_ALLOWED',  'GLIB_VERSION_2_56')
