@@ -91,6 +91,9 @@ lookup_session_user(guint uid, gid_t *primary_gid, gchar **home)
   return TRUE;
 }
 
+static gchar *find_session_bus_address(RclInputSources *self,
+                                       guint uid,
+                                       const gchar *session_path);
 static void settings_helper_read_next(RclInputSources *self);
 static gboolean helper_restart_cb(gpointer user_data);
 static void restart_settings_helper(RclInputSources *self);
