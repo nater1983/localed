@@ -174,7 +174,8 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
 
   g_debug("received GNOME input-sources snapshot: %s", line);
 
-  snapshot = g_variant_parse(G_VARIANT_TYPE("(asasass)"), line, NULL, NULL,
+  snapshot = g_variant_parse(G_VARIANT_TYPE(RCL_INPUT_SOURCES_SNAPSHOT_TYPE),
+                             line, NULL, NULL,
                              &error);
   if (!snapshot)
   {
