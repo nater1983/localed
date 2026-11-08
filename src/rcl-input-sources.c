@@ -5,7 +5,8 @@
  *
  * GNOME input-source backend. It discovers the active local GNOME session,
  * launches a per-user GSettings monitor, validates its XKB snapshot, and
- * synchronizes the resulting configuration through localed D-Bus methods.
+ * synchronizes the resulting configuration through localed's trusted
+ * in-process keyboard configuration API.
  */
 
 #include "config.h"
