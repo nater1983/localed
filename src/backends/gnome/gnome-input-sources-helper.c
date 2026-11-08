@@ -128,7 +128,7 @@ settings_changed(GSettings *settings, const gchar *key, gpointer user_data)
 }
 
 int
-main(void)
+rcl_gnome_input_sources_helper_run(void)
 {
   GSettingsSchemaSource *source;
   GSettingsSchema *schema;

@@ -182,7 +182,7 @@ apply_gnome_settings(RclGnomeBackend *self, const gchar *line)
                              &error);
   if (!snapshot)
   {
-    g_warning("invalid GNOME input-sources helper output: %s",
+    g_warning("invalid input-sources helper output: %s",
               error ? error->message : "invalid GVariant");
     g_clear_error(&error);
     return;
@@ -303,7 +303,7 @@ settings_helper_read_cb(GObject *source, GAsyncResult *result,
   else
   {
     if (error && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-      g_warning("GNOME input-sources helper stopped: %s", error->message);
+      g_warning("input-sources helper stopped: %s", error->message);
 
     if (self->settings_helper)
       g_subprocess_force_exit(self->settings_helper);
@@ -418,7 +418,7 @@ start_settings_helper(RclGnomeBackend *self)
   setpriv = g_find_program_in_path("setpriv");
   if (!setpriv)
   {
-    g_warning("setpriv is required to run the GNOME input-sources helper "
+    g_warning("setpriv is required to run the input-sources helper "
               "as the logged-in user");
     goto out;
   }
@@ -431,7 +431,7 @@ start_settings_helper(RclGnomeBackend *self)
   argv[argc++] = "--init-groups";
   argv[argc++] = "--no-new-privs";
   argv[argc++] = "--";
-  argv[argc++] = RCL_GNOME_INPUT_SOURCES_HELPER;
+  argv[argc++] = RCL_INPUT_SOURCES_HELPER;
   argv[argc] = NULL;
 
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE);
@@ -452,7 +452,7 @@ start_settings_helper(RclGnomeBackend *self)
   self->settings_helper = g_subprocess_launcher_spawnv(launcher, argv, &error);
   if (!self->settings_helper)
   {
-    g_warning("could not start GNOME input-sources helper: %s",
+    g_warning("could not start input-sources helper: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
     goto out;

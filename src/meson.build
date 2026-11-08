@@ -32,12 +32,19 @@ executable(
   gnu_symbol_visibility : 'hidden',
 )
 
+input_sources_helper_sources = files('backends/input-sources-helper.c')
+
 if get_option('desktop-backend') == 'gnome'
-  executable(
-    'localed-gnome-input-sources-helper',
+  input_sources_helper_sources += files(
     'backends/gnome/gnome-input-sources-helper.c',
-    dependencies : [glib_dep, gio_dep],
-    install      : true,
-    install_dir  : get_option('libexecdir'),
   )
 endif
+
+executable(
+  'localed-input-sources-helper',
+  input_sources_helper_sources,
+  dependencies      : [glib_dep, gio_dep],
+  include_directories : [config_h_inc, include_directories('backends')],
+  install           : true,
+  install_dir       : get_option('libexecdir'),
+)
