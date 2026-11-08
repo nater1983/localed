@@ -89,18 +89,49 @@ test_last_owned_section_wins ( void )
 }
 
 static void
-test_escaped_quotes ( void )
+test_escaped_quotes_are_not_supported ( void )
 {
-  /* The lexer decodes escapes; validation in the caller rejects unsafe
-   * resulting values before they can become D-Bus properties. */
-  assert_parse(
+  /*
+   * Xorg terminates a quoted string at the next double quote; a backslash
+   * does not escape it.  The trailing text therefore makes this malformed.
+   */
+  assert_invalid(
     "Section \"InputClass\"\n"
     "Identifier \"system-keyboard\"\n"
     "Option \"XkbLayout\" \"us\\\"bad\"\n"
-    "EndSection\n",
-    "us\"bad", "", "", "" );
+    "EndSection\n" );
 }
 
+static void
+test_backslash_is_literal_data ( void )
+{
+  assert_parse(
+    "Section \"InputClass\"\n"
+    "Identifier \"system-keyboard\"\n"
+    "Option \"XkbLayout\" \"us\\q\"\n"
+    "EndSection\n",
+    "us\\q", "", "", "" );
+}
+
+static void
+test_quoted_token_suffix_is_rejected ( void )
+{
+  assert_invalid(
+    "Section \"InputClass\"junk\n"
+    "EndSection\n" );
+}
+
+static void
+test_empty_values_and_crlf ( void )
+{
+  assert_parse(
+    "Section \"InputClass\"\r\n"
+    "Identifier \"system-keyboard\"\r\n"
+    "Option \"XkbLayout\" \"\"\r\n"
+    "Option \"XkbModel\" \"pc105\"\r\n"
+    "EndSection\r\n",
+    "", "pc105", "", "" );
+}
 static void
 test_valueless_unrelated_option ( void )
 {
@@ -220,7 +251,10 @@ main ( int argc, char **argv )
   g_test_add_func( "/xkb-config/owned-input-class", test_owned_input_class );
   g_test_add_func( "/xkb-config/duplicate-option", test_last_duplicate_option_wins );
   g_test_add_func( "/xkb-config/duplicate-section", test_last_owned_section_wins );
-  g_test_add_func( "/xkb-config/escaped-quotes", test_escaped_quotes );
+  g_test_add_func( "/xkb-config/escaped-quotes-rejected", test_escaped_quotes_are_not_supported );
+  g_test_add_func( "/xkb-config/backslash-literal", test_backslash_is_literal_data );
+  g_test_add_func( "/xkb-config/quoted-token-suffix", test_quoted_token_suffix_is_rejected );
+  g_test_add_func( "/xkb-config/empty-values-crlf", test_empty_values_and_crlf );
   g_test_add_func( "/xkb-config/valueless-unrelated-option", test_valueless_unrelated_option );
   g_test_add_func( "/xkb-config/unterminated-quote", test_unterminated_quote );
   g_test_add_func( "/xkb-config/unbalanced-section", test_unbalanced_section );
