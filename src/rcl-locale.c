@@ -91,6 +91,7 @@ struct _RclLocaleDaemonPrivate
      part of authorisation (the agent dialog) is driven asynchronously so it
      never stalls the single-threaded main loop. */
   PolkitAuthority  *authority;
+  GCancellable     *auth_cancellable;
 
   /* Cached property values.  Refreshed by rcl_daemon_sync_dbus_properties(). */
   gchar  **locale;                 /* GStrv, "KEY=value" entries, never NULL */
@@ -1518,7 +1519,8 @@ typedef enum
 typedef struct
 {
   RclLocaleDaemon        *daemon;       /* owned ref */
-  GDBusMethodInvocation  *invocation;   /* completed exactly once */
+  GDBusMethodInvocation  *invocation;   /* owned ref; completed exactly once */
+  GCancellable           *cancellable;  /* owned ref to this daemon session */
   LocaleOp                op;
 
   gchar  **locale;        /* OP_SET_LOCALE: owned GStrv */
@@ -1540,6 +1542,8 @@ auth_ctx_free( AuthCtx *ctx )
   if( !ctx )
     return;
   g_clear_object( &ctx->daemon );
+  g_clear_object( &ctx->invocation );
+  g_clear_object( &ctx->cancellable );
   g_strfreev( ctx->locale );
   g_free( ctx->keymap );
   g_free( ctx->keymap_toggle );
@@ -2061,8 +2065,31 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
 
   if( !result )
   {
-    g_dbus_method_invocation_return_gerror( ctx->invocation, error );
-    g_error_free( error );
+    if( g_cancellable_is_cancelled( ctx->cancellable ) )
+      g_dbus_method_invocation_return_dbus_error(
+        ctx->invocation,
+        "org.freedesktop.DBus.Error.Disconnected",
+        "Daemon connection was closed before authorization completed" );
+    else
+      g_dbus_method_invocation_return_gerror( ctx->invocation, error );
+
+    g_clear_error( &error );
+    auth_ctx_free( ctx );
+    return;
+  }
+
+  /*
+   * A successful PolicyKit reply may already be queued when shutdown cancels
+   * the request. Check this request's retained session cancellable before
+   * applying any privileged configuration change.
+   */
+  if( g_cancellable_is_cancelled( ctx->cancellable ) )
+  {
+    g_object_unref( result );
+    g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.Disconnected",
+      "Daemon connection was closed before authorization completed" );
     auth_ctx_free( ctx );
     return;
   }
@@ -2134,6 +2161,17 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
     }
   }
 
+  ctx->cancellable = g_object_ref( priv->auth_cancellable );
+  if( g_cancellable_is_cancelled( ctx->cancellable ) )
+  {
+    g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.Disconnected",
+      "Authorization was cancelled before it could be started" );
+    auth_ctx_free( ctx );
+    return;
+  }
+
   sender  = g_dbus_method_invocation_get_sender( ctx->invocation );
   subject = polkit_system_bus_name_new( sender );
   flags   = interactive
@@ -2142,7 +2180,7 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
 
   polkit_authority_check_authorization(
     priv->authority, subject, action_id, NULL, flags,
-    NULL /* cancellable */, on_check_done, ctx );
+    ctx->cancellable, on_check_done, ctx );
 
   g_object_unref( subject );
 }
@@ -2226,7 +2264,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon     = g_object_ref( daemon );
-    ctx->invocation = invocation;
+    ctx->invocation = g_object_ref( invocation );
     ctx->op         = OP_SET_LOCALE;
     ctx->locale     = locale;
 
@@ -2308,13 +2346,21 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
   GDBusInterfaceInfo     *iface_info;
   GError *error = NULL;
 
-  priv->connection    = g_object_ref( connection );
+  /*
+   * Startup may be repeated after a D-Bus disconnect. Retire the previous
+   * registration and authorization session before attaching the new bus.
+   */
+  rcl_daemon_shutdown( daemon );
+
+  priv->connection       = g_object_ref( connection );
+  priv->auth_cancellable = g_cancellable_new();
   priv->introspection = g_dbus_node_info_new_for_xml(
                           locale1_introspection_xml, &error );
   if( !priv->introspection )
   {
     g_warning( "Failed to parse introspection XML: %s", error->message );
     g_error_free( error );
+    rcl_daemon_shutdown( daemon );
     return FALSE;
   }
 
@@ -2334,6 +2380,7 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
   {
     g_warning( "Could not register D-Bus object: %s", error->message );
     g_error_free( error );
+    rcl_daemon_shutdown( daemon );
     return FALSE;
   }
 
@@ -2376,6 +2423,16 @@ rcl_daemon_shutdown( RclDaemon *daemon )
     g_dbus_node_info_unref( priv->introspection );
     priv->introspection = NULL;
   }
+
+  /*
+   * Cancel outstanding authorization checks before releasing the authority.
+   * Their callbacks retain the session cancellable and cannot apply changes
+   * after this daemon registration has been retired.
+   */
+  if( priv->auth_cancellable )
+    g_cancellable_cancel( priv->auth_cancellable );
+  g_clear_object( &priv->auth_cancellable );
+  g_clear_object( &priv->authority );
 }
 
 void
@@ -2404,6 +2461,9 @@ rcl_locale_daemon_finalize( GObject *object )
   }
   g_clear_object( &priv->connection );
 
+  if( priv->auth_cancellable )
+    g_cancellable_cancel( priv->auth_cancellable );
+  g_clear_object( &priv->auth_cancellable );
   g_clear_object( &priv->authority );
 
   g_strfreev( priv->locale );
