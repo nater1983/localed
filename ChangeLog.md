@@ -5,6 +5,11 @@ All notable changes to `localed` are documented in this file.
 ## [0.3.0] - Unreleased
 
 ### Fixed
+- Reject `TMP=/` in the SlackBuild before any cleanup operation, preventing
+  package-specific staging paths from being rooted directly under the
+  filesystem root.
+- Handle whitespace in package paths while identifying ELF files for
+  stripping and while compressing manual-page symlinks.
 - Isolate the SlackBuild source staging directory beneath `TMP` and remove
   only that package-specific directory and its staging package. The build no
   longer deletes the entire caller-supplied `TMP` directory, which could
