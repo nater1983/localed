@@ -113,7 +113,9 @@ start_bus
 
 # localed routes logs to syslog when stderr is not a terminal. Run it under
 # a PTY so --debug messages are captured in the typescript for assertions.
-script -q -f -e -c "exec \"$LOCALed\" --debug" "$log" &
+# Exercise --replace as a one-time startup instruction. Once locale1 is
+# acquired, the daemon must reconnect normally after the bus restarts.
+script -q -f -e -c "exec \"$LOCALed\" --debug --replace" "$log" &
 script_pid=$!
 i=0
 while [ -z "$localed_pid" ]; do
