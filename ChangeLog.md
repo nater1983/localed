@@ -25,6 +25,10 @@ All notable changes to `localed` are documented in this file.
   in GitHub Actions; all four test targets pass.
 
 ### Build
+- Run SlackBuild tests in a separate Meson build configured with isolated
+  temporary paths, then create the package from a second production build
+  configured with the real Slackware paths. Test-only paths are not compiled
+  into the installed daemon.
 - Enable GLib deprecation diagnostics for the daemon instead of suppressing
   them at the target level.
 - Run sanitizer CI on Phase 7 branch pushes and correct the stale Meson
