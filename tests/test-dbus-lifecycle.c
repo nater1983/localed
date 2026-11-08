@@ -222,6 +222,7 @@ test_system_bus_restart(Fixture *fixture, gconstpointer user_data)
 typedef struct
 {
   gboolean hold_check;
+  gboolean authorized;
   gboolean check_seen;
   gboolean cancel_seen;
   gboolean client_done;
@@ -280,7 +281,7 @@ polkit_method_call(GDBusConnection *connection,
 
     g_dbus_method_invocation_return_value(
       invocation,
-      g_variant_new("((bb@a{ss}))", FALSE, FALSE,
+      g_variant_new("((bb@a{ss}))", fixture->authorized, FALSE,
                     g_variant_new_array(G_VARIANT_TYPE("{ss}"), NULL, 0)));
     return;
   }
@@ -408,6 +409,89 @@ test_invalid_x11_keyboard_rejected_before_polkit(Fixture *fixture,
   g_object_unref(daemon);
   g_dbus_connection_close_sync(daemon_bus, NULL, NULL);
   g_object_unref(daemon_bus);
+}
+
+static void
+test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
+{
+  GError *error = NULL;
+  GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
+  GDBusConnection *polkit_bus = connect_test_bus(fixture->address);
+  GDBusNodeInfo *node = g_dbus_node_info_new_for_xml(test_polkit_xml, &error);
+  PolkitFixture polkit_fixture = { .authorized = TRUE };
+  RclDaemon *daemon = rcl_daemon_new();
+  guint registration_id;
+  guint name_result;
+  GVariant *reply;
+  GVariant *property;
+  gchar *contents = NULL;
+  gsize contents_len = 0;
+  gchar *expected_path = g_strdup(RCL_X11_KEYBOARD_FILE);
+
+  g_assert_no_error(error);
+  g_assert_nonnull(node);
+  g_assert_true(rcl_daemon_startup(daemon, daemon_bus));
+
+  reply = g_dbus_connection_call_sync(
+    polkit_bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+    "org.freedesktop.DBus", "RequestName",
+    g_variant_new("(su)", TEST_POLKIT_NAME, 0u),
+    G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 3000, NULL, &error);
+  g_assert_no_error(error);
+  g_variant_get(reply, "(u)", &name_result);
+  g_variant_unref(reply);
+  g_assert_true(name_result == 1u || name_result == 4u);
+
+  registration_id = g_dbus_connection_register_object(
+    polkit_bus, TEST_POLKIT_PATH,
+    g_dbus_node_info_lookup_interface(node,
+                                      "org.freedesktop.PolicyKit1.Authority"),
+    &test_polkit_vtable, &polkit_fixture, NULL, &error);
+  g_assert_no_error(error);
+  g_assert_cmpuint(registration_id, >, 0);
+
+  g_dbus_connection_call(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetX11Keyboard",
+    g_variant_new("(ssssbb)", "us", "pc105", "", "", FALSE, TRUE),
+    NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+    polkit_client_call_done, &polkit_fixture);
+
+  iterate_until(&polkit_fixture, polkit_condition, 5000);
+  g_assert_true(polkit_fixture.check_seen);
+  g_assert_no_error(polkit_fixture.client_error);
+
+  g_assert_true(g_file_get_contents(expected_path, &contents,
+                                    &contents_len, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(contents, "Identifier \\"system-keyboard\\""));
+  g_assert_nonnull(strstr(contents, "Option \\"XkbLayout\\" \\"us\\""));
+  g_assert_nonnull(strstr(contents, "Option \\"XkbModel\\" \\"pc105\\""));
+  g_free(contents);
+
+  reply = g_dbus_connection_call_sync(
+    fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+    "/org/freedesktop/locale1", "org.freedesktop.DBus.Properties", "Get",
+    g_variant_new("(ss)", "org.freedesktop.locale1", "X11Layout"),
+    G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 3000, NULL, &error);
+  g_assert_no_error(error);
+  g_assert_nonnull(reply);
+  g_variant_get(reply, "(v)", &property);
+  g_assert_cmpstr(g_variant_get_string(property, NULL), ==, "us");
+  g_variant_unref(property);
+  g_variant_unref(reply);
+
+  polkit_fixture_free(&polkit_fixture);
+  rcl_daemon_shutdown(daemon);
+  g_object_unref(daemon);
+  g_dbus_connection_unregister_object(polkit_bus, registration_id);
+  g_dbus_node_info_unref(node);
+  g_dbus_connection_close_sync(polkit_bus, NULL, NULL);
+  g_dbus_connection_close_sync(daemon_bus, NULL, NULL);
+  g_object_unref(polkit_bus);
+  g_object_unref(daemon_bus);
+  g_unlink(expected_path);
+  g_free(expected_path);
 }
 
 static void
@@ -554,6 +638,9 @@ main(int argc, char **argv)
              fixture_setup, test_system_bus_restart, fixture_teardown);
   g_test_add("/dbus/invalid-x11-before-polkit", Fixture, NULL,
              fixture_setup, test_invalid_x11_keyboard_rejected_before_polkit,
+             fixture_teardown);
+  g_test_add("/dbus/authorized-x11-update", Fixture, NULL,
+             fixture_setup, test_authorized_x11_keyboard_update,
              fixture_teardown);
   g_test_add("/polkit/denial", Fixture, NULL,
              fixture_setup, test_polkit_denial, fixture_teardown);
