@@ -15,17 +15,17 @@
 G_BEGIN_DECLS
 
 #define RCL_TYPE_GNOME_BACKEND (rcl_gnome_backend_get_type())
-G_DECLARE_FINAL_TYPE(RclGnomeBackend, rcl_input_sources,
+G_DECLARE_FINAL_TYPE(RclGnomeBackend, rcl_gnome_backend,
                      RCL, INPUT_SOURCES, GObject)
 
-RclInputSources *rcl_input_sources_new(RclLocaleDaemon *daemon);
-gboolean rcl_input_sources_start(RclInputSources *self, GError **error);
-void rcl_input_sources_stop(RclInputSources *self);
+RclGnomeBackend *rcl_gnome_backend_new(RclLocaleDaemon *daemon);
+gboolean rcl_gnome_backend_start(RclGnomeBackend *self, GError **error);
+void rcl_gnome_backend_stop(RclGnomeBackend *self);
 
 /* Returns a snapshot of the one unambiguous active local GNOME session.
  * The caller owns the returned strings. Returns FALSE if there is no such
  * session or if more than one eligible session is active. */
-gboolean rcl_input_sources_get_active_session(RclInputSources *self,
+gboolean rcl_gnome_backend_get_active_session(RclGnomeBackend *self,
                                                guint *uid,
                                                gchar **session_id,
                                                gchar **object_path,
