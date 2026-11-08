@@ -9,6 +9,26 @@
 #include "rcl-input-sources.h"
 
 static void
+test_input_sources_snapshot_format(void)
+{
+  const gchar *output =
+      "(['us', 'es', 'jp'], ['', '', ''], @as [], 'us', '')";
+  GError *error = NULL;
+  GVariant *snapshot;
+
+  snapshot = g_variant_parse(
+      G_VARIANT_TYPE(RCL_INPUT_SOURCES_SNAPSHOT_TYPE),
+      output, NULL, NULL, &error);
+
+  g_assert_no_error(error);
+  g_assert_nonnull(snapshot);
+  g_assert_true(g_variant_is_of_type(
+      snapshot, G_VARIANT_TYPE(RCL_INPUT_SOURCES_SNAPSHOT_TYPE)));
+
+  g_variant_unref(snapshot);
+}
+
+static void
 test_input_sources_start_stop(void)
 {
   GTestDBus *bus = g_test_dbus_new(G_TEST_DBUS_NONE);
@@ -53,6 +73,7 @@ int
 main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
+  g_test_add_func("/input-sources/snapshot-format", test_input_sources_snapshot_format);
   g_test_add_func("/input-sources/start-stop", test_input_sources_start_stop);
   return g_test_run();
 }
