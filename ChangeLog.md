@@ -4,6 +4,15 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Fixed
+- Isolate the SlackBuild source staging directory beneath `TMP` and remove
+  only that package-specific directory and its staging package. The build no
+  longer deletes the entire caller-supplied `TMP` directory, which could
+  otherwise remove unrelated package build trees or even all of `/tmp` when
+  `TMP=/tmp`.
+- Quote the SlackBuild staging, installation, documentation, and package
+  paths so build paths containing whitespace are handled consistently.
+
 ### Changed
 - Parse Xorg keyboard configuration through a dedicated XKB configuration
   parser. Only the `system-keyboard` InputClass contributes the XKB values
