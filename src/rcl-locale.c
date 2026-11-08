@@ -351,8 +351,19 @@ read_x11_keyboard_conf( const gchar *path,
   *out_variant = g_strdup( "" );
   *out_options = g_strdup( "" );
 
-  if( !g_file_get_contents( path, &contents, NULL, NULL ) )
+  if( !g_file_get_contents( path, &contents, NULL, &error ) )
+  {
+    /*
+     * A missing Xorg snippet is a normal unconfigured state.  Other read
+     * failures must be visible in the journal rather than silently looking
+     * identical to a missing file.
+     */
+    if( !g_error_matches( error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
+      g_warning( "read_x11_keyboard_conf: cannot read %s: %s",
+                 path, error ? error->message : "unknown read error" );
+    g_clear_error( &error );
     return;
+  }
 
   if( !rcl_xkb_config_parse( contents, &layout, &model, &variant,
                              &options, &error ) )
