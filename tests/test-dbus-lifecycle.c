@@ -377,7 +377,6 @@ static void
 test_invalid_x11_keyboard_rejected_before_polkit(Fixture *fixture,
                                                   gconstpointer user_data)
 {
-  GError *error = NULL;
   GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
   PolkitFixture call = { 0 };
   RclDaemon *daemon = rcl_daemon_new();
@@ -409,7 +408,6 @@ test_invalid_x11_keyboard_rejected_before_polkit(Fixture *fixture,
   g_object_unref(daemon);
   g_dbus_connection_close_sync(daemon_bus, NULL, NULL);
   g_object_unref(daemon_bus);
-  (void) error;
 }
 
 static void
