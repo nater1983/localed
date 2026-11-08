@@ -10,6 +10,7 @@
 
 #include "config.h"
 
+#include <errno.h>
 #include <string.h>
 #include <pwd.h>
 #include <sys/stat.h>
@@ -525,8 +526,169 @@ desktop_is_gnome(const gchar *desktop)
 }
 
 static gboolean
-session_properties_are_eligible(GVariant *properties,
+environment_value_is_gnome(const gchar *value)
+{
+  gchar **desktops;
+  guint i;
+  gboolean result = FALSE;
+
+  if (!value || !*value)
+    return FALSE;
+
+  desktops = g_strsplit(value, ":", -1);
+  for (i = 0; desktops[i]; i++)
+  {
+    if (desktop_is_gnome(desktops[i]))
+    {
+      result = TRUE;
+      break;
+    }
+  }
+  g_strfreev(desktops);
+  return result;
+}
+
+static gboolean
+process_environment_is_gnome(const gchar *environment, gsize length)
+{
+  gsize offset = 0;
+
+  while (offset < length)
+  {
+    const gchar *entry = environment + offset;
+    const gchar *end = memchr(entry, '\\0', length - offset);
+    gsize entry_length = end ? (gsize) (end - entry) : length - offset;
+    const gchar *value = NULL;
+
+    if (g_str_has_prefix(entry, "XDG_CURRENT_DESKTOP="))
+      value = entry + strlen("XDG_CURRENT_DESKTOP=");
+    else if (g_str_has_prefix(entry, "XDG_SESSION_DESKTOP="))
+      value = entry + strlen("XDG_SESSION_DESKTOP=");
+    else if (g_str_has_prefix(entry, "DESKTOP_SESSION="))
+      value = entry + strlen("DESKTOP_SESSION=");
+
+    if (value)
+    {
+      gchar *copy = g_strndup(value, entry_length - (gsize) (value - entry));
+      gboolean is_gnome = environment_value_is_gnome(copy);
+      g_free(copy);
+      if (is_gnome)
+        return TRUE;
+    }
+
+    offset += entry_length + (end ? 1 : 0);
+  }
+
+  return FALSE;
+}
+
+/*
+ * elogind may leave Session.Desktop empty for GDM sessions. The session
+ * leader is then gdm-session-worker (root), so its environment cannot identify
+ * the desktop. Find a GNOME process owned by the session UID and ask logind
+ * which session owns that PID. Only accept a process mapped to this exact
+ * session object path.
+ */
+static gboolean
+session_has_gnome_process(RclInputSources *self,
+                          guint uid,
+                          const gchar *session_path)
+{
+  GDir *proc_dir;
+  const gchar *entry;
+  gboolean found = FALSE;
+  GError *error = NULL;
+
+  proc_dir = g_dir_open("/proc", 0, &error);
+  if (!proc_dir)
+  {
+    g_debug("could not scan /proc for GNOME session processes: %s",
+            error ? error->message : "unknown error");
+    g_clear_error(&error);
+    return FALSE;
+  }
+
+  while (!found && (entry = g_dir_read_name(proc_dir)) != NULL)
+  {
+    gchar *endptr = NULL;
+    guint64 pid_value;
+    gchar *proc_path;
+    gchar *environment = NULL;
+    gsize environment_length = 0;
+    struct stat st;
+    GVariant *reply;
+    const gchar *process_session_path = NULL;
+
+    if (!g_ascii_isdigit(entry[0]))
+      continue;
+
+    errno = 0;
+    pid_value = g_ascii_strtoull(entry, &endptr, 10);
+    if (errno || !endptr || *endptr || pid_value == 0 ||
+        pid_value > G_MAXUINT)
+      continue;
+
+    proc_path = g_build_filename("/proc", entry, NULL);
+    if (stat(proc_path, &st) != 0 || st.st_uid != (uid_t) uid)
+    {
+      g_free(proc_path);
+      continue;
+    }
+
+    {
+      gchar *environment_path = g_build_filename(proc_path, "environ", NULL);
+      gboolean read_ok = g_file_get_contents(environment_path,
+                                             &environment,
+                                             &environment_length, NULL);
+      g_free(environment_path);
+      if (!read_ok)
+      {
+        g_free(proc_path);
+        continue;
+      }
+    }
+    g_free(proc_path);
+
+    if (!process_environment_is_gnome(environment, environment_length))
+    {
+      g_free(environment);
+      continue;
+    }
+    g_free(environment);
+
+    reply = g_dbus_connection_call_sync(
+        self->connection,
+        LOGIND_NAME,
+        LOGIND_MANAGER_PATH,
+        LOGIND_MANAGER_IFACE,
+        "GetSessionByPID",
+        g_variant_new("(u)", (guint) pid_value),
+        G_VARIANT_TYPE("(o)"),
+        G_DBUS_CALL_FLAGS_NONE,
+        2000,
+        NULL,
+        NULL);
+    if (!reply)
+      continue;
+
+    g_variant_get(reply, "(&o)", &process_session_path);
+    found = g_strcmp0(process_session_path, session_path) == 0;
+    if (found)
+      g_debug("identified GNOME session %s from process %u",
+              session_path, (guint) pid_value);
+    g_variant_unref(reply);
+  }
+
+  g_dir_close(proc_dir);
+  return found;
+}
+
+static gboolean
+session_properties_are_eligible(RclInputSources *self,
+                                GVariant *properties,
                                 const gchar *seat_from_manager,
+                                const gchar *session_path,
+                                guint uid,
                                 ActiveSession *session)
 {
   gboolean active = FALSE;
@@ -550,9 +712,22 @@ session_properties_are_eligible(GVariant *properties,
        g_strcmp0(session_type, "wayland") != 0))
     return FALSE;
 
-  if (!g_variant_lookup(properties, "Desktop", "&s", &desktop) ||
-      !desktop_is_gnome(desktop))
-    return FALSE;
+  if (g_variant_lookup(properties, "Desktop", "&s", &desktop) &&
+      desktop && *desktop)
+  {
+    if (!desktop_is_gnome(desktop))
+      return FALSE;
+  }
+  else
+  {
+    if (!session_has_gnome_process(self, uid, session_path))
+    {
+      g_debug("rejecting session %s: Desktop is empty and no GNOME process "
+              "could be verified in that session", session_path);
+      return FALSE;
+    }
+    desktop = "GNOME (verified by session process)";
+  }
 
   /* A seat-less session is not a local physical-seat desktop session. */
   if (!seat_from_manager || !*seat_from_manager)
@@ -604,7 +779,8 @@ query_session(RclInputSources *self,
   session->object_path = g_strdup(object_path);
   session->uid = uid;
 
-  if (!session_properties_are_eligible(properties, seat, session))
+  if (!session_properties_are_eligible(self, properties, seat,
+                                         object_path, uid, session))
   {
     active_session_free(session);
     session = NULL;
