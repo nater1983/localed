@@ -337,11 +337,6 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
    with an empty value are still emitted (most tools treat a present-but-
    empty Option the same as an absent one).
    -------------------------------------------------------------------------- */
-/* Maximum length for any single XKB option value extracted from the config
-   file.  Values longer than this are almost certainly malformed or malicious
-   (real XKB layout/model/variant/options strings are well under 64 chars). */
-#define MAX_XKB_VALUE_LEN  256
-
 static void
 read_x11_keyboard_conf( const gchar *path,
                         gchar **out_layout, gchar **out_model,
