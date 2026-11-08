@@ -7,6 +7,7 @@
 #pragma once
 
 #include <gio/gio.h>
+#include "rcl-locale.h"
 
 G_BEGIN_DECLS
 
@@ -14,7 +15,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE(RclInputSources, rcl_input_sources,
                      RCL, INPUT_SOURCES, GObject)
 
-RclInputSources *rcl_input_sources_new(void);
+RclInputSources *rcl_input_sources_new(RclLocaleDaemon *daemon);
 gboolean rcl_input_sources_start(RclInputSources *self, GError **error);
 void rcl_input_sources_stop(RclInputSources *self);
 
