@@ -284,13 +284,19 @@ rcl_keymap_to_x11( const gchar *keymap, gchar **out_layout, gchar **out_variant 
 }
 
 static gboolean
-rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
+rcl_x11_to_keymap( const gchar *layout,
+                   const gchar *variant,
+                   gchar **out_keymap )
 {
   guint i;
-  /* Match on layout alone (first component if a comma-separated list was
-     passed); this is a best-effort convenience, not an authoritative
-     mapping. */
+  /*
+   * Match the first layout and its corresponding first variant.  XKB uses
+   * positional correspondence between comma-separated layout and variant
+   * lists; ignoring the variant can select a different console map (for
+   * example, "ch" + "fr" must map to "ch-fr", not "ch").
+   */
   gchar *first_layout = NULL;
+  gchar *first_variant = NULL;
   const gchar *comma;
   gboolean found = FALSE;
 
@@ -301,9 +307,17 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
   first_layout = comma ? g_strndup( layout, (gsize)(comma - layout) )
                        : g_strdup( layout );
 
+  if( !variant )
+    variant = "";
+
+  comma = strchr( variant, ',' );
+  first_variant = comma ? g_strndup( variant, (gsize)(comma - variant) )
+                        : g_strdup( variant );
+
   for( i = 0; keymap_map[i].vconsole_keymap != NULL; i++ )
   {
-    if( g_strcmp0( first_layout, keymap_map[i].x11_layout ) == 0 )
+    if( g_strcmp0( first_layout, keymap_map[i].x11_layout ) == 0 &&
+        g_strcmp0( first_variant, keymap_map[i].x11_variant ) == 0 )
     {
       *out_keymap = g_strdup( keymap_map[i].vconsole_keymap );
       found = TRUE;
@@ -312,6 +326,7 @@ rcl_x11_to_keymap( const gchar *layout, gchar **out_keymap )
   }
 
   g_free( first_layout );
+  g_free( first_variant );
   return found;
 }
 
@@ -1828,7 +1843,7 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   if( convert && layout[0] != '\0' )
   {
     gchar *vc_keymap = NULL;
-    if( rcl_x11_to_keymap( layout, &vc_keymap ) )
+    if( rcl_x11_to_keymap( layout, variant, &vc_keymap ) )
     {
       if( !rcl_write_x11_vconsole_files( layout, model, variant, options,
                                          vc_keymap, &error ) )
