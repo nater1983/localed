@@ -64,6 +64,31 @@ test_owned_input_class ( void )
 }
 
 static void
+test_unrelated_input_class_is_ignored ( void )
+{
+  assert_parse(
+    "Section \"InputClass\"\\n"
+    "Option \"NoAccel\" \"on\" \"unexpected\"\\n"
+    "Identifier \"other-keyboard\"\\n"
+    "EndSection\\n"
+    "Section \"InputClass\"\\n"
+    "Identifier \"system-keyboard\"\\n"
+    "Option \"XkbLayout\" \"us\"\\n"
+    "EndSection\\n",
+    "us", "", "", "" );
+}
+
+static void
+test_owned_identifier_after_malformed_option ( void )
+{
+  assert_invalid(
+    "Section \"InputClass\"\\n"
+    "Option \"XkbLayout\"\\n"
+    "Identifier \"system-keyboard\"\\n"
+    "EndSection\\n" );
+}
+
+static void
 test_last_duplicate_option_wins ( void )
 {
   assert_parse(
@@ -285,6 +310,8 @@ main ( int argc, char **argv )
 {
   g_test_init( &argc, &argv, NULL );
   g_test_add_func( "/xkb-config/owned-input-class", test_owned_input_class );
+  g_test_add_func( "/xkb-config/unrelated-input-class", test_unrelated_input_class_is_ignored );
+  g_test_add_func( "/xkb-config/owned-late-identifier", test_owned_identifier_after_malformed_option );
   g_test_add_func( "/xkb-config/duplicate-option", test_last_duplicate_option_wins );
   g_test_add_func( "/xkb-config/duplicate-section", test_last_owned_section_wins );
   g_test_add_func( "/xkb-config/escaped-quotes-rejected", test_escaped_quotes_are_not_supported );
