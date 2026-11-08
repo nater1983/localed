@@ -619,6 +619,7 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
     rcl_locale_test_fail_rename_to(NULL);
 
     g_assert_nonnull(polkit_fixture.client_error);
+    g_assert_nonnull(strstr(polkit_fixture.client_error->message, "rename("));
     g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &after,
                                       NULL, &error));
     g_assert_no_error(error);
@@ -666,6 +667,8 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_object_unref(polkit_bus);
   g_object_unref(daemon_bus);
   unlink(expected_path);
+  unlink(RCL_RC_KEYMAP_FILE);
+  unlink(RCL_RC_KEYMAP_TOGGLE_FILE);
   g_free(expected_path);
 }
 
