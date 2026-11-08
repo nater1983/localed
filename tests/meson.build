@@ -18,6 +18,9 @@ dbus_lifecycle_test = executable(
   ],
   dependencies        : [glib_dep, gio_dep, gio_unix],
   include_directories : [config_h_inc, include_directories('../src')],
+  c_args              : [
+    '-DRCL_X11_KEYBOARD_FILE=\\"' + meson.current_build_dir() / 'test-x11-keyboard.conf' + '\\"',
+  ],
 )
 
 test(
