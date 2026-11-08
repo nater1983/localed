@@ -45,13 +45,15 @@ fi
 
 set -e
 
-rm -rf $PKG $TMP
-mkdir -p $TMP $PKG $OUTPUT
-cd $TMP
-cp -R $CWD/* .
+# Keep the build tree isolated. Never remove TMP itself: Slackware users may
+# share it with other package builds (or set TMP=/tmp).
+rm -rf "$PKG" "$SRC"
+mkdir -p "$TMP" "$PKG" "$SRC" "$OUTPUT"
+cp -R "$CWD"/* "$SRC"/
+cd "$SRC"
 
-chown -R root:root .
-find . -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} +
+chown -R root:root "$SRC"
+find . -type f \\( -perm -4000 -o -perm -2000 \\) -exec chmod -s {} +
 find . ! -type l -type d ! -perm 755 -exec chmod -f 755 {} +
 find . ! -type l -type f -perm /111 ! -perm 755 -exec chmod -f 755 {} +
 find . ! -type l -type f ! -perm /111 ! -perm 644 -exec chmod -f 644 {} +
