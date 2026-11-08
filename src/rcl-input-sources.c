@@ -199,6 +199,8 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   gsize n_layouts = 0, n_variants = 0;
   GError *error = NULL;
 
+  g_debug("received GNOME input-sources snapshot: %s", line);
+
   snapshot = g_variant_parse(G_VARIANT_TYPE("(asasass)"), line, NULL, NULL,
                              &error);
   if (!snapshot)
@@ -212,6 +214,9 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   g_variant_get(snapshot, "(@as@as@as&s&s)",
                 &layouts_v, &variants_v, &options_v,
                 &active_layout, &active_variant);
+  g_debug("GNOME input-sources snapshot parsed successfully: "
+          "active=%s variant=%s",
+          active_layout, active_variant);
   layouts = g_variant_dup_strv(layouts_v, &n_layouts);
   variants = g_variant_dup_strv(variants_v, &n_variants);
   options = g_variant_dup_strv(options_v, NULL);
@@ -276,6 +281,9 @@ apply_gnome_settings(RclInputSources *self, const gchar *line)
   console_keymap = gnome_console_keymap_lookup(active_layout, active_variant);
   if (console_keymap)
   {
+    g_debug("calling SetVConsoleKeyboard for active GNOME source %s+%s "
+            "with console keymap %s",
+            active_layout, active_variant, console_keymap);
     g_debug("synchronizing active GNOME input source: %s+%s -> console keymap %s",
             active_layout, active_variant, console_keymap);
     g_dbus_connection_call(self->connection,
