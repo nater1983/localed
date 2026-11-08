@@ -10,6 +10,9 @@ All notable changes to `localed` are documented in this file.
   filesystem root.
 - Handle whitespace in package paths while identifying ELF files for
   stripping and while compressing manual-page symlinks.
+- Exclude local Meson build directories and Git metadata when staging
+  SlackBuild sources, preventing test and debug build artifacts from being
+  copied into the package build tree.
 - Isolate the SlackBuild source staging directory beneath `TMP` and remove
   only that package-specific directory and its staging package. The build no
   longer deletes the entire caller-supplied `TMP` directory, which could
