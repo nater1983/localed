@@ -4,6 +4,33 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Changed
+- Parse Xorg keyboard configuration through a dedicated XKB configuration
+  parser. Only the `system-keyboard` InputClass contributes the XKB values
+  exposed by localed; malformed owned sections are rejected while unrelated
+  InputClass sections are ignored.
+- Validate XKB layout, model, variant, and options values with field-specific
+  rules and a shared 256-byte maximum. Use the same validation for D-Bus
+  updates and values read from the Xorg configuration file.
+- Match console-to-X11 keyboard conversion using both the first layout and
+  its corresponding first variant, preserving positional layout/variant
+  semantics instead of matching on layout alone.
+
+### Fixed
+- Reject invalid X11 keyboard values before starting PolicyKit authorization,
+  avoiding unnecessary authorization requests for malformed method arguments.
+- Report Xorg keyboard configuration read and parse failures in the journal
+  instead of silently treating every read failure as an unconfigured file.
+
+### Tests
+- Add dedicated Xorg XKB parser tests for owned and unrelated InputClass
+  sections, malformed directives, quoting, duplicate entries, CRLF input,
+  and XKB field validation.
+- Add D-Bus integration coverage for invalid X11 keyboard updates and
+  transactional keyboard conversion, including failures at each forward
+  configuration rename and verification that files and D-Bus properties
+  retain their original values after rollback.
+
 ### Fixed
 - Restore configuration snapshots through a sibling temporary file, apply the
   original mode before replacement, and atomically rename the restored file
