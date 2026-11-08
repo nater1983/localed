@@ -475,12 +475,9 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_assert_true(g_file_get_contents(expected_path, &contents,
                                     &contents_len, &error));
   g_assert_no_error(error);
-  g_assert_nonnull(strstr(contents, "Identifier"));
-  g_assert_nonnull(strstr(contents, "system-keyboard"));
-  g_assert_nonnull(strstr(contents, "XkbLayout"));
-  g_assert_nonnull(strstr(contents, "us"));
-  g_assert_nonnull(strstr(contents, "XkbModel"));
-  g_assert_nonnull(strstr(contents, "pc105"));
+  g_assert_nonnull(strstr(contents, "Identifier \"system-keyboard\""));
+  g_assert_nonnull(strstr(contents, "Option \"XkbLayout\" \"us\""));
+  g_assert_nonnull(strstr(contents, "Option \"XkbModel\" \"pc105\""));
   g_free(contents);
 
   reply = g_dbus_connection_call_sync(
