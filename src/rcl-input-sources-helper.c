@@ -8,6 +8,10 @@
  * session user's UID and GID. It never writes system configuration. It
  * emits a single GVariant tuple per settings update on stdout:
  *   (as layouts, as variants, as options, s active_layout, s active_variant)
+ *
+ * GNOME's mru-sources ordering is authoritative for the selected source.
+ * The first XKB entry is the active layout; current is not reliably updated
+ * by all GNOME Shell input-source switching paths.
  */
 
 #include <gio/gio.h>
@@ -19,11 +23,11 @@ emit_settings(GSettings *settings)
 {
   GVariant *sources;
   GVariant *options;
+  GVariant *mru_sources;
   GVariantIter iter;
   const gchar *type;
   const gchar *id;
-  guint current;
-  guint source_index = 0;
+  gboolean active_source_found = FALSE;
   gchar *active_layout = g_strdup("");
   gchar *active_variant = g_strdup("");
   GPtrArray *layouts = g_ptr_array_new_with_free_func(g_free);
@@ -33,7 +37,7 @@ emit_settings(GSettings *settings)
   gchar *printed;
 
   sources = g_settings_get_value(settings, "sources");
-  current = g_settings_get_uint(settings, "current");
+  mru_sources = g_settings_get_value(settings, "mru-sources");
   g_variant_iter_init(&iter, sources);
 
   while (g_variant_iter_next(&iter, "(&s&s)", &type, &id))
@@ -50,20 +54,37 @@ emit_settings(GSettings *settings)
       layout = g_strdup(parts[0]);
       variant = g_strdup(parts[1] ? parts[1] : "");
 
-      if (source_index == current)
-      {
-        g_free(active_layout);
-        g_free(active_variant);
-        active_layout = g_strdup(layout);
-        active_variant = g_strdup(variant);
-      }
-
       g_ptr_array_add(layouts, layout);
       g_ptr_array_add(variants, variant);
       g_strfreev(parts);
     }
 
-    source_index++;
+  }
+
+  /* mru-sources is ordered most-recently-used first. Select its first XKB
+   * entry, while keeping the complete configured sources list above. */
+  g_variant_iter_init(&iter, mru_sources);
+  while (g_variant_iter_next(&iter, "(&s&s)", &type, &id))
+  {
+    if (g_strcmp0(type, "xkb") == 0)
+    {
+      gchar **parts = g_strsplit(id, "+", 2);
+      g_free(active_layout);
+      g_free(active_variant);
+      active_layout = g_strdup(parts[0]);
+      active_variant = g_strdup(parts[1] ? parts[1] : "");
+      g_strfreev(parts);
+      active_source_found = TRUE;
+      break;
+    }
+  }
+
+  if (!active_source_found)
+  {
+    g_clear_pointer(&active_layout, g_free);
+    g_clear_pointer(&active_variant, g_free);
+    active_layout = g_strdup("");
+    active_variant = g_strdup("");
   }
 
   options = g_settings_get_value(settings, "xkb-options");
@@ -90,6 +111,7 @@ emit_settings(GSettings *settings)
   g_free(active_variant);
   g_variant_unref(options);
   g_variant_unref(sources);
+  g_variant_unref(mru_sources);
   g_ptr_array_unref(layouts);
   g_ptr_array_unref(variants);
 }
@@ -100,7 +122,7 @@ settings_changed(GSettings *settings, const gchar *key, gpointer user_data)
   (void) user_data;
 
   if (g_strcmp0(key, "sources") == 0 ||
-      g_strcmp0(key, "current") == 0 ||
+      g_strcmp0(key, "mru-sources") == 0 ||
       g_strcmp0(key, "xkb-options") == 0)
     emit_settings(settings);
 }
