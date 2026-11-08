@@ -370,7 +370,11 @@ test_snapshot_path_replacement ( Fixture *fixture, gconstpointer user_data )
 
   writer_fd = open( fixture->first, O_WRONLY | O_CLOEXEC );
   g_assert_cmpint( writer_fd, >=, 0 );
-  g_assert_cmpint( write( writer_fd, "x", 1 ), ==, 1 );
+  /*
+   * Keep the FIFO empty so its timestamps do not change.  The reader still
+   * blocks until this writer closes, allowing the path replacement to happen
+   * while the original inode remains open.
+   */
   g_assert_cmpint( g_rename( replacement, fixture->first ), ==, 0 );
   g_assert_cmpint( close( writer_fd ), ==, 0 );
 
