@@ -52,6 +52,7 @@ rcl_xkb_tokenize_line ( const gchar *line, GError **error )
   {
     GString *token;
     gboolean quoted = FALSE;
+    gboolean was_quoted = FALSE;
 
     while( g_ascii_isspace( *p ) )
       p++;
@@ -63,6 +64,7 @@ rcl_xkb_tokenize_line ( const gchar *line, GError **error )
     if( *p == '"' )
     {
       quoted = TRUE;
+      was_quoted = TRUE;
       p++;
     }
 
@@ -76,8 +78,19 @@ rcl_xkb_tokenize_line ( const gchar *line, GError **error )
           quoted = FALSE;
           break;
         }
-        if( *p == '\\' && p[1] != '\0' )
-          p++;
+        /*
+         * Xorg's configuration lexer does not interpret C-style backslash
+         * escapes inside quoted strings.  A backslash is ordinary data;
+         * the next double quote still terminates the string.
+         */
+        if( *p == '\n' || *p == '\r' )
+        {
+          g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                               "unterminated quoted string in Xorg configuration" );
+          g_string_free( token, TRUE );
+          g_ptr_array_unref( tokens );
+          return NULL;
+        }
         g_string_append_c( token, *p++ );
       }
       else
@@ -106,6 +119,18 @@ rcl_xkb_tokenize_line ( const gchar *line, GError **error )
     }
 
     g_ptr_array_add( tokens, g_string_free( token, FALSE ) );
+
+    /*
+     * A quoted Xorg token must end at whitespace, a comment, or end of line.
+     * Do not silently split a malformed token such as "value"suffix.
+     */
+    if( was_quoted && *p != '\0' && !g_ascii_isspace( *p ) && *p != '#' )
+    {
+      g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                           "unexpected character after quoted Xorg token" );
+      g_ptr_array_unref( tokens );
+      return NULL;
+    }
 
     while( g_ascii_isspace( *p ) )
       p++;
