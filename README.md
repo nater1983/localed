@@ -36,13 +36,17 @@ meson setup build
 ninja -C build
 ```
 
-Automated tests are optional and disabled in normal package builds:
+Automated tests are disabled by default and can be enabled for development
+or package validation:
 
 ```sh
 meson setup build-tests -Dtests=true
 meson compile -C build-tests
 meson test -C build-tests --print-errorlogs
 ```
+
+The SlackBuild enables the test targets and runs the suite before installing
+the package. Test executables are not installed into the resulting package.
 
 Common configure options:
 
