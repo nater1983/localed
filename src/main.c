@@ -62,7 +62,7 @@ typedef struct RclState
   /*
    * Ownership state.
    *
-   * watch_id   – handle returned by g_bus_own_name(); 0 when not owning.
+   * watch_id   – handle returned by g_bus_own_name_on_connection(); 0 when not owning.
    * has_name     – TRUE once name_acquired has fired.
    * reconnect_id – pending reconnect timer; 0 if none.
    * exiting      – set TRUE by signal handlers so name_lost does not reschedule.
