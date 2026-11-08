@@ -145,7 +145,7 @@ static gboolean rcl_main_reconnect_cb(gpointer user_data); /* forward */
 static void
 rcl_schedule_reconnect(RclState *state, const gchar *reason)
 {
-  if (state->exiting || state->replace || state->reconnecting)
+  if (state->exiting || state->reconnecting)
     return;
 
   if (state->reconnect_id)
@@ -238,6 +238,13 @@ rcl_main_name_acquired(GDBusConnection *connection,
 
   state->has_name = TRUE;
 
+  /*
+   * --replace controls the initial name request only.  Once this instance
+   * owns locale1, it must recover like any other daemon after a bus restart
+   * or a later name loss.
+   */
+  state->replace = FALSE;
+
   LOG(state, "name acquired: %s", name);
 }
 
@@ -276,13 +283,6 @@ rcl_main_name_lost(GDBusConnection *connection,
     }
 
     g_warning("could not acquire %s – is another instance running?", name);
-    g_main_loop_quit(state->loop);
-    return;
-  }
-
-  if (state->replace)
-  {
-    LOG(state, "replaced by another instance, exiting");
     g_main_loop_quit(state->loop);
     return;
   }
