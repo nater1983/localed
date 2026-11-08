@@ -249,7 +249,7 @@ rcl_main_name_acquired(GDBusConnection *connection,
 
 #if HAVE_GNOME_BACKEND
   /* Start the selected GNOME backend only after locale1 is registered. */
-  if (state->input_sources &&
+  if (state->gnome_backend &&
       !rcl_gnome_backend_start(state->input_sources, NULL))
     g_warning("could not start GNOME backend session discovery");
 #endif
