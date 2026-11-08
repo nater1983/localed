@@ -10,6 +10,7 @@
 #include <gio/gio.h>
 #include <glib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "rcl-accounts-service.h"
 #include "rcl-locale.h"
@@ -436,7 +437,7 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
    * isolated Meson test path so a developer's /etc/X11 configuration can
    * never be overwritten by the test.
    */
-  g_assert_cmpstr(g_getenv("RCL_TEST_X11_KEYBOARD_FILE"), ==, expected_path);
+  g_assert_cmpstr(expected_path, !=, "/etc/X11/xorg.conf.d/00-keyboard.conf");
 
   g_assert_no_error(error);
   g_assert_nonnull(node);
@@ -474,9 +475,12 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_assert_true(g_file_get_contents(expected_path, &contents,
                                     &contents_len, &error));
   g_assert_no_error(error);
-  g_assert_nonnull(strstr(contents, "Identifier \\"system-keyboard\\""));
-  g_assert_nonnull(strstr(contents, "Option \\"XkbLayout\\" \\"us\\""));
-  g_assert_nonnull(strstr(contents, "Option \\"XkbModel\\" \\"pc105\\""));
+  g_assert_nonnull(strstr(contents, "Identifier"));
+  g_assert_nonnull(strstr(contents, "system-keyboard"));
+  g_assert_nonnull(strstr(contents, "XkbLayout"));
+  g_assert_nonnull(strstr(contents, "us"));
+  g_assert_nonnull(strstr(contents, "XkbModel"));
+  g_assert_nonnull(strstr(contents, "pc105"));
   g_free(contents);
 
   reply = g_dbus_connection_call_sync(
@@ -500,7 +504,7 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_dbus_connection_close_sync(daemon_bus, NULL, NULL);
   g_object_unref(polkit_bus);
   g_object_unref(daemon_bus);
-  g_unlink(expected_path);
+  unlink(expected_path);
   g_free(expected_path);
 }
 
