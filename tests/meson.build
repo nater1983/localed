@@ -18,18 +18,17 @@ dbus_lifecycle_test = executable(
   ],
   dependencies        : [glib_dep, gio_dep, gio_unix],
   include_directories : [config_h_inc, include_directories('../src')],
+  c_args              : [
+    '-DRCL_X11_KEYBOARD_FILE="' 
+      + join_paths(meson.current_build_dir(), 'test-x11-keyboard.conf') + '"',
+  ],
 )
 
 test(
   'D-Bus lifecycle and resource cleanup',
   dbus_lifecycle_test,
   timeout : 30,
-  env : [
-    'G_DEBUG=fatal-warnings',
-    'G_SLICE=always-malloc',
-    'RCL_TEST_X11_KEYBOARD_FILE='
-      + join_paths(meson.current_build_dir(), 'test-x11-keyboard.conf'),
-  ],
+  env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
 )
 
 file_transaction_test = executable(
