@@ -9,6 +9,8 @@
 
 #include "rcl-xkb-config.h"
 
+static void assert_invalid ( const gchar *contents );
+
 static void
 assert_parse ( const gchar *contents,
                const gchar *layout,
@@ -132,7 +134,6 @@ test_empty_values_and_crlf ( void )
     "EndSection\r\n",
     "", "pc105", "", "" );
 }
-static void assert_invalid ( const gchar *contents );
 
 static void
 test_duplicate_identifier_last_wins ( void )
