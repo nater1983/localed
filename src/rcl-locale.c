@@ -1914,6 +1914,73 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
+/* Trusted in-process entry points used by desktop input-source backends.
+ * These deliberately bypass D-Bus and Polkit: the caller runs inside the
+ * privileged localed daemon. Public D-Bus requests continue through the
+ * authorized Set* method handlers below. */
+gboolean
+rcl_locale_daemon_set_vconsole_keyboard_internal(
+    RclLocaleDaemon *daemon,
+    const gchar *keymap,
+    const gchar *keymap_toggle,
+    GError **error)
+{
+  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), FALSE);
+  g_return_val_if_fail(keymap != NULL, FALSE);
+  g_return_val_if_fail(keymap_toggle != NULL, FALSE);
+
+  if ((keymap[0] != '\\0' && !rcl_keyboard_value_is_safe(keymap)) ||
+      (keymap_toggle[0] != '\\0' &&
+       !rcl_keyboard_value_is_safe(keymap_toggle)))
+  {
+    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                        "Invalid console keyboard configuration value");
+    return FALSE;
+  }
+
+  if (!rcl_write_vconsole_files(keymap, keymap_toggle, error))
+  {
+    rcl_daemon_sync_dbus_properties(daemon);
+    return FALSE;
+  }
+
+  rcl_daemon_sync_dbus_properties(daemon);
+  return TRUE;
+}
+
+gboolean
+rcl_locale_daemon_set_x11_keyboard_internal(
+    RclLocaleDaemon *daemon,
+    const gchar *layout,
+    const gchar *model,
+    const gchar *variant,
+    const gchar *options,
+    GError **error)
+{
+  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), FALSE);
+  g_return_val_if_fail(layout != NULL, FALSE);
+  g_return_val_if_fail(model != NULL, FALSE);
+  g_return_val_if_fail(variant != NULL, FALSE);
+  g_return_val_if_fail(options != NULL, FALSE);
+
+  if (!rcl_x11_keyboard_values_are_valid(layout, model, variant, options))
+  {
+    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                        "Invalid X11 keyboard configuration value");
+    return FALSE;
+  }
+
+  if (!write_x11_keyboard_conf(RCL_X11_KEYBOARD_FILE, layout, model,
+                               variant, options, error))
+  {
+    rcl_daemon_sync_dbus_properties(daemon);
+    return FALSE;
+  }
+
+  rcl_daemon_sync_dbus_properties(daemon);
+  return TRUE;
+}
+
 /* ---- asynchronous PolicyKit D-Bus authorization ---- */
 
 static void
