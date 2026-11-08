@@ -38,9 +38,9 @@ rcl_xkb_section_init ( RclXkbSection *section )
 }
 
 /*
- * Tokenize one Xorg configuration line.  Double-quoted strings support
- * backslash escaping; an unquoted # begins a comment.  The caller owns the
- * returned string vector.
+ * Tokenize one Xorg configuration line.  Backslashes are literal inside
+ * double-quoted strings; an unquoted # begins a comment.  The caller owns
+ * the returned string vector.
  */
 static gchar **
 rcl_xkb_tokenize_line ( const gchar *line, GError **error )
@@ -404,7 +404,7 @@ rcl_xkb_config_parse ( const gchar *contents,
     else if( in_section && in_input_class &&
              g_ascii_strcasecmp( tokens[0], "Option" ) == 0 )
     {
-      if( n < 2 ||
+      if( n < 2 || n > 3 ||
           ( rcl_xkb_option_is_managed( tokens[1] ) && n != 3 ) )
       {
         g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
