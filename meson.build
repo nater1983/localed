@@ -94,10 +94,10 @@ conf.set_quoted('RCL_RC_KEYMAP_TOGGLE_FILE',
                 get_option('rc_keymap') + '.toggle')
 conf.set_quoted('RCL_X11_KEYBOARD_FILE', get_option('x11_keyboard_conf'))
 
-backend = get_option('backend')
-conf.set('HAVE_GNOME_BACKEND', backend == 'gnome')
+desktop_backend = get_option('desktop-backend')
+conf.set('HAVE_GNOME_BACKEND', desktop_backend == 'gnome')
 
-if backend == 'gnome'
+if desktop_backend == 'gnome'
   input_sources_helper_dir = get_option('libexecdir')
   if not input_sources_helper_dir.startswith('/')
     input_sources_helper_dir = join_paths(prefix, input_sources_helper_dir)
@@ -136,5 +136,5 @@ summary({
   'console keymap': get_option('rc_keymap'),
   'X11 keyboard'  : get_option('x11_keyboard_conf'),
   'privileged group': get_option('privileged-group'),
-  'backend'          : backend,
+  'desktop backend'  : desktop_backend,
 }, section : 'Configuration')
