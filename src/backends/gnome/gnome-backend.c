@@ -67,7 +67,10 @@ struct _RclGnomeBackend
   ActiveSession *active;
 };
 
-G_DEFINE_TYPE(RclGnomeBackend, rcl_gnome_backend, G_TYPE_OBJECT)
+static void rcl_gnome_backend_iface_init(RclBackendInterface *iface);
+G_DEFINE_TYPE_WITH_CODE(RclGnomeBackend, rcl_gnome_backend, G_TYPE_OBJECT,
+                        G_IMPLEMENT_INTERFACE(RCL_TYPE_BACKEND,
+                                              rcl_gnome_backend_iface_init))
 
 enum
 {
@@ -1475,8 +1478,23 @@ rcl_gnome_backend_init(RclGnomeBackend *self)
 {
   (void) self;
 }
-
-RclGnomeBackend *
+static gboolean
+rcl_gnome_backend_iface_start(RclBackend *backend, GError **error)
+{
+  return rcl_gnome_backend_start(RCL_GNOME_BACKEND(backend), error);
+}
+static void
+rcl_gnome_backend_iface_stop(RclBackend *backend)
+{
+  rcl_gnome_backend_stop(RCL_GNOME_BACKEND(backend));
+}
+static void
+rcl_gnome_backend_iface_init(RclBackendInterface *iface)
+{
+  iface->start = rcl_gnome_backend_iface_start;
+  iface->stop = rcl_gnome_backend_iface_stop;
+}
+RclBackend *
 rcl_gnome_backend_new(RclLocaleDaemon *daemon)
 {
   RclGnomeBackend *self;

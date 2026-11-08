@@ -4,6 +4,7 @@ localed_sources = files(
   'rcl-file-transaction.c',
   'rcl-xkb-config.c',
   'rcl-locale.c',
+  'backends/backend-interface.c',
 )
 
 localed_deps = [

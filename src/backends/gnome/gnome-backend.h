@@ -8,6 +8,7 @@
 
 #include <gio/gio.h>
 #include "rcl-locale.h"
+#include "../backend-interface.h"
 
 /* Helper snapshot: layouts, variants, options, active layout, active variant. */
 #define RCL_GNOME_BACKEND_SNAPSHOT_TYPE "(asasasss)"
@@ -16,9 +17,9 @@ G_BEGIN_DECLS
 
 #define RCL_TYPE_GNOME_BACKEND (rcl_gnome_backend_get_type())
 G_DECLARE_FINAL_TYPE(RclGnomeBackend, rcl_gnome_backend,
-                     RCL, INPUT_SOURCES, GObject)
+                     RCL, GNOME_BACKEND, GObject)
 
-RclGnomeBackend *rcl_gnome_backend_new(RclLocaleDaemon *daemon);
+RclBackend *rcl_gnome_backend_new(RclLocaleDaemon *daemon);
 gboolean rcl_gnome_backend_start(RclGnomeBackend *self, GError **error);
 void rcl_gnome_backend_stop(RclGnomeBackend *self);
 

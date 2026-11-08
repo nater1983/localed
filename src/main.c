@@ -35,9 +35,10 @@
 #include <locale.h>
 
 #include "rcl-locale.h"
+#include "backends/backend-interface.h"
 #include "rcl-accounts-service.h"
 #if HAVE_GNOME_BACKEND
-#include "backends/gnome/gnome-backend.h"
+
 #endif
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
@@ -81,7 +82,7 @@ typedef struct RclState
   guint       sync_id;
   RclAccountsService *accounts_service;
 #if HAVE_GNOME_BACKEND
-  RclGnomeBackend *gnome_backend;
+  RclBackend *backend;
 #endif
 } RclState;
 
@@ -103,7 +104,7 @@ rcl_state_free(RclState *state)
   }
 
 #if HAVE_GNOME_BACKEND
-  g_clear_object(&state->gnome_backend);
+  g_clear_object(&state->backend);
 #endif
   g_clear_object(&state->accounts_service);
 
@@ -249,8 +250,8 @@ rcl_main_name_acquired(GDBusConnection *connection,
 
 #if HAVE_GNOME_BACKEND
   /* Start the selected GNOME backend only after locale1 is registered. */
-  if (state->gnome_backend &&
-      !rcl_gnome_backend_start(state->gnome_backend, NULL))
+  if (state->backend &&
+      !rcl_backend_start(state->backend, NULL))
     g_warning("could not start GNOME backend session discovery");
 #endif
 
@@ -648,7 +649,7 @@ gint main(gint argc, gchar **argv)
 
 #if HAVE_GNOME_BACKEND
   /* GNOME owns input-source discovery and synchronization. */
-  state->gnome_backend =
+  state->backend =
       rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
 #endif
 
