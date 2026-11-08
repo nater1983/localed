@@ -57,9 +57,8 @@ List all locales available to the C library via
 .BR "locale -a" .
 The optional
 .I FILTER
-argument is passed to
-.BR grep (1)
-as a case-insensitive pattern, so
+argument is matched as a case-insensitive fixed string; regular-expression
+metacharacters have no special meaning. For example,
 .B "localectl list-locales en_US"
 narrows the output to en_US locales only.
 Does not require root.
