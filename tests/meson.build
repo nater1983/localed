@@ -24,7 +24,12 @@ test(
   'D-Bus lifecycle and resource cleanup',
   dbus_lifecycle_test,
   timeout : 30,
-  env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
+  env : [
+    'G_DEBUG=fatal-warnings',
+    'G_SLICE=always-malloc',
+    'RCL_TEST_X11_KEYBOARD_FILE='
+      + join_paths(meson.current_build_dir(), 'test-x11-keyboard.conf'),
+  ],
 )
 
 file_transaction_test = executable(
