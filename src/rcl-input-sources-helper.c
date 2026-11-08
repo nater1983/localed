@@ -11,6 +11,7 @@
  */
 
 #include <gio/gio.h>
+#include <stdio.h>
 #include <glib.h>
 
 static void
@@ -89,6 +90,7 @@ main(void)
   GSettingsSchemaSource *source;
   GSettingsSchema *schema;
   GSettings *settings;
+  GMainLoop *loop;
 
   source = g_settings_schema_source_get_default();
   if (!source)
@@ -110,8 +112,10 @@ main(void)
                    G_CALLBACK(settings_changed), NULL);
 
   emit_settings(settings);
-  g_main_loop_run(g_main_loop_new(NULL, FALSE));
+  loop = g_main_loop_new(NULL, FALSE);
+  g_main_loop_run(loop);
 
+  g_main_loop_unref(loop);
   g_object_unref(settings);
   g_settings_schema_unref(schema);
   return 0;
