@@ -9,6 +9,9 @@
 #include <gio/gio.h>
 #include "rcl-locale.h"
 
+/* Helper snapshot: layouts, variants, options, active layout, active variant. */
+#define RCL_INPUT_SOURCES_SNAPSHOT_TYPE "(asasasss)"
+
 G_BEGIN_DECLS
 
 #define RCL_TYPE_INPUT_SOURCES (rcl_input_sources_get_type())
