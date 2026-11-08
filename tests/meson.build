@@ -59,7 +59,9 @@ input_sources_test = executable(
   [
     'test-input-sources.c',
     '../src/rcl-input-sources.c',
+    '../src/rcl-file-transaction.c',
     '../src/rcl-xkb-config.c',
+    '../src/rcl-locale.c',
   ],
   dependencies        : [glib_dep, gio_dep, gio_unix],
   include_directories : [config_h_inc, include_directories('../src')],
