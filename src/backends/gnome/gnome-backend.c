@@ -1361,7 +1361,7 @@ failed:
 void
 rcl_gnome_backend_stop(RclGnomeBackend *self)
 {
-  g_return_if_fail(RCL_IS_INPUT_SOURCES(self));
+  g_return_if_fail(RCL_IS_GNOME_BACKEND(self));
 
   self->stopping = TRUE;
   stop_settings_helper(self);
