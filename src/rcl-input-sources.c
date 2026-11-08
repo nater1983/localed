@@ -556,7 +556,7 @@ process_environment_is_gnome(const gchar *environment, gsize length)
   while (offset < length)
   {
     const gchar *entry = environment + offset;
-    const gchar *end = memchr(entry, '\\0', length - offset);
+    const gchar *end = memchr(entry, '\0', length - offset);
     gsize entry_length = end ? (gsize) (end - entry) : length - offset;
     const gchar *value = NULL;
 
