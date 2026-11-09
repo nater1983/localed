@@ -76,3 +76,29 @@ if get_option('desktop-backend') == 'gnome'
   )
   
 endif
+
+if get_option('desktop-backend') == 'plasma6'
+  plasma6_input_sources_test = executable(
+    'test-plasma6-input-sources',
+    [
+      'backends/plasma6/test-input-sources.c',
+      '../src/backends/plasma6/plasma6-backend.c',
+      '../src/backends/backend-interface.c',
+      '../src/rcl-file-transaction.c',
+      '../src/rcl-xkb-config.c',
+      '../src/rcl-locale.c',
+    ],
+    dependencies        : [glib_dep, gio_dep, gio_unix],
+    include_directories : [
+      config_h_inc,
+      include_directories('../src', '../src/backends/plasma6'),
+    ],
+  )
+
+  test(
+    'Plasma 6 input-sources backend lifecycle',
+    plasma6_input_sources_test,
+    timeout : 30,
+    env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
+  )
+endif
