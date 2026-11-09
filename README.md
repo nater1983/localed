@@ -73,12 +73,20 @@ meson setup build-gnome -Ddesktop-backend=gnome
 meson compile -C build-gnome
 ```
 
+To build the KDE Plasma 6 input-source backend:
+
+```sh
+meson setup build-plasma6 -Ddesktop-backend=plasma6
+meson compile -C build-plasma6
+```
+
 The backend is selected with the `desktop-backend` Meson option:
 
 | Option | Description |
 |---|---|
 | `none` | Default. Build localed without a desktop-specific input-source backend. |
 | `gnome` | Build the GNOME session and input-source integration. |
+| `plasma6` | Build the KDE Plasma 6 session and input-source integration. |
 
 For example, to explicitly select the default configuration:
 
@@ -101,6 +109,14 @@ To include the GNOME backend tests:
 meson setup build-gnome-tests -Ddesktop-backend=gnome -Dtests=true
 meson compile -C build-gnome-tests
 meson test -C build-gnome-tests --print-errorlogs
+```
+
+To include the Plasma 6 backend tests:
+
+```sh
+meson setup build-plasma6-tests -Ddesktop-backend=plasma6 -Dtests=true
+meson compile -C build-plasma6-tests
+meson test -C build-plasma6-tests --print-errorlogs
 ```
 
 The SlackBuild enables the test targets and runs the suite before installing
@@ -190,6 +206,38 @@ is compiled into the shared `localed-input-sources-helper` executable.
 The helper executable name and installation path are the same for every
 backend configuration.
 
+
+### KDE Plasma 6
+
+Build with:
+
+```sh
+meson setup build-plasma6 -Ddesktop-backend=plasma6
+```
+
+The Plasma 6 backend communicates with KWin over the user's session bus:
+
+- Service: `org.kde.keyboard`
+- Object path: `/Layouts`
+- Interface: `org.kde.KeyboardLayouts`
+
+It calls `getLayoutsList()` to retrieve the ordered `a(sss)` layout list and
+`getLayout()` to retrieve the active layout index. KWin's `LayoutNames`
+tuple contains `shortName`, `displayName`, and `longName`; the second
+field is **not** an XKB variant. The helper reads `VariantList` and
+`Options` from the session user's `~/.config/kxkbrc` and aligns variants
+with the ordered layout list.
+
+The helper monitors KWin's `layoutChanged` and `layoutListChanged` signals.
+Active-layout changes update the Slackware console keymap, while layout-list
+changes refresh the complete XKB layout, variant, and options configuration
+in the configured Xorg keyboard file. The existing XKB validation and
+console-keymap mapping are reused.
+
+As with GNOME, the Plasma-specific reader is compiled into the single
+`localed-input-sources-helper` executable. No separate Plasma helper binary
+or KDE development library is required; communication uses GIO/GDBus.
+
 ### Adding other desktop environments
 
 The backend interface is intended to keep desktop-specific integration out
@@ -230,8 +278,11 @@ than install a separate helper binary for each desktop.
 │   ├── test-file-transaction.c
 │   ├── test-xkb-config.c
 │   ├── test-slackware-dbus-restart.sh
-│   └── backends/gnome/
-│       └── test-input-sources.c
+│   └── backends/
+│       ├── gnome/
+│       │   └── test-input-sources.c
+│       └── plasma6/
+│           └── test-input-sources.c
 ├── data/
 │   ├── org.freedesktop.locale1.service.in
 │   ├── org.freedesktop.locale1.conf
