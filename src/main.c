@@ -36,8 +36,10 @@
 
 #include "rcl-locale.h"
 #include "backends/backend-interface.h"
-#if HAVE_GNOME_BACKEND
+#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
 #include "backends/gnome/gnome-backend.h"
+#elif HAVE_PLASMA6_BACKEND
+#include "backends/plasma6/plasma6-backend.h"
 #endif
 #include "rcl-accounts-service.h"
 
@@ -81,7 +83,7 @@ typedef struct RclState
   gboolean    exiting;
   guint       sync_id;
   RclAccountsService *accounts_service;
-#if HAVE_GNOME_BACKEND
+#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
   RclBackend *backend;
 #endif
 } RclState;
@@ -103,7 +105,7 @@ rcl_state_free(RclState *state)
     state->reconnect_id = 0;
   }
 
-#if HAVE_GNOME_BACKEND
+#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
   g_clear_object(&state->backend);
 #endif
   g_clear_object(&state->accounts_service);
@@ -248,8 +250,8 @@ rcl_main_name_acquired(GDBusConnection *connection,
 
   state->has_name = TRUE;
 
-#if HAVE_GNOME_BACKEND
-  /* Start the selected GNOME backend only after locale1 is registered. */
+#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
+  /* Start the selected desktop backend only after locale1 is registered. */
   if (state->backend &&
       !rcl_backend_start(state->backend, NULL))
     g_warning("could not start GNOME backend session discovery");
@@ -648,9 +650,11 @@ gint main(gint argc, gchar **argv)
   }
 
 #if HAVE_GNOME_BACKEND
-  /* GNOME owns input-source discovery and synchronization. */
   state->backend =
       rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
+#elif HAVE_PLASMA6_BACKEND
+  state->backend =
+      rcl_plasma6_backend_new(RCL_LOCALE_DAEMON(state->daemon));
 #endif
 
   /* Acquire the D-Bus name for the first time */
