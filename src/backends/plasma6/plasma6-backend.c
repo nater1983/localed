@@ -59,6 +59,9 @@ struct _RclPlasma6Backend
   GFileMonitor *locale_monitor;
   gchar *locale_config_path;
   gchar *last_locale;
+  gchar *requested_locale;
+  GCancellable *locale_cancellable;
+  gboolean locale_sync_pending;
   GDataInputStream *settings_stream;
   GCancellable *settings_cancellable;
   RclLocaleDaemon *daemon; /* borrowed; owned by the main daemon state */
@@ -208,13 +211,73 @@ out:
   return locale;
 }
 
+typedef struct
+{
+  RclPlasma6Backend *backend;
+  gchar *locale;
+} PlasmaLocaleCall;
+
+static void
+plasma_locale_call_free(PlasmaLocaleCall *call)
+{
+  g_clear_object(&call->backend);
+  g_free(call->locale);
+  g_free(call);
+}
+
+static void
+plasma_locale_call_cb(GObject *source_object,
+                      GAsyncResult *result,
+                      gpointer user_data)
+{
+  PlasmaLocaleCall *call = user_data;
+  RclPlasma6Backend *self = call->backend;
+  GError *error = NULL;
+  GVariant *reply;
+
+  reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source_object),
+                                        result, &error);
+  self->locale_sync_pending = FALSE;
+  g_clear_object(&self->locale_cancellable);
+
+  if (reply)
+  {
+    g_variant_unref(reply);
+    g_free(self->last_locale);
+    self->last_locale = g_strdup(call->locale);
+    g_debug("synchronized Plasma 6 translation language: LANG=%s",
+            call->locale);
+  }
+  else if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+  {
+    g_warning("could not synchronize Plasma 6 translation language: %s",
+              error ? error->message : "unknown D-Bus error");
+  }
+  g_clear_error(&error);
+
+  /*
+   * The file may have changed again while the request was in flight.
+   * Re-read it now and immediately submit the newest value if necessary.
+   */
+  if (!self->stopping && self->active)
+    sync_plasma_locale(self);
+
+  plasma_locale_call_free(call);
+}
+
 static void
 sync_plasma_locale(RclPlasma6Backend *self)
 {
-  gchar *contents = NULL, *locale = NULL;
+  gchar *contents = NULL;
+  gchar *locale = NULL;
+  gchar *assignment = NULL;
+  const gchar *locale_values[2] = { NULL, NULL };
   GError *error = NULL;
+  PlasmaLocaleCall *call;
+
   if (!self->active || !self->locale_config_path || self->stopping)
     return;
+
   if (!g_file_get_contents(self->locale_config_path, &contents, NULL, &error))
   {
     g_debug("could not read Plasma locale configuration %s: %s",
@@ -222,6 +285,7 @@ sync_plasma_locale(RclPlasma6Backend *self)
     g_clear_error(&error);
     return;
   }
+
   locale = rcl_plasma6_backend_locale_from_localerc(contents, &error);
   if (!locale)
   {
@@ -230,39 +294,46 @@ sync_plasma_locale(RclPlasma6Backend *self)
     g_clear_error(&error);
     goto out;
   }
+
+  g_free(self->requested_locale);
+  self->requested_locale = g_strdup(locale);
+
   if (g_strcmp0(locale, self->last_locale) == 0)
     goto out;
-  {
-    GVariant *reply = g_dbus_connection_call_sync(
-        self->connection,
-        "org.freedesktop.locale1",
-        "/org/freedesktop/locale1",
-        "org.freedesktop.locale1",
-        "SetLocale",
-        g_variant_new("(^asb)", (const gchar * const[]) {
-          g_strconcat("LANG=", locale, NULL), NULL
-        }, FALSE),
-        G_VARIANT_TYPE("()"),
-        G_DBUS_CALL_FLAGS_NONE,
-        10000,
-        NULL,
-        &error);
 
-    if (reply)
-    {
-      g_variant_unref(reply);
-      g_free(self->last_locale);
-      self->last_locale = g_strdup(locale);
-      g_debug("synchronized Plasma 6 translation language: LANG=%s", locale);
-    }
-    else
-    {
-      g_warning("could not synchronize Plasma 6 translation language: %s",
-                error ? error->message : "unknown error");
-      g_clear_error(&error);
-    }
-  }
+  /*
+   * SetLocale is handled by this same localed process. A synchronous call
+   * would block the main loop that must dispatch the method and therefore
+   * deadlock until the D-Bus timeout. Queue it asynchronously instead.
+   */
+  if (self->locale_sync_pending)
+    goto out;
+
+  assignment = g_strconcat("LANG=", locale, NULL);
+  locale_values[0] = assignment;
+
+  self->locale_cancellable = g_cancellable_new();
+  self->locale_sync_pending = TRUE;
+
+  call = g_new0(PlasmaLocaleCall, 1);
+  call->backend = g_object_ref(self);
+  call->locale = g_strdup(locale);
+
+  g_dbus_connection_call(self->connection,
+                         "org.freedesktop.locale1",
+                         "/org/freedesktop/locale1",
+                         "org.freedesktop.locale1",
+                         "SetLocale",
+                         g_variant_new("(^asb)", locale_values, FALSE),
+                         G_VARIANT_TYPE("()"),
+                         G_DBUS_CALL_FLAGS_NONE,
+                         G_MAXINT,
+                         self->locale_cancellable,
+                         plasma_locale_call_cb,
+                         call);
+
 out:
+  g_free(assignment);
   g_free(locale);
   g_free(contents);
 }
@@ -286,8 +357,13 @@ static void
 stop_locale_monitor(RclPlasma6Backend *self)
 {
   g_clear_object(&self->locale_monitor);
+  if (self->locale_cancellable)
+    g_cancellable_cancel(self->locale_cancellable);
+  g_clear_object(&self->locale_cancellable);
+  self->locale_sync_pending = FALSE;
   g_clear_pointer(&self->locale_config_path, g_free);
   g_clear_pointer(&self->last_locale, g_free);
+  g_clear_pointer(&self->requested_locale, g_free);
 }
 
 static void
