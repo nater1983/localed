@@ -9,7 +9,7 @@
  * come from org.kde.KeyboardLayouts, while variants/options are read from the
  * user's kxkbrc configuration.
  *
- * A snapshot is emitted on stdout using the same protocol as the GNOME helper:
+ * A snapshot is emitted on stdout using the same snapshot protocol as the other desktop backends:
  *   (as layouts, as variants, as options, s active_layout, s active_variant)
  */
 
@@ -50,6 +50,8 @@ split_kconfig_list(const gchar *value, guint expected_length)
 
   if (length > expected_length)
   {
+    for (i = expected_length; i < length; i++)
+      g_free(parts[i]);
     parts[expected_length] = NULL;
     length = expected_length;
   }
@@ -91,7 +93,12 @@ read_kconfig_options(GKeyFile *key_file)
   if (!value || !*value)
     options = g_new0(gchar *, 1);
   else
+  {
+    guint i;
     options = g_strsplit(value, ",", -1);
+    for (i = 0; options[i]; i++)
+      g_strstrip(options[i]);
+  }
 
   g_free(value);
   return options;
