@@ -22,4 +22,13 @@ RclBackend *rcl_plasma6_backend_new(RclLocaleDaemon *daemon);
 gboolean rcl_plasma6_backend_start(RclPlasma6Backend *self, GError **error);
 void rcl_plasma6_backend_stop(RclPlasma6Backend *self);
 
+/* Returns the one unambiguous active local Plasma session, if available. */
+gboolean rcl_plasma6_backend_get_active_session(RclPlasma6Backend *self,
+                                                guint *uid,
+                                                gchar **session_id,
+                                                gchar **object_path,
+                                                gchar **seat,
+                                                gchar **session_type,
+                                                gchar **desktop);
+
 G_END_DECLS
