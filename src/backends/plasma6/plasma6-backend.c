@@ -822,7 +822,15 @@ find_session_bus_address(RclPlasma6Backend *self,
       offset += item_length + (end ? 1 : 0);
     }
 
-    if (!address || !g_str_has_prefix(address, "unix:path="))
+    /*
+     * Slackware 15's dbus-run-session uses an abstract Unix socket.
+     * Also accept the conventional filesystem socket used by other
+     * session-bus launchers. In either case, the process UID and exact
+     * logind session are verified below before accepting the address.
+     */
+    if (!address ||
+        (!g_str_has_prefix(address, "unix:abstract=") &&
+         !g_str_has_prefix(address, "unix:path=")))
       goto next_process;
 
     reply = g_dbus_connection_call_sync(
@@ -843,30 +851,45 @@ find_session_bus_address(RclPlasma6Backend *self,
     g_variant_get(reply, "(&o)", &process_session_path);
     if (g_strcmp0(process_session_path, session_path) == 0)
     {
-      const gchar *path_start = address + strlen("unix:path=");
-      const gchar *path_end = strpbrk(path_start, ",;");
-      gchar *socket_path = path_end ?
-          g_strndup(path_start, (gsize) (path_end - path_start)) :
-          g_strdup(path_start);
-      struct stat socket_stat;
-
-      if (g_path_is_absolute(socket_path) &&
-          stat(socket_path, &socket_stat) == 0 &&
-          S_ISSOCK(socket_stat.st_mode) &&
-          socket_stat.st_uid == (uid_t) uid)
+      if (g_str_has_prefix(address, "unix:abstract="))
       {
-        result = g_strdup(address);
-        g_debug("using Plasma 6 session bus from process %u: %s",
-                (guint) pid_value, socket_path);
+        const gchar *abstract_name = address + strlen("unix:abstract=");
+        const gchar *address_end = strpbrk(abstract_name, ",;");
+
+        if (*abstract_name && (!address_end || address_end > abstract_name))
+        {
+          result = g_strdup(address);
+          g_debug("using Plasma 6 abstract session bus from logind-verified "
+                  "process %u", (guint) pid_value);
+        }
       }
       else
       {
-        g_debug("ignoring Plasma 6 session bus from process %u: socket is "
-                "missing, not a Unix socket, or not owned by uid %u",
-                (guint) pid_value, uid);
-      }
+        const gchar *path_start = address + strlen("unix:path=");
+        const gchar *path_end = strpbrk(path_start, ",;");
+        gchar *socket_path = path_end ?
+            g_strndup(path_start, (gsize) (path_end - path_start)) :
+            g_strdup(path_start);
+        struct stat socket_stat;
 
-      g_free(socket_path);
+        if (g_path_is_absolute(socket_path) &&
+            stat(socket_path, &socket_stat) == 0 &&
+            S_ISSOCK(socket_stat.st_mode) &&
+            socket_stat.st_uid == (uid_t) uid)
+        {
+          result = g_strdup(address);
+          g_debug("using Plasma 6 session bus from process %u: %s",
+                  (guint) pid_value, socket_path);
+        }
+        else
+        {
+          g_debug("ignoring Plasma 6 session bus from process %u: socket is "
+                  "missing, not a Unix socket, or not owned by uid %u",
+                  (guint) pid_value, uid);
+        }
+
+        g_free(socket_path);
+      }
     }
     g_variant_unref(reply);
 
