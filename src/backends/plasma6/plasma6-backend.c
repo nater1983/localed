@@ -1360,7 +1360,7 @@ failed:
 void
 rcl_plasma6_backend_stop(RclPlasma6Backend *self)
 {
-  g_return_if_fail(RCL_IS_Plasma 6_BACKEND(self));
+  g_return_if_fail(RCL_IS_PLASMA6_BACKEND(self));
 
   self->stopping = TRUE;
   stop_settings_helper(self);
@@ -1401,7 +1401,7 @@ rcl_plasma6_backend_stop(RclPlasma6Backend *self)
 gboolean
 rcl_plasma6_backend_start(RclPlasma6Backend *self, GError **error)
 {
-  g_return_val_if_fail(RCL_IS_Plasma 6_BACKEND(self), FALSE);
+  g_return_val_if_fail(RCL_IS_PLASMA6_BACKEND(self), FALSE);
   (void) error;
 
   if (self->connection || self->reconnect_id)
@@ -1420,7 +1420,7 @@ rcl_plasma6_backend_get_active_session(RclPlasma6Backend *self,
                                      gchar **session_type,
                                      gchar **desktop)
 {
-  g_return_val_if_fail(RCL_IS_Plasma 6_BACKEND(self), FALSE);
+  g_return_val_if_fail(RCL_IS_PLASMA6_BACKEND(self), FALSE);
 
   if (!self->active)
     return FALSE;
@@ -1499,7 +1499,7 @@ rcl_plasma6_backend_new(RclLocaleDaemon *daemon)
   RclPlasma6Backend *self;
 
   g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
-  self = g_object_new(RCL_TYPE_Plasma 6_BACKEND, NULL);
+  self = g_object_new(RCL_TYPE_PLASMA6_BACKEND, NULL);
   self->daemon = daemon;
   return RCL_BACKEND(self);
 }
