@@ -1550,6 +1550,7 @@ rcl_plasma6_backend_stop(RclPlasma6Backend *self)
 
   self->stopping = TRUE;
   stop_settings_helper(self);
+  stop_locale_monitor(self);
 
   if (self->reconnect_id)
   {
