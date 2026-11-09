@@ -31,7 +31,7 @@ The daemon follows the same general service pattern as
 | GLib / GIO | `glib-2.0`, `gio-2.0`, `gio-unix-2.0` | 2.56 |
 | Polkit | `polkit-gobject-1` | 0.113 |
 | D-Bus daemon | — | Runtime requirement |
-| logind-compatible service | — | Runtime requirement for GNOME session discovery |
+| logind-compatible service | — | Runtime requirement for desktop session discovery |
 
 The daemon is activated by `dbus-daemon` through D-Bus system-service
 activation (`[D-BUS Service]`). There is no systemd dependency.
@@ -155,7 +155,7 @@ meson install -C build
 For a system-wide installation, configure with `--prefix=/usr` and install
 with the required privileges.
 
-Both build configurations install the same daemon and helper executable
+All backend configurations install the same daemon and helper executable
 names under `libexecdir` (normally `/usr/libexec`):
 
 ```text
@@ -267,11 +267,16 @@ than install a separate helper binary for each desktop.
 │       ├── backend-interface.c
 │       ├── backend-interface.h
 │       ├── input-sources-helper.c
-│       └── gnome/
-│           ├── gnome-backend.c
-│           ├── gnome-backend.h
-│           ├── gnome-input-sources-helper.c
-│           └── gnome-input-sources-helper.h
+│       ├── gnome/
+│       │   ├── gnome-backend.c
+│       │   ├── gnome-backend.h
+│       │   ├── gnome-input-sources-helper.c
+│       │   └── gnome-input-sources-helper.h
+│       └── plasma6/
+│           ├── plasma6-backend.c
+│           ├── plasma6-backend.h
+│           ├── plasma6-input-sources-helper.c
+│           └── plasma6-input-sources-helper.h
 ├── tests/
 │   ├── test-dbus-lifecycle.c
 │   ├── test-file-mode.c
