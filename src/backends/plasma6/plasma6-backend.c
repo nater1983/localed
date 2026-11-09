@@ -628,9 +628,9 @@ process_environment_is_plasma6(const gchar *environment, gsize length)
 }
 
 /*
- * elogind may leave Session.Desktop empty for GDM sessions. The session
- * leader is then gdm-session-worker (root), so its environment cannot identify
- * the desktop. Find a Plasma 6 process owned by the session UID and ask logind
+ * elogind may leave Session.Desktop empty for display-manager sessions. The
+ * session leader may run as root, so its environment cannot identify the
+ * desktop. Find a Plasma 6 process owned by the session UID and ask logind
  * which session owns that PID. Only accept a process mapped to this exact
  * session object path.
  */
