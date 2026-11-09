@@ -231,14 +231,21 @@ apply_plasma6_settings(RclPlasma6Backend *self, const gchar *line)
   g_debug("synchronizing Plasma 6 input sources: layouts=%s variants=%s",
           layout, variant);
 
-  if (!rcl_locale_daemon_set_x11_keyboard_internal(
-          self->daemon, layout, current_model ? current_model : "",
-          variant, option, &error))
+  if (g_strcmp0(current_layout, layout) != 0 ||
+      g_strcmp0(current_variant, variant) != 0 ||
+      g_strcmp0(current_options, option) != 0)
   {
-    g_warning("could not synchronize Plasma 6 XKB source list: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
+    if (!rcl_locale_daemon_set_x11_keyboard_internal(
+            self->daemon, layout, current_model ? current_model : "",
+            variant, option, &error))
+    {
+      g_warning("could not synchronize Plasma 6 XKB source list: %s",
+                error ? error->message : "unknown error");
+      g_clear_error(&error);
+    }
   }
+  else
+    g_debug("Plasma 6 XKB source list is unchanged");
 
 
   /* The X11 source list is the complete Plasma 6 list. The console keymap,
