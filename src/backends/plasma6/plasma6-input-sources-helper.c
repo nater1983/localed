@@ -75,13 +75,26 @@ split_kconfig_list(const gchar *value, guint expected_length)
 static gchar **
 read_kconfig_list(GKeyFile *key_file, const gchar *key, guint expected_length)
 {
-  gchar *value = NULL;
-  gchar **result;
+  gchar *value = g_key_file_get_string(key_file, "Layout", key, NULL);
+  gchar **result = split_kconfig_list(value, expected_length);
 
-  value = g_key_file_get_string(key_file, "Layout", key, NULL);
-  result = split_kconfig_list(value, expected_length);
   g_free(value);
   return result;
+}
+
+static gchar **
+read_kconfig_options(GKeyFile *key_file)
+{
+  gchar *value = g_key_file_get_string(key_file, "Layout", "Options", NULL);
+  gchar **options;
+
+  if (!value || !*value)
+    options = g_new0(gchar *, 1);
+  else
+    options = g_strsplit(value, ",", -1);
+
+  g_free(value);
+  return options;
 }
 
 static void
@@ -166,7 +179,7 @@ emit_snapshot(Plasma6Helper *helper)
   }
 
   variants = read_kconfig_list(key_file, "VariantList", count);
-  options = read_kconfig_list(key_file, "Options", G_MAXUINT - 1);
+  options = read_kconfig_options(key_file);
 
   for (i = 0; i < count; i++)
     g_ptr_array_add(variants_array, g_strdup(variants[i] ? variants[i] : ""));
