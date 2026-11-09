@@ -36,7 +36,7 @@
 
 #include "rcl-locale.h"
 #include "backends/backend-interface.h"
-#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
+#if HAVE_GNOME_BACKEND
 #include "backends/gnome/gnome-backend.h"
 #elif HAVE_PLASMA6_BACKEND
 #include "backends/plasma6/plasma6-backend.h"
