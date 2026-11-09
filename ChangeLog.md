@@ -4,6 +4,25 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.3.0] - Unreleased
 
+### Added
+- Add an optional KDE Plasma 6 input-source backend selected with
+  `-Ddesktop-backend=plasma6`; the default remains `none`.
+- Query KWin's `org.kde.KeyboardLayouts` D-Bus interface for the ordered
+  layout list and active layout index, and monitor `layoutChanged` and
+  `layoutListChanged` signals.
+- Read per-layout variants and XKB options from the session user's
+  `~/.config/kxkbrc`. Interpret KWin's `a(sss)` layout entries as
+  short name, display name, and long name; do not treat display name as a
+  variant.
+- Compile the Plasma reader into the existing
+  `localed-input-sources-helper` executable; no second helper binary or
+  KDE development library is introduced.
+
+### Tests
+- Add Plasma 6 D-Bus layout tuple and helper snapshot format tests, plus
+  backend start/stop lifecycle coverage. Run the Plasma-enabled Slackware
+  build and test suite before considering this work complete.
+
 ### Fixed
 - Reject configuration snapshots when the file pathname is removed or atomically
   replaced while its original inode is being read. Confirm the opened inode
