@@ -4,7 +4,7 @@
  * Licensed under the GNU General Public License Version 2 or later.
  *
  * Plasma 6 input-source backend. It discovers the active local Plasma 6 session,
- * launches a per-user GSettings monitor, validates its XKB snapshot, and
+ * launches a per-user Plasma D-Bus monitor, validates its XKB snapshot, and
  * synchronizes the resulting configuration through localed's trusted
  * in-process keyboard configuration API.
  */
@@ -177,7 +177,7 @@ apply_plasma6_settings(RclPlasma6Backend *self, const gchar *line)
 
   g_debug("received Plasma 6 input-sources snapshot: %s", line);
 
-  snapshot = g_variant_parse(G_VARIANT_TYPE(RCL_Plasma 6_BACKEND_SNAPSHOT_TYPE),
+  snapshot = g_variant_parse(G_VARIANT_TYPE(RCL_PLASMA6_BACKEND_SNAPSHOT_TYPE),
                              line, NULL, NULL,
                              &error);
   if (!snapshot)
@@ -284,7 +284,7 @@ static void
 settings_helper_read_cb(GObject *source, GAsyncResult *result,
                         gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
   GDataInputStream *stream = G_DATA_INPUT_STREAM(source);
   gsize length = 0;
   GError *error = NULL;
@@ -482,7 +482,7 @@ out:
 static gboolean
 helper_restart_cb(gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
   self->helper_restart_id = 0;
   if (!self->stopping && self->active)
@@ -563,7 +563,8 @@ desktop_is_plasma6(const gchar *desktop)
     return FALSE;
 
   lower = g_ascii_strdown(desktop, -1);
-  result = strstr(lower, "plasma6") != NULL;
+  result = strstr(lower, "plasma") != NULL ||
+           g_strcmp0(lower, "kde") == 0;
   g_free(lower);
 
   return result;
@@ -1094,7 +1095,7 @@ refresh_sessions(RclPlasma6Backend *self)
 static gboolean
 refresh_timeout_cb(gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
   self->refresh_id = 0;
   refresh_sessions(self);
@@ -1120,7 +1121,7 @@ manager_signal_cb(GDBusConnection *connection,
                   GVariant *parameters,
                   gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
   (void) connection;
   (void) sender_name;
@@ -1142,7 +1143,7 @@ properties_changed_cb(GDBusConnection *connection,
                       GVariant *parameters,
                       gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
   const gchar *changed_interface;
   GVariant *changed = NULL;
   GVariant *invalidated = NULL;
@@ -1193,7 +1194,7 @@ name_appeared_cb(GDBusConnection *connection,
                  const gchar *owner,
                  gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
   (void) name;
   (void) owner;
@@ -1226,7 +1227,7 @@ name_vanished_cb(GDBusConnection *connection,
                  const gchar *name,
                  gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
   (void) name;
 
@@ -1258,7 +1259,7 @@ static gboolean rcl_plasma6_backend_connect(RclPlasma6Backend *self);
 static gboolean
 reconnect_timeout_cb(gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
   self->reconnect_id = 0;
   if (!self->stopping)
@@ -1273,7 +1274,7 @@ connection_closed_cb(GDBusConnection *connection,
                      GError *error,
                      gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(user_data);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
   (void) remote_peer_vanished;
 
@@ -1443,7 +1444,7 @@ rcl_plasma6_backend_get_active_session(RclPlasma6Backend *self,
 static void
 rcl_plasma6_backend_dispose(GObject *object)
 {
-  RclPlasma6Backend *self = RCL_Plasma 6_BACKEND(object);
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(object);
 
   rcl_plasma6_backend_stop(self);
   G_OBJECT_CLASS(rcl_plasma6_backend_parent_class)->dispose(object);
@@ -1479,12 +1480,12 @@ rcl_plasma6_backend_init(RclPlasma6Backend *self)
 static gboolean
 rcl_plasma6_backend_iface_start(RclBackend *backend, GError **error)
 {
-  return rcl_plasma6_backend_start(RCL_Plasma 6_BACKEND(backend), error);
+  return rcl_plasma6_backend_start(RCL_PLASMA6_BACKEND(backend), error);
 }
 static void
 rcl_plasma6_backend_iface_stop(RclBackend *backend)
 {
-  rcl_plasma6_backend_stop(RCL_Plasma 6_BACKEND(backend));
+  rcl_plasma6_backend_stop(RCL_PLASMA6_BACKEND(backend));
 }
 static void
 rcl_plasma6_backend_iface_init(RclBackendInterface *iface)
