@@ -17,6 +17,8 @@
 #include <glib.h>
 #include <stdio.h>
 
+#include "plasma6-input-sources-helper.h"
+
 #define KDE_KEYBOARD_NAME       "org.kde.keyboard"
 #define KDE_KEYBOARD_PATH       "/Layouts"
 #define KDE_KEYBOARD_INTERFACE  "org.kde.KeyboardLayouts"
