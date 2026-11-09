@@ -21,6 +21,9 @@ G_DECLARE_FINAL_TYPE(RclPlasma6Backend, rcl_plasma6_backend,
 RclBackend *rcl_plasma6_backend_new(RclLocaleDaemon *daemon);
 gboolean rcl_plasma6_backend_start(RclPlasma6Backend *self, GError **error);
 void rcl_plasma6_backend_stop(RclPlasma6Backend *self);
+/* Parse Plasma 6 Translations/LANGUAGE and return the first UTF-8 locale. */
+gchar *rcl_plasma6_backend_locale_from_localerc(const gchar *contents,
+                                                GError **error);
 
 /* Returns the one unambiguous active local Plasma session, if available. */
 gboolean rcl_plasma6_backend_get_active_session(RclPlasma6Backend *self,

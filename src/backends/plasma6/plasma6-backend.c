@@ -107,6 +107,7 @@ static gchar *find_session_bus_address(RclPlasma6Backend *self,
 static void settings_helper_read_next(RclPlasma6Backend *self);
 static gboolean helper_restart_cb(gpointer user_data);
 static void restart_settings_helper(RclPlasma6Backend *self);
+static void sync_plasma_locale(RclPlasma6Backend *self);
 
 
 typedef struct
