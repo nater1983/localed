@@ -2190,13 +2190,6 @@ rcl_write_locale_files_full( const gchar *const *known_keys,
                              const gchar *const *new_values,
                              gboolean derive_language, GError **error )
 {
-static gboolean
-rcl_write_locale_files( const gchar *const *known_keys,
-                        const gchar *const *new_values, GError **error )
-{
-  return rcl_write_locale_files_full(known_keys, new_values, TRUE, error);
-}
-
   RclFileSnapshot sh = { 0 }, csh = { 0 };
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
@@ -2221,6 +2214,13 @@ out:
   rcl_file_snapshot_clear( &sh );
   rcl_file_snapshot_clear( &csh );
   return ok;
+}
+
+static gboolean
+rcl_write_locale_files( const gchar *const *known_keys,
+                        const gchar *const *new_values, GError **error )
+{
+  return rcl_write_locale_files_full(known_keys, new_values, TRUE, error);
 }
 
 /* Commit the console keymap and its toggle sidecar together. */
