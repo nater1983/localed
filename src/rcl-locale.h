@@ -131,10 +131,6 @@ GType rcl_locale_daemon_get_type ( void ) G_GNUC_CONST;
 void rcl_daemon_sync_dbus_properties ( RclLocaleDaemon *daemon );
 gboolean rcl_locale_daemon_set_language_from_accounts (
     RclLocaleDaemon *daemon, const gchar *language, GError **error );
-#if HAVE_PLASMA6_BACKEND
-gboolean rcl_locale_daemon_set_language_from_plasma (
-    RclLocaleDaemon *daemon, const gchar *language, GError **error );
-#endif
 #if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
 /* Trusted in-process keyboard configuration entry points used by the GNOME
  * input-source backend. They bypass D-Bus/Polkit inside the daemon. */

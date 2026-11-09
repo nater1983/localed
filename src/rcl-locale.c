@@ -1776,32 +1776,6 @@ rcl_locale_daemon_set_language_from_accounts( RclLocaleDaemon *daemon,
   return TRUE;
 }
 
-gboolean
-rcl_locale_daemon_set_language_from_plasma(RclLocaleDaemon *daemon,
-                                           const gchar *language,
-                                           GError **error)
-{
-  const gchar *known_keys[] = { "LANG", NULL };
-  const gchar *new_values[] = { language, NULL };
-
-  if (!language || !rcl_locale_value_is_safe(language) ||
-      !g_str_has_suffix(language, ".UTF-8"))
-  {
-    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                        "Invalid UTF-8 locale from Plasma 6");
-    return FALSE;
-  }
-
-  if (!rcl_write_locale_files(known_keys, new_values, error))
-  {
-    rcl_daemon_sync_dbus_properties(daemon);
-    return FALSE;
-  }
-
-  rcl_daemon_sync_dbus_properties(daemon);
-  return TRUE;
-}
-
 static void
 do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
                           const gchar *keymap, const gchar *keymap_toggle,

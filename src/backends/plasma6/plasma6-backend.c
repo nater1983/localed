@@ -21,7 +21,6 @@
 #include <glib.h>
 
 #include "plasma6-backend.h"
-#include "rcl-locale.h"
 #include "rcl-xkb-config.h"
 
 #define LOGIND_NAME             "org.freedesktop.login1"
@@ -233,17 +232,35 @@ sync_plasma_locale(RclPlasma6Backend *self)
   }
   if (g_strcmp0(locale, self->last_locale) == 0)
     goto out;
-  if (rcl_locale_daemon_set_language_from_plasma(self->daemon, locale, &error))
   {
-    g_free(self->last_locale);
-    self->last_locale = g_strdup(locale);
-    g_debug("synchronized Plasma 6 translation language: LANG=%s", locale);
-  }
-  else
-  {
-    g_warning("could not synchronize Plasma 6 translation language: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
+    GVariant *reply = g_dbus_connection_call_sync(
+        self->connection,
+        "org.freedesktop.locale1",
+        "/org/freedesktop/locale1",
+        "org.freedesktop.locale1",
+        "SetLocale",
+        g_variant_new("(^asb)", (const gchar * const[]) {
+          g_strconcat("LANG=", locale, NULL), NULL
+        }, FALSE),
+        G_VARIANT_TYPE("()"),
+        G_DBUS_CALL_FLAGS_NONE,
+        10000,
+        NULL,
+        &error);
+
+    if (reply)
+    {
+      g_variant_unref(reply);
+      g_free(self->last_locale);
+      self->last_locale = g_strdup(locale);
+      g_debug("synchronized Plasma 6 translation language: LANG=%s", locale);
+    }
+    else
+    {
+      g_warning("could not synchronize Plasma 6 translation language: %s",
+                error ? error->message : "unknown error");
+      g_clear_error(&error);
+    }
   }
 out:
   g_free(locale);
