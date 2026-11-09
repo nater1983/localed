@@ -183,12 +183,20 @@ rcl_plasma6_backend_locale_from_localerc(const gchar *contents, GError **error)
         break;
     if (*p || strlen(candidate) > 128)
       continue;
-    if (g_str_has_suffix(candidate, ".UTF-8") ||
-        g_str_has_suffix(candidate, ".utf8") ||
-        g_str_has_suffix(candidate, ".UTF8"))
-      locale = g_strdup(candidate);
-    else
-      locale = g_strconcat(candidate, ".UTF-8", NULL);
+    {
+      gchar *base = g_strdup(candidate);
+      gchar *encoding = strchr(base, '.');
+      gchar *modifier = strchr(base, '@');
+
+      /* plasma-localerc normally stores bare language IDs. If an encoding
+       * was supplied, discard it: Slackware output is always UTF-8. */
+      if (encoding && (!modifier || encoding < modifier))
+        memmove(encoding, modifier ? modifier : encoding + strlen(encoding),
+                modifier ? strlen(modifier) + 1 : 1);
+
+      locale = g_strconcat(base, ".UTF-8", NULL);
+      g_free(base);
+    }
     break;
   }
   if (!locale && error && !*error)
