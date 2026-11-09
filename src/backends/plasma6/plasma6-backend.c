@@ -57,6 +57,9 @@ struct _RclPlasma6Backend
   guint helper_restart_id;
 
   GSubprocess *settings_helper;
+  GFileMonitor *locale_monitor;
+  gchar *locale_config_path;
+  gchar *last_locale;
   GDataInputStream *settings_stream;
   GCancellable *settings_cancellable;
   RclLocaleDaemon *daemon; /* borrowed; owned by the main daemon state */
@@ -149,6 +152,149 @@ plasma6_console_keymap_lookup(const gchar *layout, const gchar *variant)
       return plasma6_console_keymaps[i].keymap;
 
   return NULL;
+}
+
+gchar *
+rcl_plasma6_backend_locale_from_localerc(const gchar *contents, GError **error)
+{
+  GKeyFile *key_file;
+  gchar *language = NULL;
+  gchar **preferences = NULL;
+  gchar *locale = NULL;
+  guint i;
+
+  g_return_val_if_fail(contents != NULL, NULL);
+  key_file = g_key_file_new();
+  if (!g_key_file_load_from_data(key_file, contents, -1, G_KEY_FILE_NONE, error))
+    goto out;
+  language = g_key_file_get_string(key_file, "Translations", "LANGUAGE", error);
+  if (!language)
+    goto out;
+  preferences = g_strsplit(language, ":", -1);
+  for (i = 0; preferences[i]; i++)
+  {
+    gchar *candidate = g_strstrip(preferences[i]);
+    const gchar *p;
+    if (!*candidate)
+      continue;
+    for (p = candidate; *p; p++)
+      if (!(g_ascii_isalnum(*p) || *p == '_' || *p == '-' ||
+            *p == '.' || *p == '@'))
+        break;
+    if (*p || strlen(candidate) > 128)
+      continue;
+    if (g_str_has_suffix(candidate, ".UTF-8") ||
+        g_str_has_suffix(candidate, ".utf8") ||
+        g_str_has_suffix(candidate, ".UTF8"))
+      locale = g_strdup(candidate);
+    else
+      locale = g_strconcat(candidate, ".UTF-8", NULL);
+    break;
+  }
+  if (!locale && error && !*error)
+    g_set_error_literal(error, G_KEY_FILE_ERROR, G_KEY_FILE_ERROR_INVALID_VALUE,
+                        "Plasma Translations/LANGUAGE has no valid preference");
+out:
+  g_strfreev(preferences);
+  g_free(language);
+  g_key_file_unref(key_file);
+  return locale;
+}
+
+static void
+sync_plasma_locale(RclPlasma6Backend *self)
+{
+  gchar *contents = NULL, *locale = NULL;
+  GError *error = NULL;
+  if (!self->active || !self->locale_config_path || self->stopping)
+    return;
+  if (!g_file_get_contents(self->locale_config_path, &contents, NULL, &error))
+  {
+    g_debug("could not read Plasma locale configuration %s: %s",
+            self->locale_config_path, error->message);
+    g_clear_error(&error);
+    return;
+  }
+  locale = rcl_plasma6_backend_locale_from_localerc(contents, &error);
+  if (!locale)
+  {
+    g_debug("Plasma locale configuration has no usable translation language: %s",
+            error ? error->message : "unknown configuration error");
+    g_clear_error(&error);
+    goto out;
+  }
+  if (g_strcmp0(locale, self->last_locale) == 0)
+    goto out;
+  if (rcl_locale_daemon_set_language_from_plasma(self->daemon, locale, &error))
+  {
+    g_free(self->last_locale);
+    self->last_locale = g_strdup(locale);
+    g_debug("synchronized Plasma 6 translation language: LANG=%s", locale);
+  }
+  else
+  {
+    g_warning("could not synchronize Plasma 6 translation language: %s",
+              error ? error->message : "unknown error");
+    g_clear_error(&error);
+  }
+out:
+  g_free(locale);
+  g_free(contents);
+}
+
+static void
+locale_config_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other_file,
+                          GFileMonitorEvent event, gpointer user_data)
+{
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
+  gchar *path;
+  (void) monitor; (void) other_file; (void) event;
+  if (!file || !self->locale_config_path)
+    return;
+  path = g_file_get_path(file);
+  if (g_strcmp0(path, self->locale_config_path) == 0)
+    sync_plasma_locale(self);
+  g_free(path);
+}
+
+static void
+stop_locale_monitor(RclPlasma6Backend *self)
+{
+  g_clear_object(&self->locale_monitor);
+  g_clear_pointer(&self->locale_config_path, g_free);
+  g_clear_pointer(&self->last_locale, g_free);
+}
+
+static void
+start_locale_monitor(RclPlasma6Backend *self)
+{
+  struct passwd *pw;
+  gchar *config_dir;
+  GFile *directory;
+  GError *error = NULL;
+  stop_locale_monitor(self);
+  if (!self->active || self->stopping)
+    return;
+  pw = getpwuid((uid_t) self->active->uid);
+  if (!pw)
+    return;
+  config_dir = g_build_filename(pw->pw_dir, ".config", NULL);
+  self->locale_config_path = g_build_filename(config_dir, "plasma-localerc", NULL);
+  directory = g_file_new_for_path(config_dir);
+  self->locale_monitor = g_file_monitor_directory(
+      directory, G_FILE_MONITOR_WATCH_MOVES, NULL, &error);
+  g_object_unref(directory);
+  g_free(config_dir);
+  if (!self->locale_monitor)
+  {
+    g_debug("could not monitor Plasma locale configuration: %s",
+            error ? error->message : "unknown error");
+    g_clear_error(&error);
+  }
+  else
+    g_signal_connect(self->locale_monitor, "changed",
+                     G_CALLBACK(locale_config_changed_cb), self);
+  sync_plasma_locale(self);
 }
 
 static void
@@ -1115,6 +1261,7 @@ refresh_sessions(RclPlasma6Backend *self)
       g_debug("no unambiguous active local Plasma 6 session");
 
     restart_settings_helper(self);
+    start_locale_monitor(self);
   }
 
   active_session_free(candidate);
@@ -1323,6 +1470,7 @@ connection_closed_cb(GDBusConnection *connection,
   unsubscribe_signals(self);
   self->logind_available = FALSE;
   stop_settings_helper(self);
+  stop_locale_monitor(self);
   self->connection_closed_id = 0;
   g_clear_object(&self->connection);
 

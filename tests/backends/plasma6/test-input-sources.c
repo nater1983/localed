@@ -11,6 +11,40 @@
 #include "plasma6-backend.h"
 
 static void
+test_plasma6_translation_language(void)
+{
+  const struct { const gchar *input; const gchar *expected; } cases[] = {
+    { "es:en_GB:en_US", "es.UTF-8" },
+    { "en_GB", "en_GB.UTF-8" },
+    { "cz:en_US", "cz.UTF-8" },
+    { "es.UTF-8:en_GB", "es.UTF-8" },
+    { ":es:en_GB", "es.UTF-8" },
+  };
+  guint i;
+  for (i = 0; i < G_N_ELEMENTS(cases); i++)
+  {
+    gchar *contents = g_strdup_printf("[Formats]\nLANG=en_US.UTF-8\n\n[Translations]\nLANGUAGE=%s\n", cases[i].input);
+    GError *error = NULL;
+    gchar *locale = rcl_plasma6_backend_locale_from_localerc(contents, &error);
+    g_assert_no_error(error);
+    g_assert_cmpstr(locale, ==, cases[i].expected);
+    g_free(locale);
+    g_free(contents);
+  }
+}
+
+static void
+test_plasma6_translation_language_invalid(void)
+{
+  GError *error = NULL;
+  gchar *locale = rcl_plasma6_backend_locale_from_localerc(
+      "[Translations]\nLANGUAGE=es;touch /tmp/pwned\n", &error);
+  g_assert_null(locale);
+  g_assert_error(error, G_KEY_FILE_ERROR, G_KEY_FILE_ERROR_INVALID_VALUE);
+  g_clear_error(&error);
+}
+
+static void
 test_plasma6_layout_names_signature(void)
 {
   GVariant *reply;
@@ -119,6 +153,8 @@ int
 main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
+  g_test_add_func("/plasma6/translation-language", test_plasma6_translation_language);
+  g_test_add_func("/plasma6/translation-language-invalid", test_plasma6_translation_language_invalid);
   g_test_add_func("/plasma6/layout-names-signature",
                   test_plasma6_layout_names_signature);
   g_test_add_func("/plasma6/snapshot-format",
