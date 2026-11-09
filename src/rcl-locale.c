@@ -1533,10 +1533,6 @@ auth_ctx_free( AuthCtx *ctx )
   g_free( ctx );
 }
 
-static gboolean rcl_write_locale_files_full( const gchar *const *known_keys,
-                                              const gchar *const *new_values,
-                                              gboolean derive_language,
-                                              GError **error );
 static gboolean rcl_write_locale_files( const gchar *const *known_keys,
                                          const gchar *const *new_values,
                                          GError **error );
@@ -1672,8 +1668,6 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
   known_keys[n_known] = NULL;
   new_values[n_known] = NULL;
 
-  if (derive_language)
-  {
   /*
    * LANGUAGE auto-derivation (gap 1 vs systemd 257).
    *
@@ -1727,8 +1721,6 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
         }
       }
     }
-  }
-
   }
 
   if( !rcl_write_locale_files( known_keys, new_values, &error ) )
@@ -1791,6 +1783,7 @@ rcl_locale_daemon_set_language_from_plasma(RclLocaleDaemon *daemon,
 {
   const gchar *known_keys[] = { "LANG", NULL };
   const gchar *new_values[] = { language, NULL };
+
   if (!language || !rcl_locale_value_is_safe(language) ||
       !g_str_has_suffix(language, ".UTF-8"))
   {
@@ -1798,11 +1791,13 @@ rcl_locale_daemon_set_language_from_plasma(RclLocaleDaemon *daemon,
                         "Invalid UTF-8 locale from Plasma 6");
     return FALSE;
   }
-  if (!rcl_write_locale_files_full(known_keys, new_values, FALSE, error))
+
+  if (!rcl_write_locale_files(known_keys, new_values, error))
   {
     rcl_daemon_sync_dbus_properties(daemon);
     return FALSE;
   }
+
   rcl_daemon_sync_dbus_properties(daemon);
   return TRUE;
 }
@@ -2186,9 +2181,8 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
  * individual rename is atomic; if the second write fails, restore the first
  * file so callers do not observe a knowingly mixed locale configuration. */
 static gboolean
-rcl_write_locale_files_full( const gchar *const *known_keys,
-                             const gchar *const *new_values,
-                             gboolean derive_language, GError **error )
+rcl_write_locale_files( const gchar *const *known_keys,
+                        const gchar *const *new_values, GError **error )
 {
   RclFileSnapshot sh = { 0 }, csh = { 0 };
   GError *write_error = NULL, *rollback_error = NULL;
@@ -2214,13 +2208,6 @@ out:
   rcl_file_snapshot_clear( &sh );
   rcl_file_snapshot_clear( &csh );
   return ok;
-}
-
-static gboolean
-rcl_write_locale_files( const gchar *const *known_keys,
-                        const gchar *const *new_values, GError **error )
-{
-  return rcl_write_locale_files_full(known_keys, new_values, TRUE, error);
 }
 
 /* Commit the console keymap and its toggle sidecar together. */
