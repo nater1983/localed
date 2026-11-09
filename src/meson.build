@@ -20,6 +20,8 @@ localed_inc = [
 
 if get_option('desktop-backend') == 'gnome'
   localed_sources += files('backends/gnome/gnome-backend.c')
+elif get_option('desktop-backend') == 'plasma6'
+  localed_sources += files('backends/plasma6/plasma6-backend.c')
 endif
 
 executable(
@@ -37,6 +39,10 @@ input_sources_helper_sources = files('backends/input-sources-helper.c')
 if get_option('desktop-backend') == 'gnome'
   input_sources_helper_sources += files(
     'backends/gnome/gnome-input-sources-helper.c',
+  )
+elif get_option('desktop-backend') == 'plasma6'
+  input_sources_helper_sources += files(
+    'backends/plasma6/plasma6-input-sources-helper.c',
   )
 endif
 
