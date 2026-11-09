@@ -1914,7 +1914,7 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
-#if HAVE_GNOME_BACKEND
+#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
 /* Trusted in-process keyboard entry points used by the GNOME input-source
  * backend. Public D-Bus requests continue through authorized D-Bus handlers. */
 gboolean
@@ -1979,7 +1979,7 @@ rcl_locale_daemon_set_x11_keyboard_internal(
   rcl_daemon_sync_dbus_properties(daemon);
   return TRUE;
 }
-#endif /* HAVE_GNOME_BACKEND */
+#endif /* HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND */
 
 /* ---- asynchronous PolicyKit D-Bus authorization ---- */
 
