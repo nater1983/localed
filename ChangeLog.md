@@ -2,7 +2,9 @@
 
 All notable changes to `localed` are documented in this file.
 
-## [0.3.0] - Unreleased
+## [0.3.rc] - 2026-11-09
+
+Release candidate for localed 0.3.0.
 
 ### Added
 - Add an optional KDE Plasma 6 input-source backend selected with
