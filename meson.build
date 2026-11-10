@@ -96,6 +96,7 @@ conf.set_quoted('RCL_X11_KEYBOARD_FILE', get_option('x11_keyboard_conf'))
 
 desktop_backend = get_option('desktop-backend')
 conf.set10('HAVE_GNOME_BACKEND', desktop_backend == 'gnome')
+conf.set10('HAVE_PLASMA6_BACKEND', desktop_backend == 'plasma6')
 
 input_sources_helper_dir = get_option('libexecdir')
 if not input_sources_helper_dir.startswith('/')
