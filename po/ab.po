@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-22 02:32+0200\n"
+"POT-Creation-Date: 2026-10-21 19:38-0500\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -13,9 +13,18 @@ msgstr ""
 "X-Generator: Translate Toolkit 3.20.0\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
 
-# Supported language codes, one per line.
-# Add a code here and create the matching po/<code>.po file to enable it.
-# Example:
-# de
-# fr
-# es
+#: data/org.freedesktop.locale1.policy:9
+msgid "Set the system locale"
+msgstr ""
+
+#: data/org.freedesktop.locale1.policy:10
+msgid "Authentication is required to set the system locale."
+msgstr ""
+
+#: data/org.freedesktop.locale1.policy:19
+msgid "Set the keyboard layout and model"
+msgstr ""
+
+#: data/org.freedesktop.locale1.policy:20
+msgid "Authentication is required to set the keyboard layout and model."
+msgstr ""
