@@ -22,6 +22,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <gio/gio.h>
@@ -32,6 +33,7 @@
 #include <polkit/polkit.h>
 
 #include "rcl-locale.h"
+#include "rcl-file-utils.h"
 
 /* --------------------------------------------------------------------------
    The org.freedesktop.locale1 introspection XML.
@@ -89,6 +91,7 @@ struct _RclLocaleDaemonPrivate
      part of authorisation (the agent dialog) is driven asynchronously so it
      never stalls the single-threaded main loop. */
   PolkitAuthority  *authority;
+  GCancellable     *auth_cancellable;
 
   /* Cached property values.  Refreshed by rcl_daemon_sync_dbus_properties(). */
   gchar  **locale;                 /* GStrv, "KEY=value" entries, never NULL */
@@ -99,6 +102,137 @@ struct _RclLocaleDaemonPrivate
   gchar   *x11_variant;
   gchar   *x11_options;
 };
+
+/* A snapshot lets multi-file settings updates restore the previous state
+ * if a later file in the same operation cannot be committed. */
+typedef struct
+{
+  gchar   *path;
+  gchar   *contents;
+  gsize    length;
+  mode_t   mode;
+  gboolean existed;
+} RclFileSnapshot;
+
+static void
+rcl_file_snapshot_clear( RclFileSnapshot *snapshot )
+{
+  g_free( snapshot->path );
+  g_free( snapshot->contents );
+  memset( snapshot, 0, sizeof(*snapshot) );
+}
+
+static gboolean
+rcl_file_snapshot_take( RclFileSnapshot *snapshot,
+                        const gchar *path, GError **error )
+{
+  GError *local_error = NULL;
+  GStatBuf st;
+
+  memset( snapshot, 0, sizeof(*snapshot) );
+  snapshot->path = g_strdup( path );
+  if( !g_file_get_contents( path, &snapshot->contents,
+                            &snapshot->length, &local_error ) )
+  {
+    if( g_error_matches( local_error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
+    {
+      g_clear_error( &local_error );
+      snapshot->existed = FALSE;
+      return TRUE;
+    }
+    g_prefix_error( &local_error, "snapshot %s: ", path );
+    g_propagate_error( error, local_error );
+    rcl_file_snapshot_clear( snapshot );
+    return FALSE;
+  }
+
+  if( g_stat( path, &st ) != 0 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "stat %s: %s", path, g_strerror(errno) );
+    rcl_file_snapshot_clear( snapshot );
+    return FALSE;
+  }
+  snapshot->mode = st.st_mode & 07777;
+  snapshot->existed = TRUE;
+  return TRUE;
+}
+
+static gboolean
+rcl_file_snapshot_restore( const RclFileSnapshot *snapshot, GError **error )
+{
+  gchar *temporary_path;
+  int fd;
+  gboolean ok;
+
+  if( !snapshot->existed )
+  {
+    if( g_unlink( snapshot->path ) != 0 && errno != ENOENT )
+    {
+      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                   "remove %s during rollback: %s",
+                   snapshot->path, g_strerror(errno) );
+      return FALSE;
+    }
+    return TRUE;
+  }
+
+  temporary_path = g_strdup_printf( "%s.XXXXXX", snapshot->path );
+  fd = g_mkstemp( temporary_path );
+  if( fd == -1 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "create rollback file for %s: %s",
+                 snapshot->path, g_strerror(errno) );
+    g_free( temporary_path );
+    return FALSE;
+  }
+  close( fd );
+
+  ok = g_file_set_contents( temporary_path, snapshot->contents,
+                            (gssize)snapshot->length, error );
+  if( ok && g_chmod( temporary_path, snapshot->mode ) != 0 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "restore permissions on %s: %s",
+                 snapshot->path, g_strerror(errno) );
+    ok = FALSE;
+  }
+  if( ok && g_rename( temporary_path, snapshot->path ) != 0 )
+  {
+    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
+                 "restore %s: rename failed: %s",
+                 snapshot->path, g_strerror(errno) );
+    ok = FALSE;
+  }
+
+  if( !ok )
+    g_unlink( temporary_path );
+  g_free( temporary_path );
+  return ok;
+}
+
+static void
+rcl_report_rollback_failure( GError **error, GError *rollback_error )
+{
+  if( !rollback_error )
+    return;
+  if( error && *error )
+  {
+    gchar *message = g_strdup_printf( "%s (rollback also failed: %s)",
+                                      (*error)->message,
+                                      rollback_error->message );
+    g_clear_error( error );
+    g_set_error_literal( error, G_IO_ERROR, G_IO_ERROR_FAILED, message );
+    g_free( message );
+    g_error_free( rollback_error );
+  }
+  else if( error )
+    g_propagate_error( error, rollback_error );
+  else
+    g_error_free( rollback_error );
+}
+
 
 /* --------------------------------------------------------------------------
    GObject boilerplate
@@ -481,10 +615,8 @@ write_x11_keyboard_conf( const gchar *path,
      * final file is always accessible, even when localed creates it from
      * scratch.  Mirrors the g_chmod() calls in rcl_write_lang_sh() and
      * rcl_write_rc_keymap_toggle(). */
-    if( g_chmod( tmp_path, 0644 ) != 0 )
+    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
       g_unlink( tmp_path );
       ok = FALSE;
     }
@@ -666,10 +798,8 @@ rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
   if( ok )
   {
     /* Make the script executable */
-    if( g_chmod( tmp_path, 0755 ) != 0 )
+    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
       g_unlink( tmp_path );
       ok = FALSE;
     }
@@ -762,13 +892,11 @@ rcl_write_rc_keymap_toggle( const gchar *path,
        * lang.sh and rc.keymap permissions; g_file_set_contents creates the
        * temp file 0600 which would leave the sidecar unreadable by non-root
        * readers if created from scratch. */
-      if( g_chmod( tmp_path, 0644 ) != 0 )
-      {
-        g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                     "chmod(%s): %s", tmp_path, g_strerror(errno) );
-        g_unlink( tmp_path );
-        ok = FALSE;
-      }
+      if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
+    {
+      g_unlink( tmp_path );
+      ok = FALSE;
+    }
 
       if( ok && g_rename( tmp_path, path ) != 0 )
       {
@@ -1023,7 +1151,24 @@ rcl_write_lang_sh( const gchar         *path,
    * surface beyond what already exists.  Any caller that sources user-
    * supplied content into lang.sh before calling this function violates
    * that assumption and must sanitise the content itself. */
-  if( g_file_get_contents( path, &contents, NULL, NULL ) )
+  {
+    GError *read_error = NULL;
+
+    if( !g_file_get_contents( path, &contents, NULL, &read_error ) )
+    {
+      if( !g_error_matches( read_error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
+      {
+        g_prefix_error( &read_error, "read existing locale file %s: ", path );
+        g_propagate_error( error, read_error );
+        g_string_free( out, TRUE );
+        g_hash_table_unref( new_vals );
+        return FALSE;
+      }
+      g_clear_error( &read_error );
+    }
+  }
+
+  if( contents != NULL )
   {
     lines = g_strsplit( contents, "\n", -1 );
     g_free( contents );
@@ -1108,10 +1253,8 @@ rcl_write_lang_sh( const gchar         *path,
      * execute permission.  g_file_set_contents() creates the temp file 0600;
      * chmod it to 0755 before the rename so the final file is always
      * accessible, even when localed creates it from scratch. */
-    if( g_chmod( tmp_path, 0755 ) != 0 )
+    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
     {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "chmod(%s): %s", tmp_path, g_strerror(errno) );
       g_unlink( tmp_path );
       ok = FALSE;
     }
@@ -1204,12 +1347,11 @@ rcl_write_lang_csh( const gchar         *path,
   }
 
   ok = g_file_set_contents(tmp_path, out->str, (gssize)out->len, error);
-  if( ok && g_chmod(tmp_path, 0755) != 0 )
-  {
-    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                "chmod(%s): %s", tmp_path, g_strerror(errno));
-    ok = FALSE;
-  }
+  if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
+    {
+      g_unlink( tmp_path );
+      ok = FALSE;
+    }
   if( ok && g_rename(tmp_path, path) != 0 )
   {
     g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
@@ -1377,7 +1519,8 @@ typedef enum
 typedef struct
 {
   RclLocaleDaemon        *daemon;       /* owned ref */
-  GDBusMethodInvocation  *invocation;   /* completed exactly once */
+  GDBusMethodInvocation  *invocation;   /* owned ref; completed exactly once */
+  GCancellable           *cancellable;  /* owned ref to this daemon session */
   LocaleOp                op;
 
   gchar  **locale;        /* OP_SET_LOCALE: owned GStrv */
@@ -1399,6 +1542,8 @@ auth_ctx_free( AuthCtx *ctx )
   if( !ctx )
     return;
   g_clear_object( &ctx->daemon );
+  g_clear_object( &ctx->invocation );
+  g_clear_object( &ctx->cancellable );
   g_strfreev( ctx->locale );
   g_free( ctx->keymap );
   g_free( ctx->keymap_toggle );
@@ -1410,6 +1555,151 @@ auth_ctx_free( AuthCtx *ctx )
 }
 
 /* ---- operation handlers: run only after a successful authorisation ---- */
+
+/* Commit the two Slackware locale files as one logical operation.  Each
+ * individual rename is atomic; if the second write fails, restore the first
+ * file so callers do not observe a knowingly mixed locale configuration. */
+static gboolean
+rcl_write_locale_files( const gchar *const *known_keys,
+                        const gchar *const *new_values, GError **error )
+{
+  RclFileSnapshot sh = { 0 }, csh = { 0 };
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean ok = FALSE;
+
+  if( !rcl_file_snapshot_take( &sh, RCL_LANG_SH_FILE, error ) ||
+      !rcl_file_snapshot_take( &csh, RCL_LANG_CSH_FILE, error ) )
+    goto out;
+  if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &write_error ) )
+    goto fail;
+  if( !rcl_write_lang_csh( RCL_LANG_CSH_FILE, known_keys, new_values, &write_error ) )
+  {
+    if( !rcl_file_snapshot_restore( &sh, &rollback_error ) )
+      rcl_report_rollback_failure( &write_error, rollback_error );
+    goto fail;
+  }
+  ok = TRUE;
+  goto out;
+
+fail:
+  if( error ) g_propagate_error( error, write_error );
+  else g_clear_error( &write_error );
+out:
+  rcl_file_snapshot_clear( &sh );
+  rcl_file_snapshot_clear( &csh );
+  return ok;
+}
+
+/* Commit the console keymap and its toggle sidecar together. */
+static gboolean
+rcl_write_vconsole_files( const gchar *keymap, const gchar *keymap_toggle,
+                          GError **error )
+{
+  RclFileSnapshot keymap_snapshot = { 0 }, toggle_snapshot = { 0 };
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean ok = FALSE;
+
+  if( !rcl_file_snapshot_take( &keymap_snapshot, RCL_RC_KEYMAP_FILE, error ) ||
+      !rcl_file_snapshot_take( &toggle_snapshot, RCL_RC_KEYMAP_TOGGLE_FILE, error ) )
+    goto out;
+  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
+    goto fail;
+  if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE,
+                                   keymap_toggle, &write_error ) )
+  {
+    if( !rcl_file_snapshot_restore( &keymap_snapshot, &rollback_error ) )
+      rcl_report_rollback_failure( &write_error, rollback_error );
+    goto fail;
+  }
+  ok = TRUE;
+  goto out;
+
+fail:
+  if( error ) g_propagate_error( error, write_error );
+  else g_clear_error( &write_error );
+out:
+  rcl_file_snapshot_clear( &keymap_snapshot );
+  rcl_file_snapshot_clear( &toggle_snapshot );
+  return ok;
+}
+
+/* The optional X11/console conversion is part of the requested update.
+ * Snapshot both files so a failed second write does not leave the source
+ * setting changed while the converted setting remains stale. */
+static gboolean
+rcl_write_x11_vconsole_files( const gchar *layout, const gchar *model,
+                              const gchar *variant, const gchar *options,
+                              const gchar *keymap, GError **error )
+{
+  RclFileSnapshot x11 = { 0 }, vc = { 0 };
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean ok = FALSE;
+
+  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) ||
+      !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, error ) )
+    goto out;
+  if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
+                                variant, options, &write_error ) )
+    goto fail;
+  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
+  {
+    if( !rcl_file_snapshot_restore( &x11, &rollback_error ) )
+      rcl_report_rollback_failure( &write_error, rollback_error );
+    goto fail;
+  }
+  ok = TRUE;
+  goto out;
+fail:
+  if( error ) g_propagate_error( error, write_error );
+  else g_clear_error( &write_error );
+out:
+  rcl_file_snapshot_clear( &x11 );
+  rcl_file_snapshot_clear( &vc );
+  return ok;
+}
+
+static gboolean
+rcl_write_vconsole_x11_files( const gchar *keymap, const gchar *keymap_toggle,
+                              const gchar *layout, const gchar *model,
+                              const gchar *variant, const gchar *options,
+                              GError **error )
+{
+  RclFileSnapshot vc = { 0 }, toggle = { 0 }, x11 = { 0 };
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean keymap_written = FALSE, toggle_written = FALSE, ok = FALSE;
+
+  if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, error ) ||
+      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, error ) ||
+      !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, error ) )
+    goto out;
+  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
+    goto fail;
+  keymap_written = TRUE;
+  if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE,
+                                   keymap_toggle, &write_error ) )
+    goto rollback;
+  toggle_written = TRUE;
+  if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
+                                variant, options, &write_error ) )
+    goto rollback;
+  ok = TRUE;
+  goto out;
+rollback:
+  if( toggle_written && !rcl_file_snapshot_restore( &toggle, &rollback_error ) )
+    rcl_report_rollback_failure( &write_error, rollback_error );
+  rollback_error = NULL;
+  if( keymap_written && !rcl_file_snapshot_restore( &vc, &rollback_error ) )
+    rcl_report_rollback_failure( &write_error, rollback_error );
+fail:
+  if( error ) g_propagate_error( error, write_error );
+  else g_clear_error( &write_error );
+out:
+  rcl_file_snapshot_clear( &vc );
+  rcl_file_snapshot_clear( &toggle );
+  rcl_file_snapshot_clear( &x11 );
+  return ok;
+}
+
 
 static void
 do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
@@ -1579,9 +1869,9 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
     }
   }
 
-  if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &error ) ||
-      !rcl_write_lang_csh( RCL_LANG_CSH_FILE, known_keys, new_values, &error ) )
+  if( !rcl_write_locale_files( known_keys, new_values, &error ) )
   {
+    rcl_daemon_sync_dbus_properties( daemon );
     g_dbus_method_invocation_return_gerror( invocation, error );
     g_error_free( error );
     return;
@@ -1622,9 +1912,11 @@ rcl_locale_daemon_set_language_from_accounts( RclLocaleDaemon *daemon,
     new_values[1] = fallback;
   }
 
-  if (!rcl_write_lang_sh(RCL_LANG_SH_FILE, known_keys, new_values, error) ||
-      !rcl_write_lang_csh(RCL_LANG_CSH_FILE, known_keys, new_values, error))
+  if (!rcl_write_locale_files(known_keys, new_values, error))
+  {
+    rcl_daemon_sync_dbus_properties(daemon);
     return FALSE;
+  }
 
   rcl_daemon_sync_dbus_properties(daemon);
   return TRUE;
@@ -1652,33 +1944,23 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
     return;
   }
 
-  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &error ) )
-  {
-    g_dbus_method_invocation_return_gerror( invocation, error );
-    g_error_free( error );
-    return;
-  }
-
-  /* Persist toggle in sidecar (empty value removes the file) */
-  if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE, keymap_toggle, &error ) )
-  {
-    g_warning( "could not write toggle sidecar: %s", error->message );
-    g_clear_error( &error );
-  }
-
   if( convert && keymap[0] != '\0' )
   {
     gchar *x11_layout = NULL, *x11_variant = NULL;
     if( rcl_keymap_to_x11( keymap, &x11_layout, &x11_variant ) )
     {
-      GError *xerr = NULL;
       RclLocaleDaemonPrivate *priv = daemon->priv;
-      if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
-                                    x11_layout, priv->x11_model,
-                                    x11_variant, priv->x11_options, &xerr ) )
+      if( !rcl_write_vconsole_x11_files( keymap, keymap_toggle,
+                                         x11_layout, priv->x11_model,
+                                         x11_variant, priv->x11_options,
+                                         &error ) )
       {
-        g_warning( "convert: could not update X11 keyboard config: %s", xerr->message );
-        g_clear_error( &xerr );
+        rcl_daemon_sync_dbus_properties( daemon );
+        g_dbus_method_invocation_return_gerror( invocation, error );
+        g_clear_error( &error );
+        g_free( x11_layout );
+        g_free( x11_variant );
+        return;
       }
       g_free( x11_layout );
       g_free( x11_variant );
@@ -1686,7 +1968,21 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
     else
     {
       g_debug( "convert: no built-in X11 mapping for keymap '%s'", keymap );
+      if( !rcl_write_vconsole_files( keymap, keymap_toggle, &error ) )
+      {
+        rcl_daemon_sync_dbus_properties( daemon );
+        g_dbus_method_invocation_return_gerror( invocation, error );
+        g_clear_error( &error );
+        return;
+      }
     }
+  }
+  else if( !rcl_write_vconsole_files( keymap, keymap_toggle, &error ) )
+  {
+    rcl_daemon_sync_dbus_properties( daemon );
+    g_dbus_method_invocation_return_gerror( invocation, error );
+    g_clear_error( &error );
+    return;
   }
 
   rcl_daemon_sync_dbus_properties( daemon );
@@ -1713,31 +2009,42 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
     return;
   }
 
-  if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
-                                layout, model, variant, options, &error ) )
-  {
-    g_dbus_method_invocation_return_gerror( invocation, error );
-    g_error_free( error );
-    return;
-  }
-
   if( convert && layout[0] != '\0' )
   {
     gchar *vc_keymap = NULL;
     if( rcl_x11_to_keymap( layout, &vc_keymap ) )
     {
-      GError *kerr = NULL;
-      if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, vc_keymap, &kerr ) )
+      if( !rcl_write_x11_vconsole_files( layout, model, variant, options,
+                                         vc_keymap, &error ) )
       {
-        g_warning( "convert: could not update rc.keymap: %s", kerr->message );
-        g_clear_error( &kerr );
+        rcl_daemon_sync_dbus_properties( daemon );
+        g_dbus_method_invocation_return_gerror( invocation, error );
+        g_clear_error( &error );
+        g_free( vc_keymap );
+        return;
       }
       g_free( vc_keymap );
     }
     else
     {
       g_debug( "convert: no built-in console mapping for X11 layout '%s'", layout );
+      if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
+                                    layout, model, variant, options, &error ) )
+      {
+        rcl_daemon_sync_dbus_properties( daemon );
+        g_dbus_method_invocation_return_gerror( invocation, error );
+        g_clear_error( &error );
+        return;
+      }
     }
+  }
+  else if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
+                                     layout, model, variant, options, &error ) )
+  {
+    rcl_daemon_sync_dbus_properties( daemon );
+    g_dbus_method_invocation_return_gerror( invocation, error );
+    g_clear_error( &error );
+    return;
   }
 
   rcl_daemon_sync_dbus_properties( daemon );
@@ -1758,8 +2065,31 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
 
   if( !result )
   {
-    g_dbus_method_invocation_return_gerror( ctx->invocation, error );
-    g_error_free( error );
+    if( g_cancellable_is_cancelled( ctx->cancellable ) )
+      g_dbus_method_invocation_return_dbus_error(
+        ctx->invocation,
+        "org.freedesktop.DBus.Error.Disconnected",
+        "Daemon connection was closed before authorization completed" );
+    else
+      g_dbus_method_invocation_return_gerror( ctx->invocation, error );
+
+    g_clear_error( &error );
+    auth_ctx_free( ctx );
+    return;
+  }
+
+  /*
+   * A successful PolicyKit reply may already be queued when shutdown cancels
+   * the request. Check this request's retained session cancellable before
+   * applying any privileged configuration change.
+   */
+  if( g_cancellable_is_cancelled( ctx->cancellable ) )
+  {
+    g_object_unref( result );
+    g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.Disconnected",
+      "Daemon connection was closed before authorization completed" );
     auth_ctx_free( ctx );
     return;
   }
@@ -1831,6 +2161,17 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
     }
   }
 
+  ctx->cancellable = g_object_ref( priv->auth_cancellable );
+  if( g_cancellable_is_cancelled( ctx->cancellable ) )
+  {
+    g_dbus_method_invocation_return_dbus_error(
+      ctx->invocation,
+      "org.freedesktop.DBus.Error.Disconnected",
+      "Authorization was cancelled before it could be started" );
+    auth_ctx_free( ctx );
+    return;
+  }
+
   sender  = g_dbus_method_invocation_get_sender( ctx->invocation );
   subject = polkit_system_bus_name_new( sender );
   flags   = interactive
@@ -1839,7 +2180,7 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
 
   polkit_authority_check_authorization(
     priv->authority, subject, action_id, NULL, flags,
-    NULL /* cancellable */, on_check_done, ctx );
+    ctx->cancellable, on_check_done, ctx );
 
   g_object_unref( subject );
 }
@@ -1923,7 +2264,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon     = g_object_ref( daemon );
-    ctx->invocation = invocation;
+    ctx->invocation = g_object_ref( invocation );
     ctx->op         = OP_SET_LOCALE;
     ctx->locale     = locale;
 
@@ -1941,7 +2282,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon         = g_object_ref( daemon );
-    ctx->invocation     = invocation;
+    ctx->invocation     = g_object_ref( invocation );
     ctx->op             = OP_SET_VCONSOLE_KEYBOARD;
     ctx->keymap         = g_strdup( keymap );
     ctx->keymap_toggle  = g_strdup( keymap_toggle );
@@ -1961,7 +2302,7 @@ handle_method_call( GDBusConnection       *connection,
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon      = g_object_ref( daemon );
-    ctx->invocation  = invocation;
+    ctx->invocation  = g_object_ref( invocation );
     ctx->op          = OP_SET_X11_KEYBOARD;
     ctx->x11_layout  = g_strdup( layout );
     ctx->x11_model   = g_strdup( model );
@@ -2005,13 +2346,21 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
   GDBusInterfaceInfo     *iface_info;
   GError *error = NULL;
 
-  priv->connection    = g_object_ref( connection );
+  /*
+   * Startup may be repeated after a D-Bus disconnect. Retire the previous
+   * registration and authorization session before attaching the new bus.
+   */
+  rcl_daemon_shutdown( daemon );
+
+  priv->connection       = g_object_ref( connection );
+  priv->auth_cancellable = g_cancellable_new();
   priv->introspection = g_dbus_node_info_new_for_xml(
                           locale1_introspection_xml, &error );
   if( !priv->introspection )
   {
     g_warning( "Failed to parse introspection XML: %s", error->message );
     g_error_free( error );
+    rcl_daemon_shutdown( daemon );
     return FALSE;
   }
 
@@ -2031,6 +2380,7 @@ rcl_daemon_startup( RclDaemon *daemon, GDBusConnection *connection )
   {
     g_warning( "Could not register D-Bus object: %s", error->message );
     g_error_free( error );
+    rcl_daemon_shutdown( daemon );
     return FALSE;
   }
 
@@ -2073,6 +2423,16 @@ rcl_daemon_shutdown( RclDaemon *daemon )
     g_dbus_node_info_unref( priv->introspection );
     priv->introspection = NULL;
   }
+
+  /*
+   * Cancel outstanding authorization checks before releasing the authority.
+   * Their callbacks retain the session cancellable and cannot apply changes
+   * after this daemon registration has been retired.
+   */
+  if( priv->auth_cancellable )
+    g_cancellable_cancel( priv->auth_cancellable );
+  g_clear_object( &priv->auth_cancellable );
+  g_clear_object( &priv->authority );
 }
 
 void
@@ -2101,6 +2461,9 @@ rcl_locale_daemon_finalize( GObject *object )
   }
   g_clear_object( &priv->connection );
 
+  if( priv->auth_cancellable )
+    g_cancellable_cancel( priv->auth_cancellable );
+  g_clear_object( &priv->auth_cancellable );
   g_clear_object( &priv->authority );
 
   g_strfreev( priv->locale );

@@ -2,6 +2,48 @@
 
 All notable changes to `localed` are documented in this file.
 
+## [0.2.3] - Unreleased
+
+### Fixed
+- Reconnect locale1 using a fresh private system-bus connection after a bus
+  restart or connection loss instead of relying on GLib's cached shared bus.
+- Retry initial system-bus connection failures and locale1 registration
+  failures through one reconnect scheduler attached to the daemon's main
+  context.
+- Retire the previous locale1 registration and connection before attempting
+  reacquisition, and suppress stale name-loss callbacks during teardown.
+- Cancel outstanding PolicyKit authorization checks when the daemon's D-Bus
+  registration is shut down or replaced. Retain each request's session
+  cancellable and check it again before applying privileged changes.
+- Hold an owned reference to each asynchronous D-Bus method invocation until
+  its authorization callback completes.
+
+### Tests
+- Add an isolated system-bus restart harness that verifies localed stays alive,
+  reacquires `org.freedesktop.locale1`, and re-establishes its AccountsService
+  name watch after the bus is restarted.
+- Pending PolicyKit cancellation still requires runtime regression testing
+  before the 0.2.3 maintenance release.
+
+
+## [0.2.2] - 2026-11-02
+
+### Fixed
+- Make locale updates transactional across `lang.sh` and `lang.csh`, and
+  restore the previous file if the companion write fails.
+- Make console-keymap updates transactional across `rc.keymap` and its
+  toggle sidecar; make X11/console keyboard conversions fail atomically
+  instead of silently accepting a partial update.
+- Refresh cached D-Bus properties after failed writes and include rollback
+  failures in the reported error.
+- Preserve existing permission bits when atomically replacing locale and
+  keyboard configuration files, while retaining the established default
+  modes for newly created files.
+- Watch the AccountsService D-Bus name so language monitoring starts when the
+  service appears and recovers when it restarts. Reconnect the monitor after
+  the system D-Bus connection is closed, without moving the integration out
+  of `src/main.c`.
+
 ## [0.2.1] - 2026-10-21
 
 ### Changed
