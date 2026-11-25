@@ -250,60 +250,6 @@ implementation behind the same interface and build-time selection. They
 should reuse the single `localed-input-sources-helper` executable rather
 than install a separate helper binary for each desktop.
 
-## Project layout
-
-```text
-.
-├── meson.build
-├── meson_options.txt
-├── src/
-│   ├── main.c
-│   ├── rcl-locale.c
-│   ├── rcl-locale.h
-│   ├── rcl-file-transaction.c
-│   ├── rcl-file-transaction.h
-│   ├── rcl-file-utils.h
-│   ├── rcl-xkb-config.c
-│   ├── rcl-xkb-config.h
-│   ├── rcl-accounts-service.c
-│   ├── rcl-accounts-service.h
-│   └── backends/
-│       ├── backend-interface.c
-│       ├── backend-interface.h
-│       ├── input-sources-helper.c
-│       ├── gnome/
-│       │   ├── gnome-backend.c
-│       │   ├── gnome-backend.h
-│       │   ├── gnome-input-sources-helper.c
-│       │   └── gnome-input-sources-helper.h
-│       └── plasma6/
-│           ├── plasma6-backend.c
-│           ├── plasma6-backend.h
-│           ├── plasma6-input-sources-helper.c
-│           └── plasma6-input-sources-helper.h
-├── tests/
-│   ├── test-dbus-lifecycle.c
-│   ├── test-file-mode.c
-│   ├── test-file-transaction.c
-│   ├── test-xkb-config.c
-│   ├── test-slackware-dbus-restart.sh
-│   └── backends/
-│       ├── gnome/
-│       │   └── test-input-sources.c
-│       └── plasma6/
-│           └── test-input-sources.c
-├── data/
-│   ├── org.freedesktop.locale1.service.in
-│   ├── org.freedesktop.locale1.conf
-│   ├── org.freedesktop.locale1.policy
-│   ├── org.freedesktop.locale1.rules.in
-│   └── org.freedesktop.locale1.xml
-├── man/
-├── po/
-└── slack/
-    └── localectl
-```
-
 ## D-Bus interface quick reference
 
 Read the `Locale` property:
