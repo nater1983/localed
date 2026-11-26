@@ -1416,7 +1416,8 @@ rcl_daemon_sync_dbus_properties( RclLocaleDaemon *daemon )
       "PropertiesChanged",
       g_variant_new( "(s@a{sv}as)",
                      "org.freedesktop.locale1",
-                     g_variant_ref( changed ),
+                     /* @ takes its own reference to non-floating changed. */
+                     changed,
                      NULL ),
       &err ) )
     {
