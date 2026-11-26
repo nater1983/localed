@@ -113,8 +113,10 @@ backend_module_dir = join_paths(backend_module_dir, 'localed', 'backends')
 conf.set_quoted('RCL_BACKEND_MODULE_DIR', backend_module_dir)
 
 desktop_backend = get_option('desktop-backend')
-conf.set10('HAVE_GNOME_BACKEND', desktop_backend == 'gnome')
-conf.set10('HAVE_PLASMA6_BACKEND', desktop_backend == 'plasma6')
+have_gnome_backend = desktop_backend in ['gnome', 'both']
+have_plasma6_backend = desktop_backend in ['plasma6', 'both']
+conf.set10('HAVE_GNOME_BACKEND', have_gnome_backend)
+conf.set10('HAVE_PLASMA6_BACKEND', have_plasma6_backend)
 
 input_sources_helper_dir = get_option('libexecdir')
 if not input_sources_helper_dir.startswith('/')
