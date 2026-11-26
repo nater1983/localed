@@ -1,6 +1,40 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "rcl-session.h"
 
+#define LOGIN_NAME "org.freedesktop.login1"
+#define LOGIN_PATH "/org/freedesktop/login1"
+#define LOGIN_MANAGER "org.freedesktop.login1.Manager"
+
+GVariant *
+rcl_session_list(GDBusConnection *connection, gint timeout_ms, GError **error)
+{
+  return g_dbus_connection_call_sync(connection, LOGIN_NAME, LOGIN_PATH,
+      LOGIN_MANAGER, "ListSessions", NULL, G_VARIANT_TYPE("(a(susso))"),
+      G_DBUS_CALL_FLAGS_NONE, timeout_ms, NULL, error);
+}
+
+GVariant *
+rcl_session_get_properties(GDBusConnection *connection, const gchar *path,
+                           gint timeout_ms, GError **error)
+{
+  return g_dbus_connection_call_sync(connection, LOGIN_NAME, path,
+      "org.freedesktop.DBus.Properties", "GetAll",
+      g_variant_new("(s)", "org.freedesktop.login1.Session"),
+      G_VARIANT_TYPE("(a{sv})"), G_DBUS_CALL_FLAGS_NONE,
+      timeout_ms, NULL, error);
+}
+
+GVariant *
+rcl_session_get_by_pid(GDBusConnection *connection, guint pid,
+                       gint timeout_ms, GError **error)
+{
+  return g_dbus_connection_call_sync(connection, LOGIN_NAME, LOGIN_PATH,
+      LOGIN_MANAGER, "GetSessionByPID", g_variant_new("(u)", pid),
+      G_VARIANT_TYPE("(o)"), G_DBUS_CALL_FLAGS_NONE,
+      timeout_ms, NULL, error);
+}
+
+
 gboolean
 rcl_session_is_active_local_user(GVariant *properties, const gchar *seat)
 {
@@ -42,10 +76,7 @@ rcl_session_uid_is_unique_active_local(GDBusConnection *connection, guint64 uid)
   guint session_uid, eligible = 0;
   gboolean matches = FALSE;
 
-  reply = g_dbus_connection_call_sync(connection,
-    "org.freedesktop.login1", "/org/freedesktop/login1",
-    "org.freedesktop.login1.Manager", "ListSessions", NULL,
-    G_VARIANT_TYPE("(a(susso))"), G_DBUS_CALL_FLAGS_NONE, 2000, NULL, NULL);
+  reply = rcl_session_list(connection, 2000, NULL);
   if (!reply)
     return FALSE;
 
@@ -58,10 +89,7 @@ rcl_session_uid_is_unique_active_local(GDBusConnection *connection, guint64 uid)
 
     if (!*seat)
       continue;
-    result = g_dbus_connection_call_sync(connection,
-      "org.freedesktop.login1", path, "org.freedesktop.DBus.Properties",
-      "GetAll", g_variant_new("(s)", "org.freedesktop.login1.Session"),
-      G_VARIANT_TYPE("(a{sv})"), G_DBUS_CALL_FLAGS_NONE, 2000, NULL, NULL);
+    result = rcl_session_get_properties(connection, path, 2000, NULL);
     if (!result)
       return FALSE;
     g_variant_get(result, "(@a{sv})", &props);
