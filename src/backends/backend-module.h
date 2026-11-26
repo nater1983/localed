@@ -37,4 +37,12 @@ gboolean rcl_backend_module_validate(
     const RclBackendModuleDescriptor *descriptor,
     const gchar *expected_id, GError **error);
 
+/* Load only from an absolute, trusted installation path. The returned
+ * backend owns a full reference; the module remains resident.
+ * The caller must stop and unref the backend before destroying daemon. */
+RclBackend *rcl_backend_module_load(const gchar *path,
+                                    const gchar *expected_id,
+                                    RclLocaleDaemon *daemon,
+                                    GError **error);
+
 G_END_DECLS
