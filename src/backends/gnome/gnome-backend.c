@@ -162,6 +162,15 @@ apply_gnome_settings(RclGnomeBackend *self, const gchar *line)
   gsize n_layouts = 0, n_variants = 0;
   GError *error = NULL;
 
+  if (!self->active || self->stopping ||
+      !rcl_session_is_unique_active_graphical(
+          rcl_session_monitor_get_connection(self->monitor),
+          self->active->uid, self->active->object_path))
+  {
+    g_debug("ignoring GNOME keyboard snapshot: no unique active graphical session");
+    return;
+  }
+
   g_debug("received GNOME input-sources snapshot: %s", line);
 
   snapshot = g_variant_parse(G_VARIANT_TYPE(RCL_GNOME_BACKEND_SNAPSHOT_TYPE),
