@@ -506,7 +506,7 @@ static void
 restart_settings_helper(RclPlasma6Backend *self)
 {
   stop_settings_helper(self);
-  if (self->active && !self->stopping && !start_settings_helper(self))
+  if (self->write_enabled && self->active && !self->stopping && !start_settings_helper(self))
     self->helper_restart_id =
       g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
 }
@@ -852,6 +852,10 @@ refresh_sessions(RclPlasma6Backend *self)
     g_warning("could not enumerate logind sessions: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
+    stop_settings_helper(self);
+    active_session_free(self->active);
+    self->active = NULL;
+    emit_active_session_changed(self);
     return;
   }
 
@@ -875,6 +879,11 @@ refresh_sessions(RclPlasma6Backend *self)
     else
       active_session_free(found);
   }
+
+  if (eligible_count == 1 && !rcl_session_is_unique_active_graphical(
+          rcl_session_monitor_get_connection(self->monitor),
+          candidate->uid, candidate->object_path))
+    eligible_count = 0;
 
   if (eligible_count != 1)
   {
