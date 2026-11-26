@@ -76,6 +76,123 @@ rcl_session_is_graphical(GVariant *properties, const gchar **type)
   return TRUE;
 }
 
+/* A console login may retain Type=tty even after startx launches Xorg.
+ * Require a real, root-owned Xorg executable and exact logind membership;
+ * neither a process name nor a user-controlled DISPLAY is sufficient.
+ * Return a scan failure separately from a successful negative result. */
+static gboolean
+session_has_xorg(GDBusConnection *connection, guint uid,
+                 const gchar *session_path, gboolean *found, GError **error)
+{
+  g_autoptr(GDir) proc = g_dir_open("/proc", 0, error);
+  const gchar *entry;
+
+  *found = FALSE;
+  if (!proc)
+    return FALSE;
+
+  while ((entry = g_dir_read_name(proc)) != NULL)
+  {
+    gchar *end = NULL;
+    guint64 pid;
+    struct stat process_stat, executable_stat;
+    g_autofree gchar *proc_path = NULL;
+    g_autofree gchar *exe_path = NULL;
+    g_autofree gchar *target = NULL;
+    g_autofree gchar *basename = NULL;
+    g_autoptr(GVariant) reply = NULL;
+    g_autoptr(GError) lookup_error = NULL;
+    const gchar *path = NULL;
+
+    if (!g_ascii_isdigit(entry[0]))
+      continue;
+    errno = 0;
+    pid = g_ascii_strtoull(entry, &end, 10);
+    if (errno || !end || *end || pid == 0 || pid > G_MAXUINT)
+      continue;
+
+    proc_path = g_build_filename("/proc", entry, NULL);
+    if (stat(proc_path, &process_stat) != 0 ||
+        (process_stat.st_uid != (uid_t) uid && process_stat.st_uid != 0))
+      continue;
+    exe_path = g_build_filename(proc_path, "exe", NULL);
+    target = g_file_read_link(exe_path, NULL);
+    if (!target)
+      continue;
+    basename = g_path_get_basename(target);
+    if (g_strcmp0(basename, "Xorg") != 0 ||
+        stat(exe_path, &executable_stat) != 0 ||
+        !S_ISREG(executable_stat.st_mode) || executable_stat.st_uid != 0 ||
+        (executable_stat.st_mode & (S_IWGRP | S_IWOTH)))
+      continue;
+
+    reply = rcl_session_get_by_pid(connection, (guint) pid, 2000, &lookup_error);
+    if (!reply)
+    {
+      /* A disappearing process is harmless; an unresolved live Xorg is not
+       * evidence that the candidate is the only graphical session. */
+      if (stat(proc_path, &process_stat) != 0)
+        continue;
+      if (lookup_error &&
+          (g_error_matches(lookup_error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_OBJECT) ||
+           g_dbus_error_is_remote_error(lookup_error)))
+      {
+        g_autofree gchar *remote = g_dbus_error_get_remote_error(lookup_error);
+        if (g_strcmp0(remote, "org.freedesktop.login1.NoSessionForPID") == 0)
+          continue;
+      }
+      g_propagate_error(error, g_steal_pointer(&lookup_error));
+      return FALSE;
+    }
+    g_variant_get(reply, "(&o)", &path);
+    if (g_strcmp0(path, session_path) != 0)
+      continue;
+    /* Recheck executable identity after the synchronous PID lookup. */
+    {
+      struct stat current;
+      if (stat(exe_path, &current) != 0 ||
+          current.st_dev != executable_stat.st_dev ||
+          current.st_ino != executable_stat.st_ino)
+        continue;
+    }
+    *found = TRUE;
+    return TRUE;
+  }
+  return TRUE;
+}
+
+gboolean
+rcl_session_resolve_graphical(GDBusConnection *connection, GVariant *properties,
+                              guint uid, const gchar *session_path,
+                              const gchar **type, GError **error)
+{
+  const gchar *value = NULL;
+  gboolean found = FALSE;
+
+  *type = NULL;
+  if (!g_variant_lookup(properties, "Type", "&s", &value))
+  {
+    g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                        "Missing logind session type");
+    return FALSE;
+  }
+  if (rcl_session_is_graphical(properties, type))
+    return TRUE;
+  if (g_strcmp0(value, "tty") != 0)
+    return TRUE;
+  if (!connection || !session_path)
+  {
+    g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                        "Console session verification requires logind");
+    return FALSE;
+  }
+  if (!session_has_xorg(connection, uid, session_path, &found, error))
+    return FALSE;
+  if (found)
+    *type = "x11";
+  return TRUE;
+}
+
 /* Only an unambiguous active local user session may drive
  * automatic system locale synchronization. Fail closed if logind cannot
  * establish the session state. */
@@ -149,9 +266,16 @@ rcl_session_is_unique_active_graphical(GDBusConnection *connection,
     if (!result)
       return FALSE;
     g_variant_get(result, "(@a{sv})", &props);
-    if (!rcl_session_is_active_local_user(props, seat) ||
-        !rcl_session_is_graphical(props, NULL))
+    if (!rcl_session_is_active_local_user(props, seat))
       continue;
+    {
+      const gchar *type = NULL;
+      if (!rcl_session_resolve_graphical(connection, props, session_uid, path,
+                                         &type, NULL))
+        return FALSE;
+      if (!type)
+        continue;
+    }
     if (++eligible > 1)
       return FALSE;
     matches = session_uid == uid && g_strcmp0(path, session_path) == 0;
