@@ -35,6 +35,8 @@ struct _RclBackendManager {
   GHashTable *modules;   /* owned identifiers, borrowed resident descriptors */
   GHashTable *backends;  /* owned identifiers and monitor instances */
   gboolean started;
+  gboolean reconciling;
+  gboolean invalidated_during_reconcile;
   GHashTable *sessions; /* owned composite keys and session claims */
   GHashTable *reported; /* borrowed monitors with valid discovery reports */
   RclBackend *owner; /* borrowed */
@@ -76,7 +78,7 @@ static gboolean reconcile_cb(gpointer data);
 static void
 schedule_reconcile(RclBackendManager *self)
 {
-  if (self->started && !self->reconcile_id)
+  if (self->started && !self->reconciling && !self->reconcile_id)
     self->reconcile_id = g_timeout_add(250, reconcile_cb, self);
 }
 
@@ -142,6 +144,23 @@ ensure_session_instance(RclBackendManager *self, RclSessionClaim *claim)
   return TRUE;
 }
 
+static void
+sessions_invalidated(RclBackend *backend, gpointer data)
+{
+  RclBackendManager *self = data;
+  (void) backend;
+
+  if (!self->started)
+    return;
+  /* Invalidate the whole discovery round, without deleting instances. */
+  set_owner(self, NULL);
+  g_hash_table_remove_all(self->reported);
+  if (self->reconciling)
+    self->invalidated_during_reconcile = TRUE;
+  else
+    schedule_reconcile(self);
+}
+
 static gboolean
 reconcile_cb(gpointer data)
 {
@@ -155,12 +174,22 @@ reconcile_cb(gpointer data)
   if (!self->started)
     return G_SOURCE_REMOVE;
 
-  /* Retain and start inactive instances, but count only active claims
-   * for system-wide ownership. Readiness alone is not authorization. */
+  /* A debounce only coalesces events; it cannot certify that the
+   * independent discovery reports are current. Refresh every configured
+   * monitor in this round, with writes disabled until it completes. */
+  self->reconciling = TRUE;
+  self->invalidated_during_reconcile = FALSE;
+  set_owner(self, NULL);
+  g_hash_table_remove_all(self->reported);
+  g_hash_table_iter_init(&iter, self->backends);
+  while (g_hash_table_iter_next(&iter, NULL, &value))
+    rcl_backend_refresh(value);
+
   g_hash_table_iter_init(&iter, self->sessions);
   while (g_hash_table_iter_next(&iter, NULL, &value))
   {
     RclSessionClaim *claim = value;
+    ensure_session_instance(self, claim);
     if (claim->active)
     {
       active_count++;
@@ -168,21 +197,22 @@ reconcile_cb(gpointer data)
     }
   }
 
-  if (active_count != 1 ||
-      g_hash_table_size(self->reported) != g_hash_table_size(self->backends) ||
-      g_hash_table_size(self->backends) != (HAVE_GNOME_BACKEND + HAVE_PLASMA6_BACKEND))
-    set_owner(self, NULL);
+  if (active_count == 1 &&
+      !self->invalidated_during_reconcile &&
+      g_hash_table_size(self->reported) == g_hash_table_size(self->backends) &&
+      g_hash_table_size(self->backends) == (HAVE_GNOME_BACKEND + HAVE_PLASMA6_BACKEND) &&
+      candidate->instance)
+  {
+    /* A readiness report from a previous transition cannot grant writes. */
+    candidate->ready = FALSE;
+    rcl_backend_refresh(candidate->instance);
+    if (candidate->ready && !self->invalidated_during_reconcile)
+      set_owner(self, candidate->instance);
+  }
 
-  g_hash_table_iter_init(&iter, self->sessions);
-  while (g_hash_table_iter_next(&iter, NULL, &value))
-    ensure_session_instance(self, value);
-
-  if (active_count != 1 ||
-      g_hash_table_size(self->reported) != g_hash_table_size(self->backends) ||
-      g_hash_table_size(self->backends) != (HAVE_GNOME_BACKEND + HAVE_PLASMA6_BACKEND))
-    return G_SOURCE_REMOVE;
-
-  set_owner(self, candidate->ready ? candidate->instance : NULL);
+  self->reconciling = FALSE;
+  if (self->invalidated_during_reconcile)
+    schedule_reconcile(self);
   return G_SOURCE_REMOVE;
 }
 
@@ -341,7 +371,9 @@ rcl_backend_manager_load(RclBackendManager *self, const gchar *id,
   if (!backend)
     return FALSE;
   if (!g_signal_lookup("active-session-changed", G_OBJECT_TYPE(backend)) ||
-      !g_signal_lookup("sessions-changed", G_OBJECT_TYPE(backend)))
+      !g_signal_lookup("sessions-changed", G_OBJECT_TYPE(backend)) ||
+      !g_signal_lookup("sessions-invalidated", G_OBJECT_TYPE(backend)) ||
+      !RCL_BACKEND_GET_IFACE(backend)->refresh)
   {
     g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
                 "Desktop backend %s does not report active sessions", id);
@@ -350,6 +382,8 @@ rcl_backend_manager_load(RclBackendManager *self, const gchar *id,
   }
   g_signal_connect(backend, "sessions-changed",
                    G_CALLBACK(sessions_changed), self);
+  g_signal_connect(backend, "sessions-invalidated",
+                   G_CALLBACK(sessions_invalidated), self);
   g_hash_table_insert(self->modules, g_strdup(id), (gpointer) descriptor);
   g_hash_table_insert(self->backends, g_strdup(id), backend);
   return TRUE;
