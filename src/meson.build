@@ -23,15 +23,34 @@ localed_inc = [
   include_directories('.'),
 ]
 
-executable(
+# Only the native desktop module ABI may resolve symbols from the daemon.
+# The no-backend build has no host API to export.
+have_desktop_modules = have_gnome_backend or have_plasma6_backend
+host_export_args = []
+host_export_deps = []
+host_visibility = 'hidden'
+if have_desktop_modules
+  host_export_map = join_paths(meson.current_source_dir(), 'backends', 'host-exports.map')
+  host_export_arg = '-Wl,--version-script=' + host_export_map
+  if not cc.has_link_argument(host_export_arg)
+    error('Desktop modules require linker support for the host export map')
+  endif
+  host_export_args = [host_export_arg]
+  host_export_deps = files('backends/host-exports.map')
+  host_visibility = 'default'
+endif
+
+localed_binary = executable(
   'localed',
   localed_sources,
   dependencies          : localed_deps,
   include_directories   : localed_inc,
   install               : true,
   install_dir           : get_option('libexecdir'),
-  gnu_symbol_visibility : 'default',
-  export_dynamic        : true,
+  gnu_symbol_visibility : host_visibility,
+  export_dynamic        : have_desktop_modules,
+  link_args             : host_export_args,
+  link_depends          : host_export_deps,
 )
 
 if have_gnome_backend
