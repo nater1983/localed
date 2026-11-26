@@ -81,6 +81,15 @@ rcl_session_is_graphical(GVariant *properties, const gchar **type)
  * neither a process name nor a user-controlled DISPLAY is sufficient.
  * Return a scan failure separately from a successful negative result. */
 static gboolean
+xorg_executable_is_trusted(const gchar *basename, const struct stat *st)
+{
+  return (g_strcmp0(basename, "Xorg") == 0 ||
+          g_strcmp0(basename, "Xorg (deleted)") == 0) &&
+         S_ISREG(st->st_mode) && st->st_uid == 0 &&
+         !(st->st_mode & (S_IWGRP | S_IWOTH));
+}
+
+static gboolean
 session_has_xorg(GDBusConnection *connection, guint uid,
                  const gchar *session_path, gboolean *found, GError **error)
 {
@@ -120,10 +129,8 @@ session_has_xorg(GDBusConnection *connection, guint uid,
     if (!target)
       continue;
     basename = g_path_get_basename(target);
-    if (g_strcmp0(basename, "Xorg") != 0 ||
-        stat(exe_path, &executable_stat) != 0 ||
-        !S_ISREG(executable_stat.st_mode) || executable_stat.st_uid != 0 ||
-        (executable_stat.st_mode & (S_IWGRP | S_IWOTH)))
+    if (stat(exe_path, &executable_stat) != 0 ||
+        !xorg_executable_is_trusted(basename, &executable_stat))
       continue;
 
     reply = rcl_session_get_by_pid(connection, (guint) pid, 2000, &lookup_error);
@@ -161,10 +168,14 @@ session_has_xorg(GDBusConnection *connection, guint uid,
   return TRUE;
 }
 
-gboolean
-rcl_session_resolve_graphical(GDBusConnection *connection, GVariant *properties,
-                              guint uid, const gchar *session_path,
-                              const gchar **type, GError **error)
+typedef gboolean (*XorgProbe)(GDBusConnection *, guint, const gchar *,
+                              gboolean *, GError **);
+
+static gboolean
+resolve_graphical_with_probe(GDBusConnection *connection, GVariant *properties,
+                             guint uid, const gchar *session_path,
+                             const gchar **type, GError **error,
+                             XorgProbe probe)
 {
   const gchar *value = NULL;
   gboolean found = FALSE;
@@ -186,11 +197,20 @@ rcl_session_resolve_graphical(GDBusConnection *connection, GVariant *properties,
                         "Console session verification requires logind");
     return FALSE;
   }
-  if (!session_has_xorg(connection, uid, session_path, &found, error))
+  if (!probe(connection, uid, session_path, &found, error))
     return FALSE;
   if (found)
     *type = "x11";
   return TRUE;
+}
+
+gboolean
+rcl_session_resolve_graphical(GDBusConnection *connection, GVariant *properties,
+                              guint uid, const gchar *session_path,
+                              const gchar **type, GError **error)
+{
+  return resolve_graphical_with_probe(connection, properties, uid, session_path,
+                                      type, error, session_has_xorg);
 }
 
 /* Only an unambiguous active local user session may drive
