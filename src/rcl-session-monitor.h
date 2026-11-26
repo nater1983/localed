@@ -16,4 +16,6 @@ void rcl_session_monitor_stop(RclSessionMonitor *self);
 void rcl_session_monitor_free(RclSessionMonitor *self);
 GDBusConnection *rcl_session_monitor_get_connection(RclSessionMonitor *self);
 gboolean rcl_session_monitor_is_available(RclSessionMonitor *self);
+/* Retry an incomplete session scan after a bounded delay. */
+void rcl_session_monitor_retry_refresh(RclSessionMonitor *self);
 G_END_DECLS
