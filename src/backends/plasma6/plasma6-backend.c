@@ -22,6 +22,7 @@
 
 #include "plasma6-backend.h"
 #include "rcl-xkb-config.h"
+#include "rcl-session.h"
 
 #define LOGIND_NAME             "org.freedesktop.login1"
 #define LOGIND_MANAGER_PATH     "/org/freedesktop/login1"
@@ -909,25 +910,11 @@ session_properties_are_eligible(RclPlasma6Backend *self,
                                 guint uid,
                                 ActiveSession *session)
 {
-  gboolean active = FALSE;
-  gboolean remote = TRUE;
-  const gchar *session_class = NULL;
   const gchar *session_type = NULL;
   const gchar *desktop = NULL;
 
-  if (!g_variant_lookup(properties, "Active", "b", &active) || !active)
-    return FALSE;
-
-  if (!g_variant_lookup(properties, "Remote", "b", &remote) || remote)
-    return FALSE;
-
-  if (!g_variant_lookup(properties, "Class", "&s", &session_class) ||
-      g_strcmp0(session_class, "user") != 0)
-    return FALSE;
-
-  if (!g_variant_lookup(properties, "Type", "&s", &session_type) ||
-      (g_strcmp0(session_type, "x11") != 0 &&
-       g_strcmp0(session_type, "wayland") != 0))
+  if (!rcl_session_is_active_local_user(properties, seat_from_manager) ||
+      !rcl_session_is_graphical(properties, &session_type))
     return FALSE;
 
   if (g_variant_lookup(properties, "Desktop", "&s", &desktop) &&
@@ -946,10 +933,6 @@ session_properties_are_eligible(RclPlasma6Backend *self,
     }
     desktop = "Plasma 6 (verified by session process)";
   }
-
-  /* A seat-less session is not a local physical-seat desktop session. */
-  if (!seat_from_manager || !*seat_from_manager)
-    return FALSE;
 
   session->seat = g_strdup(seat_from_manager);
   session->session_type = g_strdup(session_type);
