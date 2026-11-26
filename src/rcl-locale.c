@@ -1005,6 +1005,20 @@ rcl_read_lang_sh( const gchar *path )
  *
  * The write is atomic (temp file + rename).
  */
+/* Compare generated content against the actual file, not cached state. */
+static gboolean
+locale_file_matches(const gchar *path, const GString *desired)
+{
+  GStatBuf st;
+  g_autofree gchar *contents = NULL;
+  gsize length = 0;
+
+  return g_lstat(path, &st) == 0 && S_ISREG(st.st_mode) &&
+         g_file_get_contents(path, &contents, &length, NULL) &&
+         length == desired->len &&
+         memcmp(contents, desired->str, length) == 0;
+}
+
 static gboolean
 rcl_write_lang_sh( const gchar         *path,
                    const gchar *const  *known_keys,
@@ -1131,6 +1145,12 @@ rcl_write_lang_sh( const gchar         *path,
 
   g_hash_table_unref( new_vals );
 
+  if (locale_file_matches(path, out))
+  {
+    g_string_free(out, TRUE);
+    return TRUE;
+  }
+
   tmp_path = g_strdup_printf( "%s.XXXXXX", path );
   {
     int fd = g_mkstemp( tmp_path );
@@ -1233,6 +1253,12 @@ rcl_write_lang_csh( const gchar         *path,
   g_string_append(out, "# End of /etc/profile.d/lang.csh\n");
 
   g_hash_table_unref(values);
+
+  if (locale_file_matches(path, out))
+  {
+    g_string_free(out, TRUE);
+    return TRUE;
+  }
 
   tmp_path = g_strdup_printf("%s.XXXXXX", path);
   {
