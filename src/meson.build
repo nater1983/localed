@@ -34,7 +34,7 @@ executable(
   export_dynamic        : true,
 )
 
-if get_option('desktop-backend') == 'gnome'
+if have_gnome_backend
   gnome_module = shared_module(
     'gnome',
     'backends/gnome/gnome-backend.c',
@@ -47,7 +47,9 @@ if get_option('desktop-backend') == 'gnome'
     install               : true,
     install_dir           : backend_module_dir,
   )
-elif get_option('desktop-backend') == 'plasma6'
+endif
+
+if have_plasma6_backend
   plasma_module = shared_module(
     'plasma',
     'backends/plasma6/plasma6-backend.c',
@@ -64,11 +66,13 @@ endif
 
 input_sources_helper_sources = files('backends/input-sources-helper.c')
 
-if get_option('desktop-backend') == 'gnome'
+if have_gnome_backend
   input_sources_helper_sources += files(
     'backends/gnome/gnome-input-sources-helper.c',
   )
-elif get_option('desktop-backend') == 'plasma6'
+endif
+
+if have_plasma6_backend
   input_sources_helper_sources += files(
     'backends/plasma6/plasma6-input-sources-helper.c',
   )
