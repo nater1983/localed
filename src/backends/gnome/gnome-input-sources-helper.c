@@ -18,6 +18,8 @@
 #include <stdio.h>
 #include <glib.h>
 
+#include "gnome-input-sources-helper.h"
+
 static void
 emit_settings(GSettings *settings)
 {
