@@ -23,10 +23,6 @@ localed_inc = [
   include_directories('.'),
 ]
 
-if get_option('desktop-backend') == 'plasma6'
-  localed_sources += files('backends/plasma6/plasma6-backend.c')
-endif
-
 executable(
   'localed',
   localed_sources,
@@ -43,6 +39,19 @@ if get_option('desktop-backend') == 'gnome'
     'gnome',
     'backends/gnome/gnome-backend.c',
     'backends/gnome/gnome-module.c',
+    dependencies          : localed_deps,
+    include_directories   : localed_inc,
+    name_prefix           : '',
+    gnu_symbol_visibility : 'hidden',
+    override_options      : ['b_lundef=false'],
+    install               : true,
+    install_dir           : backend_module_dir,
+  )
+elif get_option('desktop-backend') == 'plasma6'
+  plasma_module = shared_module(
+    'plasma',
+    'backends/plasma6/plasma6-backend.c',
+    'backends/plasma6/plasma6-module.c',
     dependencies          : localed_deps,
     include_directories   : localed_inc,
     name_prefix           : '',
