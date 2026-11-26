@@ -8,6 +8,7 @@ typedef struct {
   RclBackend *monitor;
   RclBackend *instance; /* owned, bound to this identity */
   gboolean ready;
+  gboolean active; /* reported activity, independent of instance readiness */
   gchar *module_id;
   gchar *id;
   gchar *path;
@@ -147,33 +148,41 @@ reconcile_cb(gpointer data)
   RclBackendManager *self = data;
   GHashTableIter iter;
   gpointer value;
-  RclSessionClaim *claim;
+  RclSessionClaim *candidate = NULL;
+  guint active_count = 0;
 
   self->reconcile_id = 0;
   if (!self->started)
     return G_SOURCE_REMOVE;
 
-  /* Every discovered session gets its own instance, even while writes
-   * are blocked by competing claims. */
-  if (g_hash_table_size(self->sessions) != 1)
+  /* Retain and start inactive instances, but count only active claims
+   * for system-wide ownership. Readiness alone is not authorization. */
+  g_hash_table_iter_init(&iter, self->sessions);
+  while (g_hash_table_iter_next(&iter, NULL, &value))
+  {
+    RclSessionClaim *claim = value;
+    if (claim->active)
+    {
+      active_count++;
+      candidate = claim;
+    }
+  }
+
+  if (active_count != 1 ||
+      g_hash_table_size(self->reported) != g_hash_table_size(self->backends) ||
+      g_hash_table_size(self->backends) != (HAVE_GNOME_BACKEND + HAVE_PLASMA6_BACKEND))
     set_owner(self, NULL);
 
   g_hash_table_iter_init(&iter, self->sessions);
   while (g_hash_table_iter_next(&iter, NULL, &value))
     ensure_session_instance(self, value);
 
-  if (g_hash_table_size(self->sessions) != 1 ||
+  if (active_count != 1 ||
       g_hash_table_size(self->reported) != g_hash_table_size(self->backends) ||
       g_hash_table_size(self->backends) != (HAVE_GNOME_BACKEND + HAVE_PLASMA6_BACKEND))
-  {
-    set_owner(self, NULL);
     return G_SOURCE_REMOVE;
-  }
 
-  g_hash_table_iter_init(&iter, self->sessions);
-  g_hash_table_iter_next(&iter, NULL, &value);
-  claim = value;
-  set_owner(self, claim->ready ? claim->instance : NULL);
+  set_owner(self, candidate->ready ? candidate->instance : NULL);
   return G_SOURCE_REMOVE;
 }
 
@@ -188,7 +197,7 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
   const gchar *id, *path;
   guint uid;
   gboolean changed = FALSE;
-  gboolean valid;
+  gboolean valid, active;
   g_autoptr(GHashTable) seen =
     g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
@@ -207,11 +216,11 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
 
   /* Validate the entire batch before altering any claims. NULL indicates
    * discovery failure, not a successful report of zero sessions. */
-  valid = snapshot && g_variant_is_of_type(snapshot, G_VARIANT_TYPE("a(uso)"));
+  valid = snapshot && g_variant_is_of_type(snapshot, G_VARIANT_TYPE("a(usob)"));
   if (valid)
   {
     g_variant_iter_init(&entries, snapshot);
-    while (g_variant_iter_next(&entries, "(u&s&o)", &uid, &id, &path))
+    while (g_variant_iter_next(&entries, "(u&s&ob)", &uid, &id, &path, &active))
     {
       if (!*id || !g_str_has_prefix(path, "/org/freedesktop/login1/session/") ||
           !g_hash_table_add(seen, g_strdup(path)))
@@ -233,7 +242,7 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
   if (valid)
   {
     g_variant_iter_init(&entries, snapshot);
-    while (g_variant_iter_next(&entries, "(u&s&o)", &uid, &id, &path))
+    while (g_variant_iter_next(&entries, "(u&s&ob)", &uid, &id, &path, &active))
     {
       g_autofree gchar *session_key = NULL;
       RclSessionClaim *claim;
@@ -243,7 +252,15 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
       claim = g_hash_table_lookup(self->sessions, session_key);
 
       if (claim && claim->uid == uid && g_strcmp0(claim->id, id) == 0)
+      {
+        if (claim->active != active)
+        {
+          set_owner(self, NULL);
+          changed = TRUE;
+          claim->active = active;
+        }
         continue;
+      }
 
       set_owner(self, NULL);
       changed = TRUE;
@@ -256,6 +273,7 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
       claim->id = g_strdup(id);
       claim->path = g_strdup(path);
       claim->uid = uid;
+      claim->active = active;
       g_hash_table_replace(self->sessions, g_steal_pointer(&session_key), claim);
     }
   }
