@@ -60,18 +60,6 @@ rcl_backend_manager_load(RclBackendManager *self, const gchar *id,
 }
 
 gboolean
-rcl_backend_manager_set_builtin(RclBackendManager *self, RclBackend *backend,
-                                GError **error)
-{
-  g_return_val_if_fail(self != NULL, FALSE);
-  g_return_val_if_fail(RCL_IS_BACKEND(backend), FALSE);
-  if (!can_attach(self, error))
-    return FALSE;
-  self->backend = g_object_ref(backend);
-  return TRUE;
-}
-
-gboolean
 rcl_backend_manager_start(RclBackendManager *self, GError **error)
 {
   g_return_val_if_fail(self != NULL, FALSE);
