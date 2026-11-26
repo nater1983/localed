@@ -427,6 +427,7 @@ start_settings_helper(RclPlasma6Backend *self)
   argv[argc++] = "--no-new-privs";
   argv[argc++] = "--";
   argv[argc++] = RCL_INPUT_SOURCES_HELPER;
+  argv[argc++] = "plasma6";
   argv[argc] = NULL;
 
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE);
