@@ -7,12 +7,14 @@ localed_sources = files(
   'rcl-xkb-config.c',
   'rcl-locale.c',
   'backends/backend-interface.c',
+  'backends/backend-module.c',
 )
 
 localed_deps = [
   glib_dep,
   gio_dep,
   gio_unix,
+  gmodule_dep,
 ]
 
 localed_inc = [
