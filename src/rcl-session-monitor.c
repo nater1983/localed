@@ -39,6 +39,14 @@ schedule_refresh(RclSessionMonitor *self)
                                    refresh_timeout_cb, self);
 }
 
+void
+rcl_session_monitor_retry_refresh(RclSessionMonitor *self)
+{
+  if (self->stopping || !self->logind_available || self->refresh_id)
+    return;
+  self->refresh_id = g_timeout_add(RECONNECT_DELAY_MS, refresh_timeout_cb, self);
+}
+
 static void
 manager_signal_cb(GDBusConnection *connection,
                   const gchar *sender_name,
