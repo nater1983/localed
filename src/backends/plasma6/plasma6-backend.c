@@ -774,7 +774,7 @@ query_session(RclPlasma6Backend *self,
               const gchar *id,
               guint uid,
               const gchar *seat,
-              const gchar *object_path)
+              const gchar *object_path, gboolean *failed)
 {
   GVariant *reply = NULL;
   GVariant *properties = NULL;
@@ -786,6 +786,7 @@ query_session(RclPlasma6Backend *self,
 
   if (!reply)
   {
+    *failed = TRUE;
     g_debug("could not inspect logind session %s: %s",
             id, error ? error->message : "unknown error");
     g_clear_error(&error);
@@ -855,6 +856,7 @@ refresh_sessions(RclPlasma6Backend *self)
   ActiveSession *candidate = NULL;
   guint eligible_count = 0;
   GVariantBuilder discovered;
+  gboolean failed = FALSE;
   GError *error = NULL;
 
   if (self->stopping || !rcl_session_monitor_is_available(self->monitor) || !rcl_session_monitor_get_connection(self->monitor))
@@ -872,10 +874,10 @@ refresh_sessions(RclPlasma6Backend *self)
     active_session_free(self->active);
     self->active = NULL;
     emit_active_session_changed(self);
+    g_variant_builder_clear(&discovered);
     if (!self->bound_path)
-      emit_discovered_sessions(G_OBJECT(self), &discovered);
-    else
-      g_variant_builder_clear(&discovered);
+      g_signal_emit(self, signals[SIGNAL_SESSIONS_CHANGED], 0, NULL);
+    rcl_session_monitor_retry_refresh(self->monitor);
     return;
   }
 
@@ -894,7 +896,11 @@ refresh_sessions(RclPlasma6Backend *self)
         g_strcmp0(object_path, self->bound_path) != 0))
       continue;
 
-    found = query_session(self, id, uid, seat, object_path);
+    if (!*seat)
+      continue;
+    found = query_session(self, id, uid, seat, object_path, &failed);
+    if (failed)
+      break;
     if (!found)
       continue;
 
@@ -907,7 +913,15 @@ refresh_sessions(RclPlasma6Backend *self)
       active_session_free(found);
   }
 
-  if (!self->bound_path)
+  if (failed)
+  {
+    g_variant_builder_clear(&discovered);
+    if (!self->bound_path)
+      g_signal_emit(self, signals[SIGNAL_SESSIONS_CHANGED], 0, NULL);
+    rcl_session_monitor_retry_refresh(self->monitor);
+    eligible_count = 0;
+  }
+  else if (!self->bound_path)
     emit_discovered_sessions(G_OBJECT(self), &discovered);
   else
     g_variant_builder_clear(&discovered);
@@ -961,11 +975,7 @@ monitor_lost(gpointer user_data)
 
   stop_settings_helper(self);
   if (!self->bound_path)
-  {
-    GVariantBuilder empty;
-    g_variant_builder_init(&empty, G_VARIANT_TYPE("a(uso)"));
-    emit_discovered_sessions(G_OBJECT(self), &empty);
-  }
+    g_signal_emit(self, signals[SIGNAL_SESSIONS_CHANGED], 0, NULL);
   if (self->active)
   {
     active_session_free(self->active);
