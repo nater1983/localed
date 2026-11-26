@@ -23,4 +23,13 @@ GVariant *rcl_session_get_properties(GDBusConnection *connection,
 GVariant *rcl_session_get_by_pid(GDBusConnection *connection, guint pid,
                                  gint timeout_ms, GError **error);
 
+/* The backend supplies its desktop environment predicate. The returned
+ * address is owned by the caller. Abstract sockets cannot be stat-checked. */
+typedef gboolean (*RclSessionEnvironmentMatches)(const gchar *environment,
+                                                  gsize length);
+gchar *rcl_session_find_bus_address(GDBusConnection *connection, guint uid,
+                                    const gchar *session_path,
+                                    RclSessionEnvironmentMatches matches,
+                                    gboolean allow_abstract);
+
 G_END_DECLS
