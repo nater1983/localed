@@ -18,6 +18,7 @@ typedef struct { GObjectClass parent; } FakeBackendClass;
 
 static gboolean candidate_ready;
 static guint enabled_count;
+GType fake_backend_get_type(void);
 static void fake_iface_init(RclBackendInterface *iface);
 G_DEFINE_TYPE_WITH_CODE(FakeBackend, fake_backend, G_TYPE_OBJECT,
                        G_IMPLEMENT_INTERFACE(RCL_TYPE_BACKEND, fake_iface_init))
