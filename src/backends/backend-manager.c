@@ -35,6 +35,7 @@ struct _RclBackendManager {
   GHashTable *backends;  /* owned identifiers and monitor instances */
   gboolean started;
   GHashTable *sessions; /* owned composite keys and session claims */
+  GHashTable *reported; /* borrowed monitors with valid discovery reports */
   RclBackend *owner; /* borrowed */
   guint reconcile_id;
 };
@@ -51,6 +52,7 @@ rcl_backend_manager_new(RclLocaleDaemon *daemon)
                                         g_free, g_object_unref);
   self->sessions = g_hash_table_new_full(g_str_hash, g_str_equal,
                                         g_free, session_claim_free);
+  self->reported = g_hash_table_new(g_direct_hash, g_direct_equal);
   return self;
 }
 
@@ -160,8 +162,13 @@ reconcile_cb(gpointer data)
   while (g_hash_table_iter_next(&iter, NULL, &value))
     ensure_session_instance(self, value);
 
-  if (g_hash_table_size(self->sessions) != 1)
+  if (g_hash_table_size(self->sessions) != 1 ||
+      g_hash_table_size(self->reported) != g_hash_table_size(self->backends) ||
+      g_hash_table_size(self->backends) != (HAVE_GNOME_BACKEND + HAVE_PLASMA6_BACKEND))
+  {
+    set_owner(self, NULL);
     return G_SOURCE_REMOVE;
+  }
 
   g_hash_table_iter_init(&iter, self->sessions);
   g_hash_table_iter_next(&iter, NULL, &value);
@@ -181,6 +188,7 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
   const gchar *id, *path;
   guint uid;
   gboolean changed = FALSE;
+  gboolean valid;
   g_autoptr(GHashTable) seen =
     g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
@@ -197,17 +205,38 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
   if (!module_id)
     return;
 
-  /* A malformed report must not leave stale authorization behind. */
-  if (snapshot && g_variant_is_of_type(snapshot, G_VARIANT_TYPE("a(uso)")))
+  /* Validate the entire batch before altering any claims. NULL indicates
+   * discovery failure, not a successful report of zero sessions. */
+  valid = snapshot && g_variant_is_of_type(snapshot, G_VARIANT_TYPE("a(uso)"));
+  if (valid)
+  {
+    g_variant_iter_init(&entries, snapshot);
+    while (g_variant_iter_next(&entries, "(u&s&o)", &uid, &id, &path))
+    {
+      if (!*id || !g_str_has_prefix(path, "/org/freedesktop/login1/session/") ||
+          !g_hash_table_add(seen, g_strdup(path)))
+      {
+        valid = FALSE;
+        break;
+      }
+    }
+    g_hash_table_remove_all(seen);
+  }
+  if (!valid)
+  {
+    g_hash_table_remove(self->reported, backend);
+    set_owner(self, NULL);
+  }
+  else
+    g_hash_table_add(self->reported, backend);
+
+  if (valid)
   {
     g_variant_iter_init(&entries, snapshot);
     while (g_variant_iter_next(&entries, "(u&s&o)", &uid, &id, &path))
     {
       g_autofree gchar *session_key = NULL;
       RclSessionClaim *claim;
-
-      if (!*id || !g_str_has_prefix(path, "/org/freedesktop/login1/session/"))
-        continue;
 
       session_key = g_strdup_printf("%s:%s", module_id, path);
       g_hash_table_add(seen, g_strdup(session_key));
@@ -357,6 +386,7 @@ rcl_backend_manager_stop(RclBackendManager *self)
       g_signal_handlers_disconnect_by_data(claim->instance, self);
   }
   g_hash_table_remove_all(self->sessions);
+  g_hash_table_remove_all(self->reported);
   g_hash_table_iter_init(&iter, self->backends);
   while (g_hash_table_iter_next(&iter, NULL, &backend))
     rcl_backend_stop(backend);
@@ -374,6 +404,7 @@ rcl_backend_manager_free(RclBackendManager *self)
   while (g_hash_table_iter_next(&iter, NULL, &backend))
     g_signal_handlers_disconnect_by_data(backend, self);
   g_hash_table_unref(self->sessions);
+  g_hash_table_unref(self->reported);
   g_hash_table_unref(self->backends);
   g_hash_table_unref(self->modules);
   g_free(self);
