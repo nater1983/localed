@@ -147,3 +147,11 @@ test(
   args : [files('backends/test-host-exports.sh'), nm_program.full_path(),
           localed_binary] + host_export_modules,
 )
+
+session_classification_test = executable(
+  'test-session',
+  'test-session.c',
+  dependencies : [glib_dep, gio_dep],
+  include_directories : include_directories('../src'),
+)
+test('console graphical session classification', session_classification_test)
