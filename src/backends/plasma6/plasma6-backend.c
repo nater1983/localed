@@ -50,6 +50,7 @@ struct _RclPlasma6Backend
   RclLocaleDaemon *daemon; /* borrowed; owned by the main daemon state */
 
   gboolean stopping;
+  gboolean write_enabled;
 
   ActiveSession *active;
 };
@@ -161,7 +162,7 @@ apply_plasma6_settings(RclPlasma6Backend *self, const gchar *line)
   gsize n_layouts = 0, n_variants = 0;
   GError *error = NULL;
 
-  if (!self->active || self->stopping ||
+  if (!self->write_enabled || !self->active || self->stopping ||
       !rcl_session_is_unique_active_graphical(
           rcl_session_monitor_get_connection(self->monitor),
           self->active->uid, self->active->object_path))
@@ -1024,10 +1025,23 @@ rcl_plasma6_backend_iface_stop(RclBackend *backend)
   rcl_plasma6_backend_stop(RCL_PLASMA6_BACKEND(backend));
 }
 static void
+rcl_plasma6_backend_iface_set_write_enabled(RclBackend *backend, gboolean enabled)
+{
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(backend);
+  if (self->write_enabled == enabled)
+    return;
+  self->write_enabled = enabled;
+  /* Discard queued data and request a fresh snapshot on ownership changes. */
+  if (!self->stopping && self->active)
+    restart_settings_helper(self);
+}
+
+static void
 rcl_plasma6_backend_iface_init(RclBackendInterface *iface)
 {
   iface->start = rcl_plasma6_backend_iface_start;
   iface->stop = rcl_plasma6_backend_iface_stop;
+  iface->set_write_enabled = rcl_plasma6_backend_iface_set_write_enabled;
 }
 RclBackend *
 rcl_plasma6_backend_new(RclLocaleDaemon *daemon)
@@ -1037,5 +1051,6 @@ rcl_plasma6_backend_new(RclLocaleDaemon *daemon)
   g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
   self = g_object_new(RCL_TYPE_PLASMA6_BACKEND, NULL);
   self->daemon = daemon;
+  self->write_enabled = FALSE;
   return RCL_BACKEND(self);
 }
