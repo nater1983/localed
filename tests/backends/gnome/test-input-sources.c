@@ -69,11 +69,46 @@ test_input_sources_start_stop(void)
   g_object_unref(bus);
 }
 
+static void
+test_session_binding(void)
+{
+  const gchar *path = "/org/freedesktop/login1/session/_31";
+  RclLocaleDaemon *daemon = g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
+  RclBackend *first = rcl_gnome_backend_new(daemon);
+  RclBackend *second = rcl_gnome_backend_new(daemon);
+  GError *error = NULL;
+
+  g_assert_true(first != second);
+  g_assert_false(rcl_backend_bind_session(first, 1000, "", path, &error));
+  g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+  g_clear_error(&error);
+  g_assert_false(rcl_backend_bind_session(first, 1000, "1", "/wrong", &error));
+  g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+  g_clear_error(&error);
+  g_assert_true(rcl_backend_bind_session(first, 1000, "1", path, &error));
+  g_assert_no_error(error);
+  g_assert_false(rcl_backend_bind_session(first, 1001, "2",
+      "/org/freedesktop/login1/session/_32", &error));
+  g_assert_error(error, G_IO_ERROR, G_IO_ERROR_BUSY);
+  g_clear_error(&error);
+  g_assert_true(rcl_backend_bind_session(second, 1001, "2",
+      "/org/freedesktop/login1/session/_32", &error));
+  g_assert_no_error(error);
+  rcl_backend_stop(first);
+  g_assert_false(rcl_backend_bind_session(first, 1000, "1", path, &error));
+  g_assert_error(error, G_IO_ERROR, G_IO_ERROR_BUSY);
+  g_clear_error(&error);
+  g_object_unref(first);
+  g_object_unref(second);
+  g_object_unref(daemon);
+}
+
 int
 main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
   g_test_add_func("/input-sources/snapshot-format", test_input_sources_snapshot_format);
   g_test_add_func("/input-sources/start-stop", test_input_sources_start_stop);
+  g_test_add_func("/input-sources/session-binding", test_session_binding);
   return g_test_run();
 }
