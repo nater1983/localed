@@ -421,6 +421,7 @@ start_settings_helper(RclGnomeBackend *self)
   argv[argc++] = "--no-new-privs";
   argv[argc++] = "--";
   argv[argc++] = RCL_INPUT_SOURCES_HELPER;
+  argv[argc++] = "gnome";
   argv[argc] = NULL;
 
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE);
