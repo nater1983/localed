@@ -12,6 +12,13 @@ gboolean rcl_session_is_active_local_user(GVariant *properties,
                                           const gchar *seat);
 gboolean rcl_session_is_graphical(GVariant *properties,
                                   const gchar **type);
+/* Resolve x11/wayland, including a verified Xorg server in a TTY session.
+ * TRUE with *type == NULL means non-graphical; FALSE means inspection failed.
+ * The returned type is borrowed or a static string. */
+gboolean rcl_session_resolve_graphical(GDBusConnection *connection,
+                                       GVariant *properties, guint uid,
+                                       const gchar *session_path,
+                                       const gchar **type, GError **error);
 gboolean rcl_session_uid_is_unique_active_local(GDBusConnection *connection,
                                                  guint64 uid);
 
