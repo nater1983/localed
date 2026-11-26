@@ -1,0 +1,31 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* Native host ABI for trusted desktop backend modules.
+ * Keep this list synchronized with the modules' undefined rcl_* symbols.
+ * All other daemon implementation symbols remain local. */
+{
+  global:
+    rcl_backend_get_type;
+    rcl_locale_daemon_get_type;
+    rcl_locale_daemon_set_vconsole_keyboard_internal;
+    rcl_locale_daemon_set_x11_keyboard_internal;
+    rcl_session_find_bus_address;
+    rcl_session_get_by_pid;
+    rcl_session_get_properties;
+    rcl_session_is_graphical;
+    rcl_session_is_local_user;
+    rcl_session_is_unique_active_graphical;
+    rcl_session_list;
+    rcl_session_monitor_free;
+    rcl_session_monitor_get_connection;
+    rcl_session_monitor_is_available;
+    rcl_session_monitor_new;
+    rcl_session_monitor_refresh_now;
+    rcl_session_monitor_retry_refresh;
+    rcl_session_monitor_set_invalidated;
+    rcl_session_monitor_start;
+    rcl_session_monitor_stop;
+    rcl_xkb_config_parse;
+    rcl_xkb_value_is_valid;
+  local:
+    *;
+};
