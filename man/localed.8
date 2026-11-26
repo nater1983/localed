@@ -21,7 +21,7 @@ systems that use
 and a D-Bus/PolKit stack without systemd.
 .PP
 .B localed
-does not poll or hold any files open for writing on its own initiative.
+does not poll configuration files or hold them open for writing on its own initiative.
 Instead it watches its source files with
 .BR inotify (7)
 and re-reads them whenever they change, regardless of who changed them
@@ -236,6 +236,51 @@ name appearance and disappearance. A PropertiesChanged signal does not
 identify its original caller, so this bridge cannot perform caller-based
 PolKit authorization. Other users must use the locale1 D-Bus methods,
 where PolKit evaluates the actual D-Bus caller.
+.SH DESKTOP INTEGRATION
+Optional GNOME and KDE Plasma 6 input-source backends are loaded as
+native GModule modules from the configured library directory.
+The
+.B desktop-backend
+Meson option accepts
+.BR none ,
+.BR gnome ,
+.BR plasma6 ,
+and
+.BR both .
+The daemon and modules must use the same internal module ABI
+(currently version 6).
+.PP
+The backend manager discovers local graphical sessions through elogind
+and binds operational instances to individual sessions.
+Only an unambiguous active local graphical session may drive automatic
+system-wide keyboard updates. Ownership is revoked when the session
+becomes inactive or verification fails.
+The single
+.B localed-input-sources-helper
+executable runs as the selected desktop user and reads desktop settings;
+the daemon performs the configuration writes.
+.PP
+Console-launched X11 desktops (for example,
+.BR startx (1))
+may retain an elogind session type of
+.BR tty .
+These sessions are eligible only after verification of the Xorg
+executable, process ownership, exact session membership and desktop
+identity. Plain console logins remain ineligible for automatic keyboard
+synchronization. Console sessions are rechecked periodically to detect
+Xorg startup and exit. Unchanged discovery results are not logged
+repeatedly.
+.PP
+GNOME uses GSettings input-source notifications; Plasma 6 uses the
+.B org.kde.KeyboardLayouts
+session D-Bus interface.
+The configured XKB layout list and the active console keymap are
+synchronized separately. Locale changes through AccountsService are
+independent of keyboard layout changes.
+.PP
+Automatic desktop synchronization requires a running daemon.
+For session D-Bus diagnostics, run client commands as the desktop user,
+not root.
 .SH FILES
 .TP
 .I /etc/profile.d/lang.sh
