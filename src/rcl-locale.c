@@ -1405,22 +1405,32 @@ rcl_daemon_sync_dbus_properties( RclLocaleDaemon *daemon )
   if( any_changed && priv->connection && priv->registration_id > 0 )
   {
     GError *err = NULL;
-    g_dbus_connection_emit_signal(
+    g_autoptr(GVariant) changed =
+      g_variant_ref_sink( g_variant_builder_end( &changed_props ) );
+
+    if( g_dbus_connection_emit_signal(
       priv->connection,
       NULL,
       "/org/freedesktop/locale1",
       "org.freedesktop.DBus.Properties",
       "PropertiesChanged",
-      g_variant_new( "(sa{sv}as)",
+      g_variant_new( "(s@a{sv}as)",
                      "org.freedesktop.locale1",
-                     &changed_props,
+                     g_variant_ref( changed ),
                      NULL ),
-      &err );
-
-    if( err )
+      &err ) )
     {
-      g_warning( "PropertiesChanged emission failed: %s", err->message );
-      g_error_free( err );
+      if( priv->debug )
+      {
+        g_autofree gchar *printed = g_variant_print( changed, TRUE );
+        g_debug( "D-Bus PropertiesChanged: %s", printed );
+      }
+    }
+    else
+    {
+      g_warning( "PropertiesChanged emission failed: %s",
+                 err ? err->message : "unknown D-Bus error" );
+      g_clear_error( &err );
     }
   }
   else
