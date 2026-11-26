@@ -55,7 +55,7 @@ xkb_config_test = executable(
 
 test('Xorg XKB configuration parsing', xkb_config_test)
 
-if get_option('desktop-backend') == 'gnome'
+if have_gnome_backend
   input_sources_test = executable(
     'test-input-sources',
     [
@@ -81,7 +81,7 @@ if get_option('desktop-backend') == 'gnome'
   
 endif
 
-if get_option('desktop-backend') == 'plasma6'
+if have_plasma6_backend
   plasma6_input_sources_test = executable(
     'test-plasma6-input-sources',
     [
