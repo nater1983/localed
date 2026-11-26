@@ -15,3 +15,13 @@ void rcl_backend_stop(RclBackend *self) {
   iface = RCL_BACKEND_GET_IFACE(self);
   if (iface->stop) iface->stop(self);
 }
+
+void
+rcl_backend_set_write_enabled(RclBackend *self, gboolean enabled)
+{
+  RclBackendInterface *iface;
+  g_return_if_fail(RCL_IS_BACKEND(self));
+  iface = RCL_BACKEND_GET_IFACE(self);
+  g_return_if_fail(iface->set_write_enabled != NULL);
+  iface->set_write_enabled(self, enabled);
+}
