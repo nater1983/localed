@@ -2,12 +2,32 @@
 #include "config.h"
 #include "backend-manager.h"
 
+/* A session claim is separate from the long-lived desktop monitor.
+ * The monitor is borrowed from backends; identity strings are owned. */
+typedef struct {
+  RclBackend *monitor;
+  gchar *module_id;
+  gchar *id;
+  gchar *path;
+  guint uid;
+} RclSessionClaim;
+
+static void
+session_claim_free(gpointer data)
+{
+  RclSessionClaim *claim = data;
+  g_free(claim->module_id);
+  g_free(claim->id);
+  g_free(claim->path);
+  g_free(claim);
+}
+
 struct _RclBackendManager {
   RclLocaleDaemon *daemon; /* borrowed */
   GHashTable *modules;   /* owned identifiers, borrowed resident descriptors */
   GHashTable *backends;  /* owned identifiers and monitor instances */
   gboolean started;
-  GHashTable *candidates; /* borrowed backend keys, owned session paths */
+  GHashTable *sessions; /* owned composite keys and session claims */
   RclBackend *owner; /* borrowed */
   guint reconcile_id;
 };
@@ -22,7 +42,8 @@ rcl_backend_manager_new(RclLocaleDaemon *daemon)
   self->modules = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
   self->backends = g_hash_table_new_full(g_str_hash, g_str_equal,
                                         g_free, g_object_unref);
-  self->candidates = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
+  self->sessions = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                        g_free, session_claim_free);
   return self;
 }
 
@@ -45,17 +66,19 @@ reconcile_cb(gpointer data)
 {
   RclBackendManager *self = data;
   GHashTableIter iter;
-  gpointer backend;
+  gpointer value;
+  RclSessionClaim *claim;
 
   self->reconcile_id = 0;
-  if (!self->started || g_hash_table_size(self->candidates) != 1)
+  if (!self->started || g_hash_table_size(self->sessions) != 1)
   {
     set_owner(self, NULL);
     return G_SOURCE_REMOVE;
   }
-  g_hash_table_iter_init(&iter, self->candidates);
-  g_hash_table_iter_next(&iter, &backend, NULL);
-  set_owner(self, backend);
+  g_hash_table_iter_init(&iter, self->sessions);
+  g_hash_table_iter_next(&iter, NULL, &value);
+  claim = value;
+  set_owner(self, claim->monitor);
   return G_SOURCE_REMOVE;
 }
 
@@ -65,8 +88,9 @@ active_session_changed(RclBackend *backend, gboolean active, guint uid,
                        const gchar *type, const gchar *desktop, gpointer data)
 {
   RclBackendManager *self = data;
-  (void) uid;
-  (void) id;
+  GHashTableIter iter;
+  gpointer key, value;
+  const gchar *module_id = NULL;
   (void) seat;
   (void) type;
   (void) desktop;
@@ -77,10 +101,33 @@ active_session_changed(RclBackend *backend, gboolean active, guint uid,
   /* Revoke immediately, then coalesce reports from both monitors.
    * No candidate may write until ownership is reconciled. */
   set_owner(self, NULL);
-  if (active && path && *path)
-    g_hash_table_replace(self->candidates, backend, g_strdup(path));
-  else
-    g_hash_table_remove(self->candidates, backend);
+  /* Replace only this monitor's previous claim. Distinct modules may
+   * claim the same session; both claims must remain visible to arbitration. */
+  g_hash_table_iter_init(&iter, self->sessions);
+  while (g_hash_table_iter_next(&iter, NULL, &value))
+    if (((RclSessionClaim *) value)->monitor == backend)
+      g_hash_table_iter_remove(&iter);
+
+  g_hash_table_iter_init(&iter, self->backends);
+  while (g_hash_table_iter_next(&iter, &key, &value))
+    if (value == backend)
+    {
+      module_id = key;
+      break;
+    }
+
+  if (module_id && active && id && *id && path &&
+      g_variant_is_object_path(path))
+  {
+    RclSessionClaim *claim = g_new0(RclSessionClaim, 1);
+    claim->monitor = backend;
+    claim->module_id = g_strdup(module_id);
+    claim->id = g_strdup(id);
+    claim->path = g_strdup(path);
+    claim->uid = uid;
+    g_hash_table_insert(self->sessions,
+                        g_strdup_printf("%s:%s", module_id, path), claim);
+  }
 
   if (!self->reconcile_id)
     self->reconcile_id = g_timeout_add(250, reconcile_cb, self);
@@ -184,7 +231,7 @@ rcl_backend_manager_stop(RclBackendManager *self)
     self->reconcile_id = 0;
   }
   set_owner(self, NULL);
-  g_hash_table_remove_all(self->candidates);
+  g_hash_table_remove_all(self->sessions);
   g_hash_table_iter_init(&iter, self->backends);
   while (g_hash_table_iter_next(&iter, NULL, &backend))
     rcl_backend_stop(backend);
@@ -201,7 +248,7 @@ rcl_backend_manager_free(RclBackendManager *self)
   g_hash_table_iter_init(&iter, self->backends);
   while (g_hash_table_iter_next(&iter, NULL, &backend))
     g_signal_handlers_disconnect_by_data(backend, self);
-  g_hash_table_unref(self->candidates);
+  g_hash_table_unref(self->sessions);
   g_hash_table_unref(self->backends);
   g_hash_table_unref(self->modules);
   g_free(self);
