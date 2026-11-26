@@ -24,9 +24,8 @@ The daemon follows the same general service pattern as
 - Does not require systemd; it uses D-Bus and a logind-compatible session
   manager for desktop session discovery.
 
-The Plasma 6 backend reads the system locale from `[Formats] LANG` in
-`~/.config/plasma-localerc`, not the translation preference list in
-`[Translations] LANGUAGE`. Missing or invalid `LANG` values are skipped.
+GNOME and Plasma 6 use AccountsService for automatic primary locale
+synchronization. Neither desktop backend monitors locale configuration files.
 
 ## Dependencies
 
@@ -312,8 +311,12 @@ guessing.
 
 When `org.freedesktop.Accounts` is available on the system bus, `localed`
 subscribes to account `Language` property changes and applies them for
-accounts in the configured privileged group (default: `wheel`). The
-monitor is optional and reconnects when AccountsService appears or restarts.
+accounts in the configured privileged group (default: `wheel`) with the
+only active local graphical user session. The monitor reconnects when
+AccountsService appears or restarts. Without AccountsService, automatic
+desktop locale synchronization is unavailable; manual locale changes
+through locale1 remain supported. Plasma 6.7.6 was runtime-tested with
+SetLanguage; other Plasma versions have not yet been runtime-verified.
 Because D-Bus property-change signals do not identify the original caller,
 this integration cannot perform caller-based Polkit authorization. Other
 users should request system-wide changes through the
