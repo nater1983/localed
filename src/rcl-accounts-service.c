@@ -45,7 +45,7 @@ static gboolean uid_in_privileged_group(guint64 uid)
   return found;
 }
 
-/* Only an unambiguous active local graphical user session may drive
+/* Only an unambiguous active local user session may drive
  * automatic system locale synchronization. Fail closed if logind cannot
  * establish the session state. */
 static gboolean
@@ -71,7 +71,7 @@ uid_has_active_local_session(GDBusConnection *connection, guint64 uid)
                              &user, &seat, &path)) {
     g_autoptr(GVariant) result = NULL;
     g_autoptr(GVariant) props = NULL;
-    const gchar *type = NULL, *klass = NULL;
+    const gchar *klass = NULL;
     gboolean active = FALSE, remote = TRUE;
 
     if (!*seat)
@@ -86,9 +86,7 @@ uid_has_active_local_session(GDBusConnection *connection, guint64 uid)
     if (!g_variant_lookup(props, "Active", "b", &active) || !active ||
         !g_variant_lookup(props, "Remote", "b", &remote) || remote ||
         !g_variant_lookup(props, "Class", "&s", &klass) ||
-        g_strcmp0(klass, "user") != 0 ||
-        !g_variant_lookup(props, "Type", "&s", &type) ||
-        (g_strcmp0(type, "x11") != 0 && g_strcmp0(type, "wayland") != 0))
+        g_strcmp0(klass, "user") != 0)
       continue;
     eligible++;
     matches = session_uid == uid;
@@ -142,7 +140,7 @@ static void properties_changed(GDBusConnection *connection, const gchar *sender,
   }
   if (!uid_has_active_local_session(connection, uid)) {
     g_debug("ignoring AccountsService language change for uid %" G_GUINT64_FORMAT
-            ": no unambiguous active local graphical session", uid);
+            ": no unambiguous active local user session", uid);
     goto out;
   }
   if (!rcl_locale_daemon_set_language_from_accounts(self->daemon, language, &error)) {
