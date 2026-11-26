@@ -76,6 +76,8 @@ typedef struct RclState
   gboolean    reconnecting;
   gboolean    exiting;
   guint       sync_id;
+  guint       sigint_id;
+  guint       sigterm_id;
   RclAccountsService *accounts_service;
 #if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
   RclBackendManager *backend_manager;
@@ -87,6 +89,13 @@ typedef struct RclState
 static void
 rcl_state_free(RclState *state)
 {
+  state->exiting = TRUE;
+  if (state->sigint_id)
+    g_source_remove(state->sigint_id);
+  if (state->sigterm_id)
+    g_source_remove(state->sigterm_id);
+  state->sigint_id = state->sigterm_id = 0;
+
   if (state->sync_id)
   {
     g_source_remove(state->sync_id);
@@ -315,6 +324,7 @@ static gboolean
 rcl_main_sigint_cb(gpointer user_data)
 {
   RclState *state = user_data;
+  state->sigint_id = 0;
   LOG(state, "SIGINT received");
   g_warning("main loop quit requested by SIGINT");
   state->exiting = TRUE;
@@ -326,6 +336,7 @@ static gboolean
 rcl_main_sigterm_cb(gpointer user_data)
 {
   RclState *state = user_data;
+  state->sigterm_id = 0;
   LOG(state, "SIGTERM received");
   g_warning("main loop quit requested by SIGTERM");
   state->exiting = TRUE;
@@ -578,8 +589,8 @@ gint main(gint argc, gchar **argv)
                     NULL);
 
   /* signals */
-  g_unix_signal_add(SIGINT,  rcl_main_sigint_cb,  state);
-  g_unix_signal_add(SIGTERM, rcl_main_sigterm_cb, state);
+  state->sigint_id = g_unix_signal_add(SIGINT, rcl_main_sigint_cb, state);
+  state->sigterm_id = g_unix_signal_add(SIGTERM, rcl_main_sigterm_cb, state);
 
   /*
    * File monitoring.
