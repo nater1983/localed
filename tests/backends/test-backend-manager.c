@@ -226,6 +226,20 @@ test_arbitration(void)
   g_weak_ref_init(&first_ref, first);
   g_assert_cmpuint(enabled_count, ==, 1);
 
+  /* A periodic unchanged snapshot must not churn a healthy writer.
+   * But loss of global eligibility (e.g. an unclaimed Xorg session)
+   * must revoke it even without a change in desktop discovery claims. */
+  fake_refresh(RCL_BACKEND(primary));
+  g_assert_true(manager->owner == first);
+  g_assert_cmpuint(manager->reconcile_id, ==, 0);
+  candidate_ready = FALSE;
+  fake_refresh(RCL_BACKEND(primary));
+  g_assert_null(manager->owner);
+  g_assert_cmpuint(enabled_count, ==, 0);
+  candidate_ready = TRUE;
+  run_round(manager);
+  g_assert_true(manager->owner == first);
+
   set_snapshot(primary, "[(1000, '1', '" SESSION_ONE "', false)]");
   g_assert_null(manager->owner);
   run_round(manager);
