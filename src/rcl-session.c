@@ -41,16 +41,24 @@ rcl_session_get_by_pid(GDBusConnection *connection, guint pid,
 
 
 gboolean
-rcl_session_is_active_local_user(GVariant *properties, const gchar *seat)
+rcl_session_is_local_user(GVariant *properties, const gchar *seat)
 {
-  gboolean active = FALSE, remote = TRUE;
+  gboolean remote = TRUE;
   const gchar *klass = NULL;
 
   return seat && *seat &&
-         g_variant_lookup(properties, "Active", "b", &active) && active &&
          g_variant_lookup(properties, "Remote", "b", &remote) && !remote &&
          g_variant_lookup(properties, "Class", "&s", &klass) &&
          g_strcmp0(klass, "user") == 0;
+}
+
+gboolean
+rcl_session_is_active_local_user(GVariant *properties, const gchar *seat)
+{
+  gboolean active = FALSE;
+
+  return rcl_session_is_local_user(properties, seat) &&
+         g_variant_lookup(properties, "Active", "b", &active) && active;
 }
 
 gboolean
