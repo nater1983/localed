@@ -98,7 +98,8 @@ static void properties_changed(GDBusConnection *connection, const gchar *sender,
               error ? error->message : "unknown error");
     g_clear_error(&error);
   } else {
-    g_debug("applied AccountsService language change");
+    g_debug("applied AccountsService language change: uid=%" G_GUINT64_FORMAT
+            " LANG=%s", uid, language);
   }
 out:
   g_clear_pointer(&value, g_variant_unref);
