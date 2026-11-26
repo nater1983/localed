@@ -14,6 +14,12 @@ gboolean rcl_session_is_graphical(GVariant *properties,
 gboolean rcl_session_uid_is_unique_active_local(GDBusConnection *connection,
                                                  guint64 uid);
 
+/* Authorize automatic keyboard writes only for the sole active local
+ * graphical session, matching both UID and logind object path. */
+gboolean rcl_session_is_unique_active_graphical(GDBusConnection *connection,
+                                                 guint uid,
+                                                 const gchar *session_path);
+
 /* Return full references to the typed D-Bus reply tuples, or NULL on error. */
 GVariant *rcl_session_list(GDBusConnection *connection, gint timeout_ms,
                            GError **error);
