@@ -53,9 +53,9 @@ option(
 option(
   'desktop-backend',
   type        : 'combo',
-  choices     : ['none', 'gnome', 'plasma6'],
-  value       : 'none',
-  description : 'Desktop integration backend to build',
+  choices     : ['none', 'gnome', 'plasma6', 'both'],
+  value       : 'both',
+  description : 'Desktop integration backends to build',
 )
 
 option(
