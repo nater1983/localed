@@ -9,6 +9,9 @@ All notable changes to `localed` are documented in this file.
 - Require an unambiguous active local user session, including TTY sessions and privileged-group membership for automatic AccountsService updates.
 - Skip unchanged shell locale file writes and isolate the C-shell companion path alongside the configured Bourne-shell script.
 
+- Report the affected UID and selected locale in AccountsService success diagnostics, and log the actual changed-property dictionary after successful D-Bus signal emission in debug mode. Unchanged properties remain silent.
+- Live Plasma 6 testing confirmed the locale1 `Locale` property and its `PropertiesChanged` notification after an AccountsService language change.
+
 ### Refactoring — Phase 2: Shared session infrastructure
 - Introduce `rcl-session.c` and `rcl-session.h` to centralize elogind session discovery, active local user eligibility, graphical session eligibility, and unambiguous UID validation.
 - Reuse the shared session validation in AccountsService and the GNOME and Plasma 6 backends. Preserve TTY-based locale synchronization while retaining graphical-session and desktop verification requirements for keyboard integration.
