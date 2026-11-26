@@ -68,6 +68,7 @@ G_DEFINE_TYPE_WITH_CODE(RclGnomeBackend, rcl_gnome_backend, G_TYPE_OBJECT,
 enum
 {
   SIGNAL_ACTIVE_SESSION_CHANGED,
+  SIGNAL_SESSIONS_CHANGED,
   N_SIGNALS
 };
 
@@ -826,6 +827,15 @@ emit_active_session_changed(RclGnomeBackend *self)
   }
 }
 
+/* Discovery publishes a complete batch, never incremental claims. */
+static void
+emit_discovered_sessions(GObject *object, GVariantBuilder *builder)
+{
+  GVariant *snapshot = g_variant_ref_sink(g_variant_builder_end(builder));
+  g_signal_emit(object, signals[SIGNAL_SESSIONS_CHANGED], 0, snapshot);
+  g_variant_unref(snapshot);
+}
+
 static void
 refresh_sessions(RclGnomeBackend *self)
 {
@@ -839,11 +849,13 @@ refresh_sessions(RclGnomeBackend *self)
   guint uid;
   ActiveSession *candidate = NULL;
   guint eligible_count = 0;
+  GVariantBuilder discovered;
   GError *error = NULL;
 
   if (self->stopping || !rcl_session_monitor_is_available(self->monitor) || !rcl_session_monitor_get_connection(self->monitor))
     return;
 
+  g_variant_builder_init(&discovered, G_VARIANT_TYPE("a(uso)"));
   reply = rcl_session_list(rcl_session_monitor_get_connection(self->monitor), 5000, &error);
 
   if (!reply)
@@ -855,6 +867,10 @@ refresh_sessions(RclGnomeBackend *self)
     active_session_free(self->active);
     self->active = NULL;
     emit_active_session_changed(self);
+    if (!self->bound_path)
+      emit_discovered_sessions(G_OBJECT(self), &discovered);
+    else
+      g_variant_builder_clear(&discovered);
     return;
   }
 
@@ -877,12 +893,19 @@ refresh_sessions(RclGnomeBackend *self)
     if (!found)
       continue;
 
+    if (!self->bound_path)
+      g_variant_builder_add(&discovered, "(uso)", uid, id, object_path);
     eligible_count++;
     if (eligible_count == 1)
       candidate = found;
     else
       active_session_free(found);
   }
+
+  if (!self->bound_path)
+    emit_discovered_sessions(G_OBJECT(self), &discovered);
+  else
+    g_variant_builder_clear(&discovered);
 
   if (eligible_count == 1 && !rcl_session_is_unique_active_graphical(
           rcl_session_monitor_get_connection(self->monitor),
@@ -932,6 +955,12 @@ monitor_lost(gpointer user_data)
   RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
   stop_settings_helper(self);
+  if (!self->bound_path)
+  {
+    GVariantBuilder empty;
+    g_variant_builder_init(&empty, G_VARIANT_TYPE("a(uso)"));
+    emit_discovered_sessions(G_OBJECT(self), &empty);
+  }
   if (self->active)
   {
     active_session_free(self->active);
@@ -1009,6 +1038,11 @@ rcl_gnome_backend_class_init(RclGnomeBackendClass *klass)
   GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
   object_class->dispose = rcl_gnome_backend_dispose;
+
+  signals[SIGNAL_SESSIONS_CHANGED] =
+    g_signal_new("sessions-changed", G_TYPE_FROM_CLASS(klass),
+                 G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+                 G_TYPE_NONE, 1, G_TYPE_VARIANT);
 
   signals[SIGNAL_ACTIVE_SESSION_CHANGED] =
     g_signal_new("active-session-changed",
