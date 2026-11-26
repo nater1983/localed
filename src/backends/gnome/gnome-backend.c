@@ -24,14 +24,8 @@
 #include "rcl-locale.h"
 #include "rcl-xkb-config.h"
 #include "rcl-session.h"
+#include "rcl-session-monitor.h"
 
-#define LOGIND_NAME             "org.freedesktop.login1"
-#define LOGIND_MANAGER_PATH     "/org/freedesktop/login1"
-#define LOGIND_MANAGER_IFACE    "org.freedesktop.login1.Manager"
-#define LOGIND_SESSION_IFACE    "org.freedesktop.login1.Session"
-#define DBUS_PROPERTIES_IFACE   "org.freedesktop.DBus.Properties"
-#define RECONNECT_DELAY_MS      2500
-#define REFRESH_DELAY_MS        100
 #define HELPER_RESTART_DELAY_MS 2500
 
 typedef struct
@@ -48,13 +42,7 @@ struct _RclGnomeBackend
 {
   GObject parent_instance;
 
-  GDBusConnection *connection;
-  guint name_watch_id;
-  guint manager_subscription_id;
-  guint properties_subscription_id;
-  gulong connection_closed_id;
-  guint reconnect_id;
-  guint refresh_id;
+  RclSessionMonitor *monitor;
   guint helper_restart_id;
 
   GSubprocess *settings_helper;
@@ -63,7 +51,6 @@ struct _RclGnomeBackend
   RclLocaleDaemon *daemon; /* borrowed; owned by the main daemon state */
 
   gboolean stopping;
-  gboolean logind_available;
 
   ActiveSession *active;
 };
@@ -378,7 +365,7 @@ start_settings_helper(RclGnomeBackend *self)
   GError *error = NULL;
   gboolean ok = FALSE;
 
-  if (!self->active || self->stopping || !self->connection)
+  if (!self->active || self->stopping || !rcl_session_monitor_get_connection(self->monitor))
     return FALSE;
 
   if (!lookup_session_user(self->active->uid, &primary_gid, &home))
@@ -406,7 +393,7 @@ start_settings_helper(RclGnomeBackend *self)
     goto out;
   }
 
-  bus_address = rcl_session_find_bus_address(self->connection, self->active->uid,
+  bus_address = rcl_session_find_bus_address(rcl_session_monitor_get_connection(self->monitor), self->active->uid,
                                              self->active->object_path,
                                              process_environment_is_gnome,
                                              FALSE);
@@ -704,7 +691,7 @@ session_has_gnome_process(RclGnomeBackend *self,
     }
     g_free(environment);
 
-    reply = rcl_session_get_by_pid(self->connection, (guint) pid_value,
+    reply = rcl_session_get_by_pid(rcl_session_monitor_get_connection(self->monitor), (guint) pid_value,
                                    2000, NULL);
     if (!reply)
       continue;
@@ -773,7 +760,7 @@ query_session(RclGnomeBackend *self,
   GError *error = NULL;
   ActiveSession *session = NULL;
 
-  reply = rcl_session_get_properties(self->connection, object_path,
+  reply = rcl_session_get_properties(rcl_session_monitor_get_connection(self->monitor), object_path,
                                      3000, &error);
 
   if (!reply)
@@ -839,10 +826,10 @@ refresh_sessions(RclGnomeBackend *self)
   guint eligible_count = 0;
   GError *error = NULL;
 
-  if (self->stopping || !self->logind_available || !self->connection)
+  if (self->stopping || !rcl_session_monitor_is_available(self->monitor) || !rcl_session_monitor_get_connection(self->monitor))
     return;
 
-  reply = rcl_session_list(self->connection, 5000, &error);
+  reply = rcl_session_list(rcl_session_monitor_get_connection(self->monitor), 5000, &error);
 
   if (!reply)
   {
@@ -904,308 +891,33 @@ refresh_sessions(RclGnomeBackend *self)
   g_variant_unref(reply);
 }
 
-static gboolean
-refresh_timeout_cb(gpointer user_data)
+static void
+monitor_refresh(gpointer user_data)
+{
+  refresh_sessions(RCL_GNOME_BACKEND(user_data));
+}
+
+static void
+monitor_lost(gpointer user_data)
 {
   RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
 
-  self->refresh_id = 0;
-  refresh_sessions(self);
-  return G_SOURCE_REMOVE;
-}
-
-static void
-schedule_refresh(RclGnomeBackend *self)
-{
-  if (self->stopping || self->refresh_id)
-    return;
-
-  self->refresh_id = g_timeout_add(REFRESH_DELAY_MS,
-                                   refresh_timeout_cb, self);
-}
-
-static void
-manager_signal_cb(GDBusConnection *connection,
-                  const gchar *sender_name,
-                  const gchar *object_path,
-                  const gchar *interface_name,
-                  const gchar *signal_name,
-                  GVariant *parameters,
-                  gpointer user_data)
-{
-  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
-
-  (void) connection;
-  (void) sender_name;
-  (void) object_path;
-  (void) interface_name;
-  (void) parameters;
-
-  if (g_strcmp0(signal_name, "SessionNew") == 0 ||
-      g_strcmp0(signal_name, "SessionRemoved") == 0)
-    schedule_refresh(self);
-}
-
-static void
-properties_changed_cb(GDBusConnection *connection,
-                      const gchar *sender_name,
-                      const gchar *object_path,
-                      const gchar *interface_name,
-                      const gchar *signal_name,
-                      GVariant *parameters,
-                      gpointer user_data)
-{
-  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
-  const gchar *changed_interface;
-  GVariant *changed = NULL;
-  GVariant *invalidated = NULL;
-
-  (void) connection;
-  (void) sender_name;
-  (void) interface_name;
-  (void) signal_name;
-
-  if (!object_path ||
-      !g_variant_is_of_type(parameters, G_VARIANT_TYPE("(sa{sv}as)")))
-    return;
-
-  g_variant_get(parameters, "(&s@a{sv}@as)",
-                &changed_interface, &changed, &invalidated);
-
-  if (g_strcmp0(changed_interface, LOGIND_SESSION_IFACE) == 0)
-    schedule_refresh(self);
-
-  g_clear_pointer(&changed, g_variant_unref);
-  g_clear_pointer(&invalidated, g_variant_unref);
-}
-
-static void
-unsubscribe_signals(RclGnomeBackend *self)
-{
-  if (!self->connection)
-    return;
-
-  if (self->manager_subscription_id)
-  {
-    g_dbus_connection_signal_unsubscribe(self->connection,
-                                         self->manager_subscription_id);
-    self->manager_subscription_id = 0;
-  }
-
-  if (self->properties_subscription_id)
-  {
-    g_dbus_connection_signal_unsubscribe(self->connection,
-                                         self->properties_subscription_id);
-    self->properties_subscription_id = 0;
-  }
-}
-
-static void
-name_appeared_cb(GDBusConnection *connection,
-                 const gchar *name,
-                 const gchar *owner,
-                 gpointer user_data)
-{
-  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
-
-  (void) name;
-  (void) owner;
-
-  if (self->stopping || connection != self->connection)
-    return;
-
-  self->logind_available = TRUE;
-
-  if (!self->manager_subscription_id)
-    self->manager_subscription_id =
-      g_dbus_connection_signal_subscribe(
-          connection, LOGIND_NAME, LOGIND_MANAGER_IFACE, NULL,
-          LOGIND_MANAGER_PATH, NULL, G_DBUS_SIGNAL_FLAGS_NONE,
-          manager_signal_cb, self, NULL);
-
-  if (!self->properties_subscription_id)
-    self->properties_subscription_id =
-      g_dbus_connection_signal_subscribe(
-          connection, LOGIND_NAME, DBUS_PROPERTIES_IFACE,
-          "PropertiesChanged", NULL, NULL, G_DBUS_SIGNAL_FLAGS_NONE,
-          properties_changed_cb, self, NULL);
-
-  g_debug("watching logind for GNOME session changes");
-  schedule_refresh(self);
-}
-
-static void
-name_vanished_cb(GDBusConnection *connection,
-                 const gchar *name,
-                 gpointer user_data)
-{
-  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
-
-  (void) name;
-
-  if (connection != self->connection)
-    return;
-
-  self->logind_available = FALSE;
   stop_settings_helper(self);
-  unsubscribe_signals(self);
-
-  if (self->refresh_id)
-  {
-    g_source_remove(self->refresh_id);
-    self->refresh_id = 0;
-  }
-
   if (self->active)
   {
     active_session_free(self->active);
     self->active = NULL;
     emit_active_session_changed(self);
   }
-
-  g_debug("logind disappeared; waiting for it to return");
-}
-
-static gboolean rcl_gnome_backend_connect(RclGnomeBackend *self);
-
-static gboolean
-reconnect_timeout_cb(gpointer user_data)
-{
-  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
-
-  self->reconnect_id = 0;
-  if (!self->stopping)
-    rcl_gnome_backend_connect(self);
-
-  return G_SOURCE_REMOVE;
-}
-
-static void
-connection_closed_cb(GDBusConnection *connection,
-                     gboolean remote_peer_vanished,
-                     GError *error,
-                     gpointer user_data)
-{
-  RclGnomeBackend *self = RCL_GNOME_BACKEND(user_data);
-
-  (void) remote_peer_vanished;
-
-  if (connection != self->connection || self->stopping)
-    return;
-
-  g_debug("system D-Bus connection for GNOME session discovery closed: %s",
-          error ? error->message : "connection closed");
-
-  if (self->name_watch_id)
-  {
-    g_bus_unwatch_name(self->name_watch_id);
-    self->name_watch_id = 0;
-  }
-
-  unsubscribe_signals(self);
-  self->logind_available = FALSE;
-  stop_settings_helper(self);
-  self->connection_closed_id = 0;
-  g_clear_object(&self->connection);
-
-  if (self->active)
-  {
-    active_session_free(self->active);
-    self->active = NULL;
-    emit_active_session_changed(self);
-  }
-
-  if (!self->reconnect_id)
-    self->reconnect_id =
-      g_timeout_add(RECONNECT_DELAY_MS, reconnect_timeout_cb, self);
-}
-
-static gboolean
-rcl_gnome_backend_connect(RclGnomeBackend *self)
-{
-  gchar *address;
-  GError *error = NULL;
-
-  if (self->stopping || self->connection)
-    return self->connection != NULL;
-
-  address = g_dbus_address_get_for_bus_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
-  if (!address)
-    goto failed;
-
-  self->connection = g_dbus_connection_new_for_address_sync(
-      address,
-      G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
-      G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
-      NULL, NULL, &error);
-  g_free(address);
-
-  if (!self->connection)
-    goto failed;
-
-  g_dbus_connection_set_exit_on_close(self->connection, FALSE);
-  self->connection_closed_id =
-    g_signal_connect(self->connection, "closed",
-                     G_CALLBACK(connection_closed_cb), self);
-
-  self->name_watch_id =
-    g_bus_watch_name_on_connection(self->connection, LOGIND_NAME,
-                                   G_BUS_NAME_WATCHER_FLAGS_NONE,
-                                   name_appeared_cb, name_vanished_cb,
-                                   self, NULL);
-
-  g_debug("watching for logind on the system bus");
-  return TRUE;
-
-failed:
-  g_warning("could not connect to system D-Bus for GNOME session discovery: %s",
-            error ? error->message : "unknown error");
-  g_clear_error(&error);
-
-  if (!self->stopping && !self->reconnect_id)
-    self->reconnect_id =
-      g_timeout_add(RECONNECT_DELAY_MS, reconnect_timeout_cb, self);
-
-  return FALSE;
 }
 
 void
 rcl_gnome_backend_stop(RclGnomeBackend *self)
 {
   g_return_if_fail(RCL_IS_GNOME_BACKEND(self));
-
   self->stopping = TRUE;
+  rcl_session_monitor_stop(self->monitor);
   stop_settings_helper(self);
-
-  if (self->reconnect_id)
-  {
-    g_source_remove(self->reconnect_id);
-    self->reconnect_id = 0;
-  }
-
-  if (self->refresh_id)
-  {
-    g_source_remove(self->refresh_id);
-    self->refresh_id = 0;
-  }
-
-  if (self->name_watch_id)
-  {
-    g_bus_unwatch_name(self->name_watch_id);
-    self->name_watch_id = 0;
-  }
-
-  unsubscribe_signals(self);
-
-  if (self->connection && self->connection_closed_id)
-  {
-    g_signal_handler_disconnect(self->connection,
-                                self->connection_closed_id);
-    self->connection_closed_id = 0;
-  }
-
-  g_clear_object(&self->connection);
-  self->logind_available = FALSE;
   active_session_free(self->active);
   self->active = NULL;
 }
@@ -1215,12 +927,8 @@ rcl_gnome_backend_start(RclGnomeBackend *self, GError **error)
 {
   g_return_val_if_fail(RCL_IS_GNOME_BACKEND(self), FALSE);
   (void) error;
-
-  if (self->connection || self->reconnect_id)
-    return TRUE;
-
   self->stopping = FALSE;
-  return rcl_gnome_backend_connect(self);
+  return rcl_session_monitor_start(self->monitor);
 }
 
 gboolean
@@ -1259,6 +967,7 @@ rcl_gnome_backend_dispose(GObject *object)
   RclGnomeBackend *self = RCL_GNOME_BACKEND(object);
 
   rcl_gnome_backend_stop(self);
+  g_clear_pointer(&self->monitor, rcl_session_monitor_free);
   G_OBJECT_CLASS(rcl_gnome_backend_parent_class)->dispose(object);
 }
 
@@ -1287,7 +996,7 @@ rcl_gnome_backend_class_init(RclGnomeBackendClass *klass)
 static void
 rcl_gnome_backend_init(RclGnomeBackend *self)
 {
-  (void) self;
+  self->monitor = rcl_session_monitor_new(monitor_refresh, monitor_lost, self);
 }
 static gboolean
 rcl_gnome_backend_iface_start(RclBackend *backend, GError **error)
