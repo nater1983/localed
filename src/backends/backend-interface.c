@@ -25,3 +25,26 @@ rcl_backend_set_write_enabled(RclBackend *self, gboolean enabled)
   g_return_if_fail(iface->set_write_enabled != NULL);
   iface->set_write_enabled(self, enabled);
 }
+
+gboolean
+rcl_backend_bind_session(RclBackend *self, guint uid, const gchar *id,
+                         const gchar *path, GError **error)
+{
+  RclBackendInterface *iface;
+  g_return_val_if_fail(RCL_IS_BACKEND(self), FALSE);
+  if (!id || !*id || !path || !g_variant_is_object_path(path) ||
+      !g_str_has_prefix(path, "/org/freedesktop/login1/session/"))
+  {
+    g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                        "Invalid desktop session identity");
+    return FALSE;
+  }
+  iface = RCL_BACKEND_GET_IFACE(self);
+  if (!iface->bind_session)
+  {
+    g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                        "Backend does not support session binding");
+    return FALSE;
+  }
+  return iface->bind_session(self, uid, id, path, error);
+}
