@@ -9,6 +9,7 @@
 
 #include <gio/gio.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -818,11 +819,54 @@ test_polkit_cancellation(Fixture *fixture, gconstpointer user_data)
   g_object_unref(daemon_bus);
 }
 
+/* A repeated automatic locale update must not replace either file.
+ * A missing companion must still be recreated. */
+static void
+test_accounts_duplicate_locale(Fixture *fixture, gconstpointer user_data)
+{
+  GError *error = NULL;
+  GStatBuf sh_before, csh_before, sh_after, csh_after;
+  RclLocaleDaemon *daemon;
+
+  g_assert_cmpstr(RCL_LANG_SH_FILE, !=, "/etc/profile.d/lang.sh");
+  g_assert_cmpstr(RCL_LANG_CSH_FILE, !=, "/etc/profile.d/lang.csh");
+  g_assert_cmpstr(RCL_LANG_SH_FILE, !=, RCL_LANG_CSH_FILE);
+  daemon = RCL_LOCALE_DAEMON(rcl_daemon_new());
+
+  g_assert_true(rcl_locale_daemon_set_language_from_accounts(
+      daemon, "en_GB.UTF-8", &error));
+  g_assert_no_error(error);
+  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_before), ==, 0);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_before), ==, 0);
+
+  g_assert_true(rcl_locale_daemon_set_language_from_accounts(
+      daemon, "en_GB.UTF-8", &error));
+  g_assert_no_error(error);
+  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_after), ==, 0);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_after), ==, 0);
+  g_assert_true(sh_before.st_ino == sh_after.st_ino);
+  g_assert_true(csh_before.st_ino == csh_after.st_ino);
+
+  g_assert_cmpint(g_unlink(RCL_LANG_CSH_FILE), ==, 0);
+  g_assert_true(rcl_locale_daemon_set_language_from_accounts(
+      daemon, "en_GB.UTF-8", &error));
+  g_assert_no_error(error);
+  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_after), ==, 0);
+  g_assert_true(sh_before.st_ino == sh_after.st_ino);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_after), ==, 0);
+
+  g_assert_cmpint(g_unlink(RCL_LANG_SH_FILE), ==, 0);
+  g_assert_cmpint(g_unlink(RCL_LANG_CSH_FILE), ==, 0);
+  g_object_unref(daemon);
+}
+
 int
 main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
 
+  g_test_add("/dbus/accounts-duplicate-locale", Fixture, NULL,
+             fixture_setup, test_accounts_duplicate_locale, fixture_teardown);
   g_test_add("/dbus/accounts-name-lifecycle", Fixture, NULL,
              fixture_setup, test_accounts_name_lifecycle, fixture_teardown);
   g_test_add("/dbus/repeated-start-stop-cleanup", Fixture, NULL,
