@@ -4,7 +4,8 @@
 
 struct _RclBackendManager {
   RclLocaleDaemon *daemon; /* borrowed */
-  GHashTable *backends;   /* owned identifiers and instances */
+  GHashTable *modules;   /* owned identifiers, borrowed resident descriptors */
+  GHashTable *backends;  /* owned identifiers and monitor instances */
   gboolean started;
   GHashTable *candidates; /* borrowed backend keys, owned session paths */
   RclBackend *owner; /* borrowed */
@@ -18,6 +19,7 @@ rcl_backend_manager_new(RclLocaleDaemon *daemon)
   g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
   self = g_new0(RclBackendManager, 1);
   self->daemon = daemon;
+  self->modules = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
   self->backends = g_hash_table_new_full(g_str_hash, g_str_equal,
                                         g_free, g_object_unref);
   self->candidates = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
@@ -89,6 +91,7 @@ rcl_backend_manager_load(RclBackendManager *self, const gchar *id,
                          GError **error)
 {
   const gchar *filename;
+  const RclBackendModuleDescriptor *descriptor;
   RclBackend *backend;
   g_autofree gchar *path = NULL;
 
@@ -114,13 +117,16 @@ rcl_backend_manager_load(RclBackendManager *self, const gchar *id,
   }
 
   path = g_build_filename(RCL_BACKEND_MODULE_DIR, filename, NULL);
-  if (g_hash_table_contains(self->backends, id))
+  if (g_hash_table_contains(self->modules, id))
   {
     g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
                 "Desktop backend %s is already loaded", id);
     return FALSE;
   }
-  backend = rcl_backend_module_load(path, id, self->daemon, error);
+  descriptor = rcl_backend_module_open(path, id, error);
+  if (!descriptor)
+    return FALSE;
+  backend = rcl_backend_module_create(descriptor, self->daemon, error);
   if (!backend)
     return FALSE;
   if (!g_signal_lookup("active-session-changed", G_OBJECT_TYPE(backend)))
@@ -132,6 +138,7 @@ rcl_backend_manager_load(RclBackendManager *self, const gchar *id,
   }
   g_signal_connect(backend, "active-session-changed",
                    G_CALLBACK(active_session_changed), self);
+  g_hash_table_insert(self->modules, g_strdup(id), (gpointer) descriptor);
   g_hash_table_insert(self->backends, g_strdup(id), backend);
   return TRUE;
 }
@@ -196,5 +203,6 @@ rcl_backend_manager_free(RclBackendManager *self)
     g_signal_handlers_disconnect_by_data(backend, self);
   g_hash_table_unref(self->candidates);
   g_hash_table_unref(self->backends);
+  g_hash_table_unref(self->modules);
   g_free(self);
 }
