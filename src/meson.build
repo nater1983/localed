@@ -2,6 +2,7 @@ localed_sources = files(
   'main.c',
   'rcl-accounts-service.c',
   'rcl-session.c',
+  'rcl-session-monitor.c',
   'rcl-file-transaction.c',
   'rcl-xkb-config.c',
   'rcl-locale.c',
