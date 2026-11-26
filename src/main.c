@@ -35,9 +35,7 @@
 
 #include "rcl-locale.h"
 #include "backends/backend-manager.h"
-#if HAVE_GNOME_BACKEND
-#include "backends/gnome/gnome-backend.h"
-#elif HAVE_PLASMA6_BACKEND
+#if HAVE_PLASMA6_BACKEND
 #include "backends/plasma6/plasma6-backend.h"
 #endif
 #include "rcl-accounts-service.h"
@@ -653,17 +651,21 @@ gint main(gint argc, gchar **argv)
 
 #if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
   {
-    g_autoptr(RclBackend) backend = NULL;
     state->backend_manager =
         rcl_backend_manager_new(RCL_LOCALE_DAEMON(state->daemon));
 #if HAVE_GNOME_BACKEND
-    backend = rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
+    g_autoptr(GError) error = NULL;
+    if (!rcl_backend_manager_load(state->backend_manager, "gnome", &error))
+      g_warning("could not load GNOME backend: %s", error->message);
+    else
+      g_debug("loaded GNOME backend module");
 #else
-    backend = rcl_plasma6_backend_new(RCL_LOCALE_DAEMON(state->daemon));
-#endif
+    g_autoptr(RclBackend) backend =
+        rcl_plasma6_backend_new(RCL_LOCALE_DAEMON(state->daemon));
     if (!backend ||
         !rcl_backend_manager_set_builtin(state->backend_manager, backend, NULL))
       g_warning("could not attach built-in desktop backend");
+#endif
   }
 #endif
 
