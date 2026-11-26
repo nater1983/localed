@@ -7,6 +7,7 @@
 typedef struct {
   RclBackend *monitor;
   RclBackend *instance; /* owned, bound to this identity */
+  gulong readiness_handler;
   gboolean ready;
   gboolean active; /* reported activity, independent of instance readiness */
   gchar *module_id;
@@ -21,8 +22,11 @@ session_claim_free(gpointer data)
   RclSessionClaim *claim = data;
   if (claim->instance)
   {
+    if (claim->readiness_handler)
+      g_signal_handler_disconnect(claim->instance, claim->readiness_handler);
+    rcl_backend_set_write_enabled(claim->instance, FALSE);
     rcl_backend_stop(claim->instance);
-    g_object_unref(claim->instance);
+    g_clear_object(&claim->instance);
   }
   g_free(claim->module_id);
   g_free(claim->id);
@@ -134,8 +138,9 @@ ensure_session_instance(RclBackendManager *self, RclSessionClaim *claim)
     return FALSE;
   }
   claim->instance = instance;
-  g_signal_connect(instance, "active-session-changed",
-                   G_CALLBACK(instance_session_changed), self);
+  claim->readiness_handler =
+    g_signal_connect(instance, "active-session-changed",
+                     G_CALLBACK(instance_session_changed), self);
   if (!rcl_backend_start(instance, &error))
     g_debug("session backend %s initial connection pending: %s", claim->path,
             error ? error->message : "monitor reconnect pending");
@@ -294,9 +299,6 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
 
       set_owner(self, NULL);
       changed = TRUE;
-      if (claim && claim->instance)
-        g_signal_handlers_disconnect_by_data(claim->instance, self);
-
       claim = g_new0(RclSessionClaim, 1);
       claim->monitor = backend;
       claim->module_id = g_strdup(module_id);
@@ -318,8 +320,6 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
       continue;
     set_owner(self, NULL);
     changed = TRUE;
-    if (claim->instance)
-      g_signal_handlers_disconnect_by_data(claim->instance, self);
     g_hash_table_iter_remove(&iter);
   }
 
@@ -430,18 +430,15 @@ rcl_backend_manager_stop(RclBackendManager *self)
     self->reconcile_id = 0;
   }
   set_owner(self, NULL);
-  g_hash_table_iter_init(&iter, self->sessions);
-  while (g_hash_table_iter_next(&iter, NULL, &backend))
-  {
-    RclSessionClaim *claim = backend;
-    if (claim->instance)
-      g_signal_handlers_disconnect_by_data(claim->instance, self);
-  }
-  g_hash_table_remove_all(self->sessions);
-  g_hash_table_remove_all(self->reported);
+  /* Stop producers before releasing their session claims. Claim disposal
+   * disconnects readiness handlers before stopping bound instances. */
   g_hash_table_iter_init(&iter, self->backends);
   while (g_hash_table_iter_next(&iter, NULL, &backend))
     rcl_backend_stop(backend);
+  g_hash_table_remove_all(self->sessions);
+  g_hash_table_remove_all(self->reported);
+  self->reconciling = FALSE;
+  self->invalidated_during_reconcile = FALSE;
 }
 
 void
