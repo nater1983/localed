@@ -4,6 +4,7 @@
 #include <pwd.h>
 #include <gio/gio.h>
 #include "rcl-accounts-service.h"
+#include "rcl-session.h"
 
 #define ACCOUNTS_NAME "org.freedesktop.Accounts"
 #define USER_PREFIX "/org/freedesktop/Accounts/User"
@@ -43,57 +44,6 @@ static gboolean uid_in_privileged_group(guint64 uid)
     if (groups[i] == gr->gr_gid) { found = TRUE; break; }
   g_free(groups);
   return found;
-}
-
-/* Only an unambiguous active local user session may drive
- * automatic system locale synchronization. Fail closed if logind cannot
- * establish the session state. */
-static gboolean
-uid_has_active_local_session(GDBusConnection *connection, guint64 uid)
-{
-  g_autoptr(GVariant) reply = NULL;
-  g_autoptr(GVariant) sessions = NULL;
-  GVariantIter iter;
-  const gchar *id, *user, *seat, *path;
-  guint session_uid, eligible = 0;
-  gboolean matches = FALSE;
-
-  reply = g_dbus_connection_call_sync(connection,
-    "org.freedesktop.login1", "/org/freedesktop/login1",
-    "org.freedesktop.login1.Manager", "ListSessions", NULL,
-    G_VARIANT_TYPE("(a(susso))"), G_DBUS_CALL_FLAGS_NONE, 2000, NULL, NULL);
-  if (!reply)
-    return FALSE;
-
-  g_variant_get(reply, "(@a(susso))", &sessions);
-  g_variant_iter_init(&iter, sessions);
-  while (g_variant_iter_next(&iter, "(&su&s&s&o)", &id, &session_uid,
-                             &user, &seat, &path)) {
-    g_autoptr(GVariant) result = NULL;
-    g_autoptr(GVariant) props = NULL;
-    const gchar *klass = NULL;
-    gboolean active = FALSE, remote = TRUE;
-
-    if (!*seat)
-      continue;
-    result = g_dbus_connection_call_sync(connection,
-      "org.freedesktop.login1", path, "org.freedesktop.DBus.Properties",
-      "GetAll", g_variant_new("(s)", "org.freedesktop.login1.Session"),
-      G_VARIANT_TYPE("(a{sv})"), G_DBUS_CALL_FLAGS_NONE, 2000, NULL, NULL);
-    if (!result)
-      return FALSE;
-    g_variant_get(result, "(@a{sv})", &props);
-    if (!g_variant_lookup(props, "Active", "b", &active) || !active ||
-        !g_variant_lookup(props, "Remote", "b", &remote) || remote ||
-        !g_variant_lookup(props, "Class", "&s", &klass) ||
-        g_strcmp0(klass, "user") != 0)
-      continue;
-    eligible++;
-    matches = session_uid == uid;
-    if (eligible > 1)
-      return FALSE;
-  }
-  return eligible == 1 && matches;
 }
 
 static gboolean parse_uid(const gchar *text, guint64 *uid)
@@ -138,7 +88,7 @@ static void properties_changed(GDBusConnection *connection, const gchar *sender,
             ": account is not in group '%s'", uid, PRIVILEGED_GROUP);
     goto out;
   }
-  if (!uid_has_active_local_session(connection, uid)) {
+  if (!rcl_session_uid_is_unique_active_local(connection, uid)) {
     g_debug("ignoring AccountsService language change for uid %" G_GUINT64_FORMAT
             ": no unambiguous active local user session", uid);
     goto out;
