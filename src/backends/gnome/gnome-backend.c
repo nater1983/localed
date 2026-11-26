@@ -737,7 +737,7 @@ session_properties_are_eligible(RclGnomeBackend *self,
   const gchar *session_type = NULL;
   const gchar *desktop = NULL;
 
-  if (!rcl_session_is_active_local_user(properties, seat_from_manager) ||
+  if (!rcl_session_is_local_user(properties, seat_from_manager) ||
       !rcl_session_is_graphical(properties, &session_type))
     return FALSE;
 
@@ -769,7 +769,8 @@ query_session(RclGnomeBackend *self,
               const gchar *id,
               guint uid,
               const gchar *seat,
-              const gchar *object_path, gboolean *failed)
+              const gchar *object_path, gboolean *failed,
+              gboolean *active)
 {
   GVariant *reply = NULL;
   GVariant *properties = NULL;
@@ -789,6 +790,14 @@ query_session(RclGnomeBackend *self,
   }
 
   g_variant_get(reply, "(@a{sv})", &properties);
+
+  if (!g_variant_lookup(properties, "Active", "b", active))
+  {
+    *failed = TRUE;
+    g_variant_unref(properties);
+    g_variant_unref(reply);
+    return NULL;
+  }
 
   session = g_new0(ActiveSession, 1);
   session->id = g_strdup(id);
@@ -857,7 +866,7 @@ refresh_sessions(RclGnomeBackend *self)
   if (self->stopping || !rcl_session_monitor_is_available(self->monitor) || !rcl_session_monitor_get_connection(self->monitor))
     return;
 
-  g_variant_builder_init(&discovered, G_VARIANT_TYPE("a(uso)"));
+  g_variant_builder_init(&discovered, G_VARIANT_TYPE("a(usob)"));
   reply = rcl_session_list(rcl_session_monitor_get_connection(self->monitor), 5000, &error);
 
   if (!reply)
@@ -883,6 +892,7 @@ refresh_sessions(RclGnomeBackend *self)
                              &id, &uid, &user, &seat, &object_path))
   {
     ActiveSession *found;
+    gboolean active = FALSE;
 
     (void) user;
 
@@ -893,14 +903,19 @@ refresh_sessions(RclGnomeBackend *self)
 
     if (!*seat)
       continue;
-    found = query_session(self, id, uid, seat, object_path, &failed);
+    found = query_session(self, id, uid, seat, object_path, &failed, &active);
     if (failed)
       break;
     if (!found)
       continue;
 
     if (!self->bound_path)
-      g_variant_builder_add(&discovered, "(uso)", uid, id, object_path);
+      g_variant_builder_add(&discovered, "(usob)", uid, id, object_path, active);
+    if (!active)
+    {
+      active_session_free(found);
+      continue;
+    }
     eligible_count++;
     if (eligible_count == 1)
       candidate = found;
