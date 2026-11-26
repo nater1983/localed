@@ -14,4 +14,13 @@ gboolean rcl_session_is_graphical(GVariant *properties,
 gboolean rcl_session_uid_is_unique_active_local(GDBusConnection *connection,
                                                  guint64 uid);
 
+/* Return full references to the typed D-Bus reply tuples, or NULL on error. */
+GVariant *rcl_session_list(GDBusConnection *connection, gint timeout_ms,
+                           GError **error);
+GVariant *rcl_session_get_properties(GDBusConnection *connection,
+                                     const gchar *path, gint timeout_ms,
+                                     GError **error);
+GVariant *rcl_session_get_by_pid(GDBusConnection *connection, guint pid,
+                                 gint timeout_ms, GError **error);
+
 G_END_DECLS
