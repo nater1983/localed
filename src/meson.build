@@ -8,6 +8,7 @@ localed_sources = files(
   'rcl-locale.c',
   'backends/backend-interface.c',
   'backends/backend-module.c',
+  'backends/backend-manager.c',
 )
 
 localed_deps = [
