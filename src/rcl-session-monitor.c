@@ -25,7 +25,8 @@ refresh_timeout_cb(gpointer user_data)
   RclSessionMonitor *self = user_data;
 
   self->refresh_id = 0;
-  self->refresh(self->user_data);
+  if (rcl_session_monitor_is_available(self))
+    self->refresh(self->user_data);
   return G_SOURCE_REMOVE;
 }
 
@@ -36,7 +37,7 @@ schedule_refresh(RclSessionMonitor *self)
     return;
   if (self->invalidated)
     self->invalidated(self->user_data);
-  if (self->refresh_id)
+  if (self->stopping || !self->logind_available || self->refresh_id)
     return;
 
   self->refresh_id = g_timeout_add(REFRESH_DELAY_MS,
@@ -83,7 +84,9 @@ manager_signal_cb(GDBusConnection *connection,
 {
   RclSessionMonitor *self = user_data;
 
-  (void) connection;
+  if (self->stopping || connection != self->connection)
+    return;
+
   (void) sender_name;
   (void) object_path;
   (void) interface_name;
@@ -108,7 +111,9 @@ properties_changed_cb(GDBusConnection *connection,
   GVariant *changed = NULL;
   GVariant *invalidated = NULL;
 
-  (void) connection;
+  if (self->stopping || connection != self->connection)
+    return;
+
   (void) sender_name;
   (void) interface_name;
   (void) signal_name;
@@ -191,7 +196,7 @@ name_vanished_cb(GDBusConnection *connection,
 
   (void) name;
 
-  if (connection != self->connection)
+  if (self->stopping || connection != self->connection)
     return;
 
   self->logind_available = FALSE;
@@ -246,7 +251,7 @@ connection_closed_cb(GDBusConnection *connection,
 
   unsubscribe_signals(self);
   self->logind_available = FALSE;
-    if (self->refresh_id)
+  if (self->refresh_id)
   {
     g_source_remove(self->refresh_id);
     self->refresh_id = 0;
@@ -255,11 +260,12 @@ connection_closed_cb(GDBusConnection *connection,
   self->connection_closed_id = 0;
   g_clear_object(&self->connection);
 
-  self->lost(self->user_data);
-
   if (!self->stopping && !self->reconnect_id)
     self->reconnect_id =
       g_timeout_add(RECONNECT_DELAY_MS, reconnect_timeout_cb, self);
+
+  /* Notify last: the owner may stop discovery in response to loss. */
+  self->lost(self->user_data);
 }
 
 static gboolean
@@ -346,6 +352,10 @@ rcl_session_monitor_stop(RclSessionMonitor *self)
     self->connection_closed_id = 0;
   }
 
+  /* This connection is private, not a shared g_bus_get() connection.
+   * Close explicitly after unsubscribing; completion needs no owner data. */
+  if (self->connection && !g_dbus_connection_is_closed(self->connection))
+    g_dbus_connection_close(self->connection, NULL, NULL, NULL);
   g_clear_object(&self->connection);
   self->logind_available = FALSE;
 }
