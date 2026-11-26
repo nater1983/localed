@@ -131,3 +131,19 @@ if have_gnome_backend or have_plasma6_backend
     env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
   )
 endif
+
+# ELF regression test also covers the no-backend build (no rcl_* exports).
+host_export_modules = []
+if have_gnome_backend
+  host_export_modules += [gnome_module]
+endif
+if have_plasma6_backend
+  host_export_modules += [plasma_module]
+endif
+nm_program = find_program('nm')
+test(
+  'desktop module host symbol visibility',
+  find_program('sh'),
+  args : [files('backends/test-host-exports.sh'), nm_program.full_path(),
+          localed_binary] + host_export_modules,
+)
