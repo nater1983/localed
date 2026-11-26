@@ -11,7 +11,7 @@
     rcl_session_find_bus_address;
     rcl_session_get_by_pid;
     rcl_session_get_properties;
-    rcl_session_is_graphical;
+    rcl_session_resolve_graphical;
     rcl_session_is_local_user;
     rcl_session_is_unique_active_graphical;
     rcl_session_list;
