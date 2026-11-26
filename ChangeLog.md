@@ -9,7 +9,17 @@ All notable changes to `localed` are documented in this file.
 - Require an unambiguous active local user session, including TTY sessions and privileged-group membership for automatic AccountsService updates.
 - Skip unchanged shell locale file writes and isolate the C-shell companion path alongside the configured Bourne-shell script.
 
+### Refactoring — Phase 2: Shared session infrastructure
+- Introduce `rcl-session.c` and `rcl-session.h` to centralize elogind session discovery, active local user eligibility, graphical session eligibility, and unambiguous UID validation.
+- Reuse the shared session validation in AccountsService and the GNOME and Plasma 6 backends. Preserve TTY-based locale synchronization while retaining graphical-session and desktop verification requirements for keyboard integration.
+- Centralize the `ListSessions`, `GetAll`, and `GetSessionByPID` D-Bus operations while preserving existing timeouts and error handling.
+- Consolidate session bus address discovery, including process UID checks, desktop environment matching, elogind session association, and filesystem socket ownership validation. Preserve the existing backend-specific abstract socket acceptance policy.
+- Introduce `rcl-session-monitor.c` and `rcl-session-monitor.h` to share elogind name watching, session signal subscriptions, refresh scheduling, system-bus reconnection, and resource cleanup across the desktop backends.
+- Cancel pending session refreshes when the system-bus connection closes. Retain the 100 ms refresh delay and 2500 ms reconnect delay.
+- Keep desktop-specific identification and keyboard helper lifecycle management in the respective backends. Each backend retains its own session monitor instance pending backend manager development.
+
 ### Validation
+- All five existing Meson test suites passed with the Plasma 6 backend enabled after each Phase 2 refactoring stage (zero failures). GNOME regression and live desktop testing after the refactoring, and sanitizer validation, remain for final release validation.
 - Verified AccountsService-only locale synchronization on Plasma 6.7.6 with an elogind TTY login session, switching between es_ES.UTF-8 and en_US.UTF-8 after removing the desktop-specific monitor.
 - Plasma 6.7.6 runtime testing verified primary locale updates, regional format changes, and translation preference additions and reordering before consolidation. Other Plasma releases remain unverified.
 - Add regression coverage for duplicate locale writes and missing companion recovery.
