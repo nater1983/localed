@@ -650,22 +650,28 @@ gint main(gint argc, gchar **argv)
   {
     state->backend_manager =
         rcl_backend_manager_new(RCL_LOCALE_DAEMON(state->daemon));
+#if HAVE_GNOME_BACKEND
+    {
+      g_autoptr(GError) error = NULL;
+      if (!rcl_backend_manager_load(state->backend_manager, "gnome", &error))
+        g_warning("could not load GNOME backend: %s",
+                  error ? error->message : "unknown error");
+      else
+        g_debug("loaded GNOME backend module");
+    }
+#endif
+#if HAVE_PLASMA6_BACKEND
+    {
+      g_autoptr(GError) error = NULL;
+      if (!rcl_backend_manager_load(state->backend_manager, "plasma6", &error))
+        g_warning("could not load Plasma 6 backend: %s",
+                  error ? error->message : "unknown error");
+      else
+        g_debug("loaded Plasma 6 backend module");
+    }
+#endif
 #if HAVE_GNOME_BACKEND && HAVE_PLASMA6_BACKEND
-    /* Do not select an arbitrary desktop while arbitration is pending. */
-    g_message("both desktop modules built; automatic desktop activation pending session arbitration");
-#elif HAVE_GNOME_BACKEND
-    g_autoptr(GError) error = NULL;
-    if (!rcl_backend_manager_load(state->backend_manager, "gnome", &error))
-      g_warning("could not load GNOME backend: %s", error->message);
-    else
-      g_debug("loaded GNOME backend module");
-#else
-    g_autoptr(GError) error = NULL;
-    if (!rcl_backend_manager_load(state->backend_manager, "plasma6", &error))
-      g_warning("could not load Plasma 6 backend: %s",
-                error ? error->message : "unknown error");
-    else
-      g_debug("loaded Plasma 6 backend module");
+    g_message("desktop activation pending session arbitration");
 #endif
   }
 #endif
