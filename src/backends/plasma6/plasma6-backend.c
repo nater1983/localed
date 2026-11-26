@@ -168,7 +168,7 @@ apply_plasma6_settings(RclPlasma6Backend *self, const gchar *line)
   gsize n_layouts = 0, n_variants = 0;
   GError *error = NULL;
 
-  if (!self->write_enabled || !self->active || self->stopping ||
+  if (!self->write_enabled || !self->bound_path || !self->active || self->stopping ||
       !rcl_session_is_unique_active_graphical(
           rcl_session_monitor_get_connection(self->monitor),
           self->active->uid, self->active->object_path))
@@ -289,18 +289,34 @@ out:
   g_variant_unref(snapshot);
 }
 
+/* Discovery-only, stopped or revoked instances must never run a helper. */
+static gboolean
+helper_can_run(RclPlasma6Backend *self)
+{
+  return self->write_enabled && self->bound_path && self->active &&
+         !self->stopping &&
+         rcl_session_monitor_is_available(self->monitor);
+}
+
 static void
 settings_helper_read_cb(GObject *source, GAsyncResult *result,
                         gpointer user_data)
 {
-  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
+  GWeakRef *owner = user_data;
+  RclPlasma6Backend *self = g_weak_ref_get(owner);
   GDataInputStream *stream = G_DATA_INPUT_STREAM(source);
   gsize length = 0;
   GError *error = NULL;
   gchar *line = g_data_input_stream_read_line_finish(stream, result,
                                                       &length, &error);
 
-  if (self->stopping || stream != self->settings_stream)
+  g_weak_ref_clear(owner);
+  g_free(owner);
+
+  /* Always finish the async operation, even if the instance was freed. */
+  if (!self || !helper_can_run(self) || stream != self->settings_stream ||
+      !self->settings_cancellable ||
+      g_cancellable_is_cancelled(self->settings_cancellable))
     goto out;
 
   if (line)
@@ -321,7 +337,7 @@ settings_helper_read_cb(GObject *source, GAsyncResult *result,
     g_clear_object(&self->settings_helper);
     g_clear_object(&self->settings_cancellable);
 
-    if (!self->stopping && self->active && !self->helper_restart_id)
+    if (helper_can_run(self) && !self->helper_restart_id)
       self->helper_restart_id =
         g_timeout_add(HELPER_RESTART_DELAY_MS,
                       helper_restart_cb, self);
@@ -330,21 +346,28 @@ settings_helper_read_cb(GObject *source, GAsyncResult *result,
 out:
   g_free(line);
   g_clear_error(&error);
-  g_object_unref(self);
+  g_clear_object(&self);
 }
 
 static void
 settings_helper_read_next(RclPlasma6Backend *self)
 {
-  if (!self->settings_stream || !self->settings_cancellable ||
-      self->stopping)
+  GWeakRef *owner;
+
+  if (!helper_can_run(self) || !self->settings_stream ||
+      !self->settings_cancellable ||
+      g_cancellable_is_cancelled(self->settings_cancellable))
     return;
 
+  /* Do not keep an otherwise unowned backend alive through an endless
+   * chain of reads. Disposal cancels the outstanding operation. */
+  owner = g_new0(GWeakRef, 1);
+  g_weak_ref_init(owner, self);
   g_data_input_stream_read_line_async(self->settings_stream,
                                       G_PRIORITY_DEFAULT,
                                       self->settings_cancellable,
                                       settings_helper_read_cb,
-                                      g_object_ref(self));
+                                      owner);
 }
 
 static void
@@ -387,7 +410,10 @@ start_settings_helper(RclPlasma6Backend *self)
   GError *error = NULL;
   gboolean ok = FALSE;
 
-  if (!self->active || self->stopping || !rcl_session_monitor_get_connection(self->monitor))
+  if (!helper_can_run(self) || self->settings_helper ||
+      !rcl_session_is_unique_active_graphical(
+          rcl_session_monitor_get_connection(self->monitor),
+          self->active->uid, self->active->object_path))
     return FALSE;
 
   if (!lookup_session_user(self->active->uid, &primary_gid, &home))
@@ -497,7 +523,7 @@ helper_restart_cb(gpointer user_data)
   RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
   self->helper_restart_id = 0;
-  if (!self->stopping && self->active)
+  if (helper_can_run(self))
   {
     stop_settings_helper(self);
     if (!start_settings_helper(self))
@@ -512,7 +538,7 @@ static void
 restart_settings_helper(RclPlasma6Backend *self)
 {
   stop_settings_helper(self);
-  if (self->write_enabled && self->active && !self->stopping && !start_settings_helper(self))
+  if (helper_can_run(self) && !start_settings_helper(self))
     self->helper_restart_id =
       g_timeout_add(HELPER_RESTART_DELAY_MS, helper_restart_cb, self);
 }
@@ -990,6 +1016,13 @@ monitor_invalidated(gpointer user_data)
   RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
   if (!self->bound_path)
     g_signal_emit(self, signals[SIGNAL_SESSIONS_INVALIDATED], 0);
+  else
+  {
+    self->write_enabled = FALSE;
+    stop_settings_helper(self);
+    g_signal_emit(self, signals[SIGNAL_ACTIVE_SESSION_CHANGED], 0,
+                  FALSE, 0u, "", "", "", "", "");
+  }
 }
 
 static void
@@ -997,6 +1030,7 @@ monitor_lost(gpointer user_data)
 {
   RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
 
+  self->write_enabled = FALSE;
   stop_settings_helper(self);
   if (!self->bound_path)
     g_signal_emit(self, signals[SIGNAL_SESSIONS_CHANGED], 0, NULL);
@@ -1013,6 +1047,7 @@ rcl_plasma6_backend_stop(RclPlasma6Backend *self)
 {
   g_return_if_fail(RCL_IS_PLASMA6_BACKEND(self));
   self->stopping = TRUE;
+  self->write_enabled = FALSE;
   rcl_session_monitor_stop(self->monitor);
   stop_settings_helper(self);
   active_session_free(self->active);
@@ -1123,12 +1158,18 @@ static void
 rcl_plasma6_backend_iface_set_write_enabled(RclBackend *backend, gboolean enabled)
 {
   RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(backend);
-  if (self->write_enabled == enabled)
+  enabled = enabled && self->bound_path && !self->stopping;
+  if (!enabled)
+  {
+    self->write_enabled = FALSE;
+    stop_settings_helper(self);
     return;
-  self->write_enabled = enabled;
+  }
+  if (self->write_enabled)
+    return;
+  self->write_enabled = TRUE;
   /* Discard queued data and request a fresh snapshot on ownership changes. */
-  if (!self->stopping && self->active)
-    restart_settings_helper(self);
+  restart_settings_helper(self);
 }
 
 static gboolean
