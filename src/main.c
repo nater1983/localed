@@ -35,9 +35,6 @@
 
 #include "rcl-locale.h"
 #include "backends/backend-manager.h"
-#if HAVE_PLASMA6_BACKEND
-#include "backends/plasma6/plasma6-backend.h"
-#endif
 #include "rcl-accounts-service.h"
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
@@ -660,11 +657,12 @@ gint main(gint argc, gchar **argv)
     else
       g_debug("loaded GNOME backend module");
 #else
-    g_autoptr(RclBackend) backend =
-        rcl_plasma6_backend_new(RCL_LOCALE_DAEMON(state->daemon));
-    if (!backend ||
-        !rcl_backend_manager_set_builtin(state->backend_manager, backend, NULL))
-      g_warning("could not attach built-in desktop backend");
+    g_autoptr(GError) error = NULL;
+    if (!rcl_backend_manager_load(state->backend_manager, "plasma6", &error))
+      g_warning("could not load Plasma 6 backend: %s",
+                error ? error->message : "unknown error");
+    else
+      g_debug("loaded Plasma 6 backend module");
 #endif
   }
 #endif
