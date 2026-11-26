@@ -154,6 +154,12 @@ rcl_schedule_reconnect(RclState *state, const gchar *reason)
   if (state->exiting || state->reconnecting)
     return;
 
+#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
+  /* No automatic desktop writes while locale1 ownership is unavailable. */
+  if (state->backend_manager)
+    rcl_backend_manager_stop(state->backend_manager);
+#endif
+
   if (state->reconnect_id)
     return;
 
