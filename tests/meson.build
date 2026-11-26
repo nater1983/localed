@@ -108,3 +108,26 @@ if have_plasma6_backend
     env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
   )
 endif
+
+if have_gnome_backend or have_plasma6_backend
+  backend_manager_test = executable(
+    'test-backend-manager',
+    [
+      'backends/test-backend-manager.c',
+      '../src/backends/backend-interface.c',
+      '../src/backends/backend-module.c',
+      '../src/rcl-file-transaction.c',
+      '../src/rcl-xkb-config.c',
+      '../src/rcl-locale.c',
+    ],
+    dependencies        : [glib_dep, gio_dep, gio_unix, gmodule_dep],
+    include_directories : [config_h_inc, include_directories('../src')],
+  )
+
+  test(
+    'desktop backend manager arbitration and lifecycle',
+    backend_manager_test,
+    timeout : 30,
+    env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
+  )
+endif
