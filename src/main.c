@@ -670,9 +670,6 @@ gint main(gint argc, gchar **argv)
         g_debug("loaded Plasma 6 backend module");
     }
 #endif
-#if HAVE_GNOME_BACKEND && HAVE_PLASMA6_BACKEND
-    g_message("desktop activation pending session arbitration");
-#endif
   }
 #endif
 
