@@ -68,6 +68,7 @@ enum
 {
   SIGNAL_ACTIVE_SESSION_CHANGED,
   SIGNAL_SESSIONS_CHANGED,
+  SIGNAL_SESSIONS_INVALIDATED,
   N_SIGNALS
 };
 
@@ -984,6 +985,14 @@ monitor_refresh(gpointer user_data)
 }
 
 static void
+monitor_invalidated(gpointer user_data)
+{
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
+  if (!self->bound_path)
+    g_signal_emit(self, signals[SIGNAL_SESSIONS_INVALIDATED], 0);
+}
+
+static void
 monitor_lost(gpointer user_data)
 {
   RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
@@ -1069,6 +1078,11 @@ rcl_plasma6_backend_class_init(RclPlasma6BackendClass *klass)
 
   object_class->dispose = rcl_plasma6_backend_dispose;
 
+  signals[SIGNAL_SESSIONS_INVALIDATED] =
+    g_signal_new("sessions-invalidated", G_TYPE_FROM_CLASS(klass),
+                 G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+                 G_TYPE_NONE, 0);
+
   signals[SIGNAL_SESSIONS_CHANGED] =
     g_signal_new("sessions-changed", G_TYPE_FROM_CLASS(klass),
                  G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
@@ -1093,6 +1107,7 @@ static void
 rcl_plasma6_backend_init(RclPlasma6Backend *self)
 {
   self->monitor = rcl_session_monitor_new(monitor_refresh, monitor_lost, self);
+  rcl_session_monitor_set_invalidated(self->monitor, monitor_invalidated);
 }
 static gboolean
 rcl_plasma6_backend_iface_start(RclBackend *backend, GError **error)
@@ -1135,12 +1150,32 @@ rcl_plasma6_backend_iface_bind_session(RclBackend *backend, guint uid,
 }
 
 static void
+rcl_plasma6_backend_iface_refresh(RclBackend *backend)
+{
+  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(backend);
+  if (!rcl_session_monitor_refresh_now(self->monitor))
+  {
+    if (!self->bound_path)
+      g_signal_emit(self, signals[SIGNAL_SESSIONS_CHANGED], 0, NULL);
+    else
+      g_signal_emit(self, signals[SIGNAL_ACTIVE_SESSION_CHANGED], 0,
+                    FALSE, 0u, "", "", "", "", "");
+    return;
+  }
+
+  /* A coordinated scan requires a readiness report even if unchanged. */
+  if (self->bound_path)
+    emit_active_session_changed(self);
+}
+
+static void
 rcl_plasma6_backend_iface_init(RclBackendInterface *iface)
 {
   iface->start = rcl_plasma6_backend_iface_start;
   iface->stop = rcl_plasma6_backend_iface_stop;
   iface->set_write_enabled = rcl_plasma6_backend_iface_set_write_enabled;
   iface->bind_session = rcl_plasma6_backend_iface_bind_session;
+  iface->refresh = rcl_plasma6_backend_iface_refresh;
 }
 RclBackend *
 rcl_plasma6_backend_new(RclLocaleDaemon *daemon)
