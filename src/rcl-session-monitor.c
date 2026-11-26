@@ -15,7 +15,7 @@ struct _RclSessionMonitor {
   gulong connection_closed_id;
   guint reconnect_id, refresh_id;
   gboolean stopping, logind_available;
-  RclSessionMonitorCallback refresh, lost;
+  RclSessionMonitorCallback refresh, lost, invalidated;
   gpointer user_data;
 };
 
@@ -32,7 +32,11 @@ refresh_timeout_cb(gpointer user_data)
 static void
 schedule_refresh(RclSessionMonitor *self)
 {
-  if (self->stopping || self->refresh_id)
+  if (self->stopping || !self->logind_available)
+    return;
+  if (self->invalidated)
+    self->invalidated(self->user_data);
+  if (self->refresh_id)
     return;
 
   self->refresh_id = g_timeout_add(REFRESH_DELAY_MS,
@@ -45,6 +49,27 @@ rcl_session_monitor_retry_refresh(RclSessionMonitor *self)
   if (self->stopping || !self->logind_available || self->refresh_id)
     return;
   self->refresh_id = g_timeout_add(RECONNECT_DELAY_MS, refresh_timeout_cb, self);
+}
+
+void
+rcl_session_monitor_set_invalidated(RclSessionMonitor *self,
+                                    RclSessionMonitorCallback callback)
+{
+  self->invalidated = callback;
+}
+
+gboolean
+rcl_session_monitor_refresh_now(RclSessionMonitor *self)
+{
+  if (!rcl_session_monitor_is_available(self) || !self->connection)
+    return FALSE;
+  if (self->refresh_id)
+  {
+    g_source_remove(self->refresh_id);
+    self->refresh_id = 0;
+  }
+  self->refresh(self->user_data);
+  return TRUE;
 }
 
 static void
