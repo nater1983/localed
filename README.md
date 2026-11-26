@@ -19,8 +19,7 @@ The daemon follows the same general service pattern as
 - Uses Polkit for authorization, with a configurable privileged group
   (default: `wheel`).
 - Integrates with AccountsService when it is available at runtime.
-- Provides optional desktop input-source integration through a build-time
-  backend selection.
+- Provides optional GNOME and Plasma 6 input-source integration through independently loadable GModule backends, with simultaneous module support.
 - Does not require systemd; it uses D-Bus and a logind-compatible session
   manager for desktop session discovery.
 
@@ -31,7 +30,7 @@ synchronization. Neither desktop backend monitors locale configuration files.
 
 | Library / service | pkg-config name | Minimum version / requirement |
 |---|---|---|
-| GLib / GIO | `glib-2.0`, `gio-2.0`, `gio-unix-2.0` | 2.56 |
+| GLib / GIO / GModule | `glib-2.0`, `gio-2.0`, `gio-unix-2.0`, `gmodule-2.0` | 2.56 |
 | Polkit | `polkit-gobject-1` | 0.113 |
 | D-Bus daemon | — | Runtime requirement |
 | logind-compatible service | — | Runtime requirement for desktop session discovery |
@@ -42,9 +41,9 @@ AccountsService integration is optional at runtime: `localed` monitors its
 D-Bus name and synchronizes account language changes when the service is
 available. No AccountsService development library is required.
 
-The GNOME input-source backend uses GIO/GSettings and the GNOME session's
-D-Bus connection. It does not add a separate helper executable or a separate
-build-time GNOME library dependency.
+The GNOME reader uses GIO/GSettings; the Plasma reader uses GIO/GDBus.
+Both are compiled into one user-side input-sources helper executable.
+Neither requires desktop-specific development libraries.
 
 On Debian/Ubuntu:
 
@@ -62,68 +61,49 @@ dnf install glib2-devel polkit-devel \
 
 ## Building
 
-The default build does not enable a desktop integration backend:
+The current 0.4.0 development configuration defaults to building both desktop
+modules. Select the desired configuration explicitly for packaging.
 
 ```sh
-meson setup build
+meson setup build --prefix=/usr --libdir=lib64 --libexecdir=libexec \
+    --sysconfdir=/etc -Ddesktop-backend=both -Dtests=false
 meson compile -C build
 ```
 
-To build the GNOME input-source backend:
-
-```sh
-meson setup build-gnome -Ddesktop-backend=gnome
-meson compile -C build-gnome
-```
-
-To build the KDE Plasma 6 input-source backend:
-
-```sh
-meson setup build-plasma6 -Ddesktop-backend=plasma6
-meson compile -C build-plasma6
-```
-
-The backend is selected with the `desktop-backend` Meson option:
+The example uses Slackware x86_64 paths; select the appropriate libdir on
+other architectures.
 
 | Option | Description |
 |---|---|
-| `none` | Default. Build localed without a desktop-specific input-source backend. |
-| `gnome` | Build the GNOME session and input-source integration. |
-| `plasma6` | Build the KDE Plasma 6 session and input-source integration. |
+| `none` | Build without desktop keyboard integration. |
+| `gnome` | Build the GNOME module and helper reader. |
+| `plasma6` | Build the Plasma 6 module and helper reader. |
+| `both` | Build both modules and readers (current default). |
 
-For example, to explicitly select the default configuration:
+### Automated tests
+
+Run the entire backend build matrix with isolated configuration files:
 
 ```sh
-meson setup build -Ddesktop-backend=none
+sh tests/run-backend-matrix.sh
 ```
 
-Automated tests are disabled by default and can be enabled for development
-or package validation:
+The runner creates an independent temporary build and configuration directory
+for each backend selection, executes tests serially, and retains the logs.
+For a single configuration, use an isolated test build:
 
 ```sh
-meson setup build-tests -Dtests=true
+test_config=$(mktemp -d)
+meson setup build-tests -Ddesktop-backend=both -Dtests=true \
+    -Dlang_sh="$test_config/lang.sh" \
+    -Drc_keymap="$test_config/rc.keymap" \
+    -Dx11_keyboard_conf="$test_config/00-keyboard.conf"
 meson compile -C build-tests
-meson test -C build-tests --print-errorlogs
+meson test -C build-tests --num-processes 1 --print-errorlogs
 ```
 
-To include the GNOME backend tests:
-
-```sh
-meson setup build-gnome-tests -Ddesktop-backend=gnome -Dtests=true
-meson compile -C build-gnome-tests
-meson test -C build-gnome-tests --print-errorlogs
-```
-
-To include the Plasma 6 backend tests:
-
-```sh
-meson setup build-plasma6-tests -Ddesktop-backend=plasma6 -Dtests=true
-meson compile -C build-plasma6-tests
-meson test -C build-plasma6-tests --print-errorlogs
-```
-
-The SlackBuild enables the test targets and runs the suite before installing
-the package. Test executables are not installed into the resulting package.
+Use a fresh test build directory. Do not install a test build or run the tests
+with production configuration paths. The test binaries are not installed.
 
 ### Common Meson options
 
@@ -167,15 +147,55 @@ names under `libexecdir` (normally `/usr/libexec`):
 └── localed-input-sources-helper
 ```
 
-There is one input-sources helper executable. Desktop-specific helper code
-is compiled into that executable when its backend is selected; GNOME does not
-install a separately named GNOME helper.
+Selected desktop modules are installed in `<libdir>/localed/backends`:
+on Slackware x86_64, `/usr/lib64/localed/backends/gnome.so` and
+`/usr/lib64/localed/backends/plasma.so`. The module loader uses the configured
+installation directory; the daemon and modules share internal ABI version 6
+and must be installed from matching builds.
+
+There is one input-sources helper executable. Desktop-specific reader code
+is compiled into it when selected, and the daemon starts it with `gnome` or
+`plasma6`. Do not run the helper as root for session diagnostics.
+
+For upgrades, confirm the Meson prefix before installation: a default
+`/usr/local` installation does not replace binaries under `/usr`.
+Restart the running daemon after installing matching modules and helper.
 
 ## Desktop input-source integration
 
-Desktop integration is optional and selected at build time with
-`-Ddesktop-backend`. The default is `none`, keeping the daemon independent
-of desktop-specific APIs.
+Desktop integration is selected at build time with `-Ddesktop-backend`.
+The backend manager loads the selected modules at runtime. Desktop-specific
+code remains outside the core daemon.
+
+Discovery instances report complete session snapshots. Operational instances
+are bound to a specific local user's elogind session; inactive instances
+are retained across virtual terminal switches. Only one eligible active
+graphical session can own automatic keyboard writes. The manager revokes
+ownership on invalidation and rechecks eligibility before granting writes;
+the backend checks global session uniqueness again before applying a
+snapshot. Ambiguous or failed discovery does not authorize a new writer.
+The helper is stopped on ownership loss and restarted when ownership returns.
+
+### Console-launched X11 desktops
+
+Slackware users may launch a desktop with `startx` instead of a display
+manager. Elogind can report the original `Type=tty` with an empty Desktop
+property even while Xorg is running. localed resolves these sessions to X11
+only after checking the Xorg executable (root-owned regular file, not
+group/world writable), process UID and exact elogind session membership.
+The backend independently verifies the desktop and user session bus before
+starting the helper. Plain console logins are not graphical sessions.
+
+Console sessions are periodically rechecked at 2.5-second intervals because
+starting or exiting Xorg need not change elogind's session properties.
+Unchanged discovery and nonmatching desktops are not logged repeatedly.
+Normal session transitions and inspection errors remain visible in debug mode.
+A daemon must be running for automatic synchronization to occur.
+
+For diagnostics, run `/usr/libexec/localed --debug` as root with any existing
+instance stopped (or use `--replace`), and run desktop session D-Bus commands
+as the actual desktop user. `loginctl show-session` may still report
+`Type=tty`; localed does not alter elogind's session properties.
 
 ### GNOME
 
@@ -204,7 +224,7 @@ but `us` is active, the Xorg configuration contains `us,es` while
 the console keymap to `es` without removing either XKB layout from the
 Xorg configuration.
 
-The GNOME backend is compiled into `localed`; its session settings reader
+The GNOME backend is loaded from `gnome.so`; its session settings reader
 is compiled into the shared `localed-input-sources-helper` executable.
 The helper executable name and installation path are the same for every
 backend configuration.
@@ -237,7 +257,7 @@ changes refresh the complete XKB layout, variant, and options configuration
 in the configured Xorg keyboard file. The existing XKB validation and
 console-keymap mapping are reused.
 
-As with GNOME, the Plasma-specific reader is compiled into the single
+The Plasma backend is loaded from `plasma.so`. As with GNOME, the Plasma-specific reader is compiled into the single
 `localed-input-sources-helper` executable. No separate Plasma helper binary
 or KDE development library is required; communication uses GIO/GDBus.
 
@@ -245,7 +265,7 @@ or KDE development library is required; communication uses GIO/GDBus.
 
 The backend interface is intended to keep desktop-specific integration out
 of the locale daemon's core. Future desktop integrations can add their
-implementation behind the same interface and build-time selection. They
+implementation behind the same versioned module interface and build-time selection. They
 should reuse the single `localed-input-sources-helper` executable rather
 than install a separate helper binary for each desktop.
 
