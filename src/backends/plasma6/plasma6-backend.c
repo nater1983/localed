@@ -708,18 +708,8 @@ session_has_plasma6_process(RclPlasma6Backend *self,
     }
     g_free(environment);
 
-    reply = g_dbus_connection_call_sync(
-        self->connection,
-        LOGIND_NAME,
-        LOGIND_MANAGER_PATH,
-        LOGIND_MANAGER_IFACE,
-        "GetSessionByPID",
-        g_variant_new("(u)", (guint) pid_value),
-        G_VARIANT_TYPE("(o)"),
-        G_DBUS_CALL_FLAGS_NONE,
-        2000,
-        NULL,
-        NULL);
+    reply = rcl_session_get_by_pid(self->connection, (guint) pid_value,
+                                   2000, NULL);
     if (!reply)
       continue;
 
@@ -833,18 +823,8 @@ find_session_bus_address(RclPlasma6Backend *self,
          !g_str_has_prefix(address, "unix:path=")))
       goto next_process;
 
-    reply = g_dbus_connection_call_sync(
-        self->connection,
-        LOGIND_NAME,
-        LOGIND_MANAGER_PATH,
-        LOGIND_MANAGER_IFACE,
-        "GetSessionByPID",
-        g_variant_new("(u)", (guint) pid_value),
-        G_VARIANT_TYPE("(o)"),
-        G_DBUS_CALL_FLAGS_NONE,
-        2000,
-        NULL,
-        NULL);
+    reply = rcl_session_get_by_pid(self->connection, (guint) pid_value,
+                                   2000, NULL);
     if (!reply)
       goto next_process;
 
@@ -952,18 +932,8 @@ query_session(RclPlasma6Backend *self,
   GError *error = NULL;
   ActiveSession *session = NULL;
 
-  reply = g_dbus_connection_call_sync(
-      self->connection,
-      LOGIND_NAME,
-      object_path,
-      DBUS_PROPERTIES_IFACE,
-      "GetAll",
-      g_variant_new("(s)", LOGIND_SESSION_IFACE),
-      G_VARIANT_TYPE("(a{sv})"),
-      G_DBUS_CALL_FLAGS_NONE,
-      3000,
-      NULL,
-      &error);
+  reply = rcl_session_get_properties(self->connection, object_path,
+                                     3000, &error);
 
   if (!reply)
   {
@@ -1031,18 +1001,7 @@ refresh_sessions(RclPlasma6Backend *self)
   if (self->stopping || !self->logind_available || !self->connection)
     return;
 
-  reply = g_dbus_connection_call_sync(
-      self->connection,
-      LOGIND_NAME,
-      LOGIND_MANAGER_PATH,
-      LOGIND_MANAGER_IFACE,
-      "ListSessions",
-      NULL,
-      G_VARIANT_TYPE("(a(susso))"),
-      G_DBUS_CALL_FLAGS_NONE,
-      5000,
-      NULL,
-      &error);
+  reply = rcl_session_list(self->connection, 5000, &error);
 
   if (!reply)
   {
