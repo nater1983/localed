@@ -650,7 +650,10 @@ gint main(gint argc, gchar **argv)
   {
     state->backend_manager =
         rcl_backend_manager_new(RCL_LOCALE_DAEMON(state->daemon));
-#if HAVE_GNOME_BACKEND
+#if HAVE_GNOME_BACKEND && HAVE_PLASMA6_BACKEND
+    /* Do not select an arbitrary desktop while arbitration is pending. */
+    g_message("both desktop modules built; automatic desktop activation pending session arbitration");
+#elif HAVE_GNOME_BACKEND
     g_autoptr(GError) error = NULL;
     if (!rcl_backend_manager_load(state->backend_manager, "gnome", &error))
       g_warning("could not load GNOME backend: %s", error->message);
