@@ -34,7 +34,7 @@
 #include <locale.h>
 
 #include "rcl-locale.h"
-#include "backends/backend-interface.h"
+#include "backends/backend-manager.h"
 #if HAVE_GNOME_BACKEND
 #include "backends/gnome/gnome-backend.h"
 #elif HAVE_PLASMA6_BACKEND
@@ -83,7 +83,7 @@ typedef struct RclState
   guint       sync_id;
   RclAccountsService *accounts_service;
 #if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
-  RclBackend *backend;
+  RclBackendManager *backend_manager;
 #endif
 } RclState;
 
@@ -105,7 +105,7 @@ rcl_state_free(RclState *state)
   }
 
 #if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
-  g_clear_object(&state->backend);
+  g_clear_pointer(&state->backend_manager, rcl_backend_manager_free);
 #endif
   g_clear_object(&state->accounts_service);
 
@@ -251,8 +251,8 @@ rcl_main_name_acquired(GDBusConnection *connection,
 
 #if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
   /* Start the selected desktop backend only after locale1 is registered. */
-  if (state->backend &&
-      !rcl_backend_start(state->backend, NULL))
+  if (state->backend_manager &&
+      !rcl_backend_manager_start(state->backend_manager, NULL))
     g_warning("could not start desktop backend session discovery");
 #endif
 
@@ -651,12 +651,20 @@ gint main(gint argc, gchar **argv)
     g_clear_error(&error);
   }
 
+#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
+  {
+    g_autoptr(RclBackend) backend = NULL;
+    state->backend_manager =
+        rcl_backend_manager_new(RCL_LOCALE_DAEMON(state->daemon));
 #if HAVE_GNOME_BACKEND
-  state->backend =
-      rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
-#elif HAVE_PLASMA6_BACKEND
-  state->backend =
-      rcl_plasma6_backend_new(RCL_LOCALE_DAEMON(state->daemon));
+    backend = rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
+#else
+    backend = rcl_plasma6_backend_new(RCL_LOCALE_DAEMON(state->daemon));
+#endif
+    if (!backend ||
+        !rcl_backend_manager_set_builtin(state->backend_manager, backend, NULL))
+      g_warning("could not attach built-in desktop backend");
+  }
 #endif
 
   /* Acquire the D-Bus name for the first time */
