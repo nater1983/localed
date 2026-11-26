@@ -759,30 +759,50 @@ session_properties_are_eligible(RclGnomeBackend *self,
                                 const gchar *seat_from_manager,
                                 const gchar *session_path,
                                 guint uid,
-                                ActiveSession *session)
+                                ActiveSession *session,
+                                gboolean *failed, gboolean *poll_console)
 {
   const gchar *session_type = NULL;
+  const gchar *raw_type = NULL;
   const gchar *desktop = NULL;
+  gboolean console;
+  g_autoptr(GError) error = NULL;
 
-  if (!rcl_session_is_local_user(properties, seat_from_manager) ||
-      !rcl_session_is_graphical(properties, &session_type))
+  if (!rcl_session_is_local_user(properties, seat_from_manager))
+    return FALSE;
+
+  g_variant_lookup(properties, "Type", "&s", &raw_type);
+  console = g_strcmp0(raw_type, "tty") == 0;
+  if (console)
+    *poll_console = TRUE;
+  if (!rcl_session_resolve_graphical(
+          rcl_session_monitor_get_connection(self->monitor), properties,
+          uid, session_path, &session_type, &error))
+  {
+    *failed = TRUE;
+    g_debug("could not resolve graphical session %s: %s", session_path,
+            error ? error->message : "unknown error");
+    return FALSE;
+  }
+  if (!session_type)
     return FALSE;
 
   if (g_variant_lookup(properties, "Desktop", "&s", &desktop) &&
-      desktop && *desktop)
-  {
-    if (!desktop_is_gnome(desktop))
-      return FALSE;
-  }
-  else
+      desktop && *desktop && !desktop_is_gnome(desktop))
+    return FALSE;
+
+  /* Console sessions always require independent desktop process evidence. */
+  if (console || !desktop || !*desktop)
   {
     if (!session_has_gnome_process(self, uid, session_path))
     {
-      g_debug("rejecting session %s: Desktop is empty and no GNOME process "
+      g_debug("rejecting session %s: no GNOME process "
               "could be verified in that session", session_path);
       return FALSE;
     }
     desktop = "GNOME (verified by session process)";
+    if (console)
+      g_debug("verified console-launched X11 GNOME session %s", session_path);
   }
 
   session->seat = g_strdup(seat_from_manager);
@@ -797,7 +817,7 @@ query_session(RclGnomeBackend *self,
               guint uid,
               const gchar *seat,
               const gchar *object_path, gboolean *failed,
-              gboolean *active)
+              gboolean *active, gboolean *poll_console)
 {
   GVariant *reply = NULL;
   GVariant *properties = NULL;
@@ -832,7 +852,8 @@ query_session(RclGnomeBackend *self,
   session->uid = uid;
 
   if (!session_properties_are_eligible(self, properties, seat,
-                                         object_path, uid, session))
+                                         object_path, uid, session,
+                                         failed, poll_console))
   {
     active_session_free(session);
     session = NULL;
@@ -888,6 +909,7 @@ refresh_sessions(RclGnomeBackend *self)
   guint eligible_count = 0;
   GVariantBuilder discovered;
   gboolean failed = FALSE;
+  gboolean poll_console = FALSE;
   GError *error = NULL;
 
   if (self->stopping || !rcl_session_monitor_is_available(self->monitor) || !rcl_session_monitor_get_connection(self->monitor))
@@ -930,7 +952,8 @@ refresh_sessions(RclGnomeBackend *self)
 
     if (!*seat)
       continue;
-    found = query_session(self, id, uid, seat, object_path, &failed, &active);
+    found = query_session(self, id, uid, seat, object_path, &failed,
+                          &active, &poll_console);
     if (failed)
       break;
     if (!found)
@@ -997,6 +1020,11 @@ refresh_sessions(RclGnomeBackend *self)
   active_session_free(candidate);
   g_variant_unref(sessions);
   g_variant_unref(reply);
+
+  /* startx and Xorg exit do not necessarily change any logind property.
+   * Recheck console sessions without invalidating unchanged ownership. */
+  if (poll_console)
+    rcl_session_monitor_retry_refresh(self->monitor);
 }
 
 static void
