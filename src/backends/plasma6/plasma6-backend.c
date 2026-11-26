@@ -746,9 +746,6 @@ session_has_plasma6_process(RclPlasma6Backend *self,
 
     g_variant_get(reply, "(&o)", &process_session_path);
     found = g_strcmp0(process_session_path, session_path) == 0;
-    if (found)
-      g_debug("identified Plasma 6 session %s from process %u",
-              session_path, (guint) pid_value);
     g_variant_unref(reply);
   }
 
@@ -799,15 +796,12 @@ session_properties_are_eligible(RclPlasma6Backend *self,
   /* Console sessions always require independent desktop process evidence. */
   if (console || !desktop || !*desktop)
   {
+    /* A non-matching desktop is a normal discovery result, not an error.
+     * Report the successful desktop only when active session state changes. */
     if (!session_has_plasma6_process(self, uid, session_path))
-    {
-      g_debug("rejecting session %s: no Plasma 6 process "
-              "could be verified in that session", session_path);
       return FALSE;
-    }
-    desktop = "Plasma 6 (verified by session process)";
-    if (console)
-      g_debug("verified console-launched X11 Plasma 6 session %s", session_path);
+    desktop = console ? "Plasma 6 (verified console-launched X11)" :
+                        "Plasma 6 (verified by session process)";
   }
 
   session->seat = g_strdup(seat_from_manager);
@@ -1011,12 +1005,14 @@ refresh_sessions(RclPlasma6Backend *self)
     self->active = active_session_copy(candidate);
     emit_active_session_changed(self);
 
-    if (self->active)
+    /* The bound instance reports operational session transitions. The
+     * discovery instance must not duplicate those messages. */
+    if (self->bound_path && self->active)
       g_debug("active local Plasma 6 session: id=%s uid=%u seat=%s type=%s "
               "desktop=%s",
               self->active->id, self->active->uid, self->active->seat,
               self->active->session_type, self->active->desktop);
-    else
+    else if (self->bound_path)
       g_debug("no unambiguous active local Plasma 6 session");
 
     restart_settings_helper(self);
