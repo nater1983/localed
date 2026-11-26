@@ -6,7 +6,7 @@ G_BEGIN_DECLS
 typedef struct _RclBackendManager RclBackendManager;
 
 /* Main-context-owned manager. The daemon must outlive the manager.
- * Multiple modules may be loaded; activation in dual builds is deferred. */
+ * Multiple modules may monitor sessions; only one may write at a time. */
 RclBackendManager *rcl_backend_manager_new(RclLocaleDaemon *daemon);
 gboolean rcl_backend_manager_load(RclBackendManager *self,
                                   const gchar *id, GError **error);
