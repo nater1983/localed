@@ -312,7 +312,7 @@ guessing.
 When `org.freedesktop.Accounts` is available on the system bus, `localed`
 subscribes to account `Language` property changes and applies them for
 accounts in the configured privileged group (default: `wheel`) with the
-only active local graphical user session. The monitor reconnects when
+only active local user session (including TTY-based desktop sessions). The monitor reconnects when
 AccountsService appears or restarts. Without AccountsService, automatic
 desktop locale synchronization is unavailable; manual locale changes
 through locale1 remain supported. Plasma 6.7.6 was runtime-tested with
