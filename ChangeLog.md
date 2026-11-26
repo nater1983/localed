@@ -2,6 +2,17 @@
 
 All notable changes to `localed` are documented in this file.
 
+## [0.4.0] - Unreleased
+
+### Changed
+- Use AccountsService as the sole automatic primary locale synchronization path for GNOME and Plasma 6; remove the Plasma-specific locale file monitor and parser.
+- Require an unambiguous active local graphical session and privileged-group membership for automatic AccountsService updates.
+- Skip unchanged shell locale file writes and isolate the C-shell companion path alongside the configured Bourne-shell script.
+
+### Validation
+- Plasma 6.7.6 runtime testing verified primary locale updates, regional format changes, and translation preference additions and reordering before consolidation. Other Plasma releases remain unverified.
+- Add regression coverage for duplicate locale writes and missing companion recovery.
+
 ## [0.3.1] - 2026-11-23
 
 Maintenance release for Plasma 6 locale synchronization.
