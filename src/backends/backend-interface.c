@@ -48,3 +48,13 @@ rcl_backend_bind_session(RclBackend *self, guint uid, const gchar *id,
   }
   return iface->bind_session(self, uid, id, path, error);
 }
+
+void
+rcl_backend_refresh(RclBackend *self)
+{
+  RclBackendInterface *iface;
+  g_return_if_fail(RCL_IS_BACKEND(self));
+  iface = RCL_BACKEND_GET_IFACE(self);
+  g_return_if_fail(iface->refresh != NULL);
+  iface->refresh(self);
+}
