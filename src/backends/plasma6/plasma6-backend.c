@@ -96,9 +96,8 @@ lookup_session_user(guint uid, gid_t *primary_gid, gchar **home)
   return TRUE;
 }
 
-static gchar *find_session_bus_address(RclPlasma6Backend *self,
-                                       guint uid,
-                                       const gchar *session_path);
+static gboolean process_environment_is_plasma6(const gchar *environment,
+                                                gsize length);
 static void settings_helper_read_next(RclPlasma6Backend *self);
 static gboolean helper_restart_cb(gpointer user_data);
 static void restart_settings_helper(RclPlasma6Backend *self);
@@ -413,8 +412,10 @@ start_settings_helper(RclPlasma6Backend *self)
     goto out;
   }
 
-  bus_address = find_session_bus_address(self, self->active->uid,
-                                         self->active->object_path);
+  bus_address = rcl_session_find_bus_address(self->connection, self->active->uid,
+                                             self->active->object_path,
+                                             process_environment_is_plasma6,
+                                             TRUE);
   if (!bus_address)
   {
     g_debug("could not find a verified D-Bus socket for Plasma 6 session %s",
@@ -726,161 +727,6 @@ session_has_plasma6_process(RclPlasma6Backend *self,
 }
 
 
-/*
- * Slackware's session bus may be started at a private path in /tmp rather
- * than /run/user/$UID/bus. Find the address from a Plasma 6 process that elogind
- * confirms belongs to the active session. Never trust an arbitrary process
- * environment or an address that points to another user's socket.
- */
-static gchar *
-find_session_bus_address(RclPlasma6Backend *self,
-                         guint uid,
-                         const gchar *session_path)
-{
-  GDir *proc_dir;
-  const gchar *entry;
-  gchar *result = NULL;
-  GError *error = NULL;
-
-  proc_dir = g_dir_open("/proc", 0, &error);
-  if (!proc_dir)
-  {
-    g_debug("could not scan /proc for the Plasma 6 session bus: %s",
-            error ? error->message : "unknown error");
-    g_clear_error(&error);
-    return NULL;
-  }
-
-  while (!result && (entry = g_dir_read_name(proc_dir)) != NULL)
-  {
-    gchar *endptr = NULL;
-    guint64 pid_value;
-    gchar *proc_path;
-    gchar *environment_path;
-    gchar *environment = NULL;
-    gsize environment_length = 0;
-    struct stat st;
-    GVariant *reply;
-    const gchar *process_session_path = NULL;
-    gsize offset = 0;
-    gchar *address = NULL;
-
-    if (!g_ascii_isdigit(entry[0]))
-      continue;
-
-    errno = 0;
-    pid_value = g_ascii_strtoull(entry, &endptr, 10);
-    if (errno || !endptr || *endptr || pid_value == 0 ||
-        pid_value > G_MAXUINT)
-      continue;
-
-    proc_path = g_build_filename("/proc", entry, NULL);
-    if (stat(proc_path, &st) != 0 || st.st_uid != (uid_t) uid)
-    {
-      g_free(proc_path);
-      continue;
-    }
-
-    environment_path = g_build_filename(proc_path, "environ", NULL);
-    g_free(proc_path);
-    if (!g_file_get_contents(environment_path, &environment,
-                             &environment_length, NULL))
-    {
-      g_free(environment_path);
-      continue;
-    }
-    g_free(environment_path);
-
-    if (!process_environment_is_plasma6(environment, environment_length))
-      goto next_process;
-
-    while (offset < environment_length)
-    {
-      const gchar *item = environment + offset;
-      const gchar *end = memchr(item, '\0', environment_length - offset);
-      gsize item_length = end ? (gsize) (end - item) :
-                                environment_length - offset;
-
-      if (g_str_has_prefix(item, "DBUS_SESSION_BUS_ADDRESS="))
-      {
-        address = g_strndup(item + strlen("DBUS_SESSION_BUS_ADDRESS="),
-                            item_length -
-                            strlen("DBUS_SESSION_BUS_ADDRESS="));
-        break;
-      }
-
-      offset += item_length + (end ? 1 : 0);
-    }
-
-    /*
-     * Slackware 15's dbus-run-session uses an abstract Unix socket.
-     * Also accept the conventional filesystem socket used by other
-     * session-bus launchers. In either case, the process UID and exact
-     * logind session are verified below before accepting the address.
-     */
-    if (!address ||
-        (!g_str_has_prefix(address, "unix:abstract=") &&
-         !g_str_has_prefix(address, "unix:path=")))
-      goto next_process;
-
-    reply = rcl_session_get_by_pid(self->connection, (guint) pid_value,
-                                   2000, NULL);
-    if (!reply)
-      goto next_process;
-
-    g_variant_get(reply, "(&o)", &process_session_path);
-    if (g_strcmp0(process_session_path, session_path) == 0)
-    {
-      if (g_str_has_prefix(address, "unix:abstract="))
-      {
-        const gchar *abstract_name = address + strlen("unix:abstract=");
-        const gchar *address_end = strpbrk(abstract_name, ",;");
-
-        if (*abstract_name && (!address_end || address_end > abstract_name))
-        {
-          result = g_strdup(address);
-          g_debug("using Plasma 6 abstract session bus from logind-verified "
-                  "process %u", (guint) pid_value);
-        }
-      }
-      else
-      {
-        const gchar *path_start = address + strlen("unix:path=");
-        const gchar *path_end = strpbrk(path_start, ",;");
-        gchar *socket_path = path_end ?
-            g_strndup(path_start, (gsize) (path_end - path_start)) :
-            g_strdup(path_start);
-        struct stat socket_stat;
-
-        if (g_path_is_absolute(socket_path) &&
-            stat(socket_path, &socket_stat) == 0 &&
-            S_ISSOCK(socket_stat.st_mode) &&
-            socket_stat.st_uid == (uid_t) uid)
-        {
-          result = g_strdup(address);
-          g_debug("using Plasma 6 session bus from process %u: %s",
-                  (guint) pid_value, socket_path);
-        }
-        else
-        {
-          g_debug("ignoring Plasma 6 session bus from process %u: socket is "
-                  "missing, not a Unix socket, or not owned by uid %u",
-                  (guint) pid_value, uid);
-        }
-
-        g_free(socket_path);
-      }
-    }
-    g_variant_unref(reply);
-
-next_process:
-    g_free(address);
-    g_free(environment);
-  }
-
-  g_dir_close(proc_dir);
-  return result;
-}
 
 static gboolean
 session_properties_are_eligible(RclPlasma6Backend *self,
