@@ -37,6 +37,16 @@ gboolean rcl_backend_module_validate(
     const RclBackendModuleDescriptor *descriptor,
     const gchar *expected_id, GError **error);
 
+/* Open a trusted module and retain its immutable factory descriptor.
+ * The descriptor remains valid for the process lifetime. */
+const RclBackendModuleDescriptor *rcl_backend_module_open(
+    const gchar *path, const gchar *expected_id, GError **error);
+
+/* Create a fresh instance from a previously validated resident descriptor. */
+RclBackend *rcl_backend_module_create(
+    const RclBackendModuleDescriptor *descriptor,
+    RclLocaleDaemon *daemon, GError **error);
+
 /* Load only from an absolute, trusted installation path. The returned
  * backend owns a full reference; the module remains resident.
  * The caller must stop and unref the backend before destroying daemon. */
