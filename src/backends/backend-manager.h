@@ -10,10 +10,6 @@ typedef struct _RclBackendManager RclBackendManager;
 RclBackendManager *rcl_backend_manager_new(RclLocaleDaemon *daemon);
 gboolean rcl_backend_manager_load(RclBackendManager *self,
                                   const gchar *id, GError **error);
-/* Transitional adapter: takes its own reference to a built-in backend. */
-gboolean rcl_backend_manager_set_builtin(RclBackendManager *self,
-                                         RclBackend *backend,
-                                         GError **error);
 gboolean rcl_backend_manager_start(RclBackendManager *self, GError **error);
 void rcl_backend_manager_stop(RclBackendManager *self);
 void rcl_backend_manager_free(RclBackendManager *self);
