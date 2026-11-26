@@ -6,6 +6,8 @@
  * The monitor is borrowed from backends; identity strings are owned. */
 typedef struct {
   RclBackend *monitor;
+  RclBackend *instance; /* owned, bound to this identity */
+  gboolean ready;
   gchar *module_id;
   gchar *id;
   gchar *path;
@@ -16,6 +18,11 @@ static void
 session_claim_free(gpointer data)
 {
   RclSessionClaim *claim = data;
+  if (claim->instance)
+  {
+    rcl_backend_stop(claim->instance);
+    g_object_unref(claim->instance);
+  }
   g_free(claim->module_id);
   g_free(claim->id);
   g_free(claim->path);
@@ -61,6 +68,77 @@ set_owner(RclBackendManager *self, RclBackend *owner)
           owner ? G_OBJECT_TYPE_NAME(owner) : "none");
 }
 
+static gboolean reconcile_cb(gpointer data);
+
+static void
+schedule_reconcile(RclBackendManager *self)
+{
+  if (self->started && !self->reconcile_id)
+    self->reconcile_id = g_timeout_add(250, reconcile_cb, self);
+}
+
+static void
+instance_session_changed(RclBackend *backend, gboolean active, guint uid,
+                         const gchar *id, const gchar *path, const gchar *seat,
+                         const gchar *type, const gchar *desktop, gpointer data)
+{
+  RclBackendManager *self = data;
+  GHashTableIter iter;
+  gpointer value;
+  (void) seat;
+  (void) type;
+  (void) desktop;
+
+  if (!self->started)
+    return;
+  g_hash_table_iter_init(&iter, self->sessions);
+  while (g_hash_table_iter_next(&iter, NULL, &value))
+  {
+    RclSessionClaim *claim = value;
+    if (claim->instance != backend)
+      continue;
+    claim->ready = active && uid == claim->uid &&
+                   g_strcmp0(id, claim->id) == 0 &&
+                   g_strcmp0(path, claim->path) == 0;
+    if (!claim->ready && self->owner == backend)
+      set_owner(self, NULL);
+    schedule_reconcile(self);
+    return;
+  }
+}
+
+static gboolean
+ensure_session_instance(RclBackendManager *self, RclSessionClaim *claim)
+{
+  const RclBackendModuleDescriptor *descriptor;
+  g_autoptr(GError) error = NULL;
+  RclBackend *instance;
+
+  if (claim->instance)
+    return TRUE;
+  descriptor = g_hash_table_lookup(self->modules, claim->module_id);
+  if (!descriptor)
+    return FALSE;
+  instance = rcl_backend_module_create(descriptor, self->daemon, &error);
+  if (!instance || !rcl_backend_bind_session(instance, claim->uid, claim->id,
+                                            claim->path, &error))
+  {
+    g_warning("could not create session backend %s: %s", claim->path,
+              error ? error->message : "unknown error");
+    g_clear_object(&instance);
+    return FALSE;
+  }
+  claim->instance = instance;
+  g_signal_connect(instance, "active-session-changed",
+                   G_CALLBACK(instance_session_changed), self);
+  if (!rcl_backend_start(instance, &error))
+    g_debug("session backend %s initial connection pending: %s", claim->path,
+            error ? error->message : "monitor reconnect pending");
+  g_debug("created %s backend instance for session %s uid=%u",
+          claim->module_id, claim->id, claim->uid);
+  return TRUE;
+}
+
 static gboolean
 reconcile_cb(gpointer data)
 {
@@ -78,7 +156,10 @@ reconcile_cb(gpointer data)
   g_hash_table_iter_init(&iter, self->sessions);
   g_hash_table_iter_next(&iter, NULL, &value);
   claim = value;
-  set_owner(self, claim->monitor);
+  if (!ensure_session_instance(self, claim) || !claim->ready)
+    set_owner(self, NULL);
+  else
+    set_owner(self, claim->instance);
   return G_SOURCE_REMOVE;
 }
 
@@ -106,7 +187,12 @@ active_session_changed(RclBackend *backend, gboolean active, guint uid,
   g_hash_table_iter_init(&iter, self->sessions);
   while (g_hash_table_iter_next(&iter, NULL, &value))
     if (((RclSessionClaim *) value)->monitor == backend)
+    {
+      RclSessionClaim *old = value;
+      if (old->instance)
+        g_signal_handlers_disconnect_by_data(old->instance, self);
       g_hash_table_iter_remove(&iter);
+    }
 
   g_hash_table_iter_init(&iter, self->backends);
   while (g_hash_table_iter_next(&iter, &key, &value))
@@ -129,8 +215,7 @@ active_session_changed(RclBackend *backend, gboolean active, guint uid,
                         g_strdup_printf("%s:%s", module_id, path), claim);
   }
 
-  if (!self->reconcile_id)
-    self->reconcile_id = g_timeout_add(250, reconcile_cb, self);
+  schedule_reconcile(self);
 }
 
 gboolean
@@ -231,6 +316,13 @@ rcl_backend_manager_stop(RclBackendManager *self)
     self->reconcile_id = 0;
   }
   set_owner(self, NULL);
+  g_hash_table_iter_init(&iter, self->sessions);
+  while (g_hash_table_iter_next(&iter, NULL, &backend))
+  {
+    RclSessionClaim *claim = backend;
+    if (claim->instance)
+      g_signal_handlers_disconnect_by_data(claim->instance, self);
+  }
   g_hash_table_remove_all(self->sessions);
   g_hash_table_iter_init(&iter, self->backends);
   while (g_hash_table_iter_next(&iter, NULL, &backend))
