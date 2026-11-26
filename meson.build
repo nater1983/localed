@@ -105,6 +105,13 @@ conf.set_quoted('RCL_RC_KEYMAP_TOGGLE_FILE',
                 get_option('rc_keymap') + '.toggle')
 conf.set_quoted('RCL_X11_KEYBOARD_FILE', get_option('x11_keyboard_conf'))
 
+backend_module_dir = get_option('libdir')
+if not backend_module_dir.startswith('/')
+  backend_module_dir = join_paths(prefix, backend_module_dir)
+endif
+backend_module_dir = join_paths(backend_module_dir, 'localed', 'backends')
+conf.set_quoted('RCL_BACKEND_MODULE_DIR', backend_module_dir)
+
 desktop_backend = get_option('desktop-backend')
 conf.set10('HAVE_GNOME_BACKEND', desktop_backend == 'gnome')
 conf.set10('HAVE_PLASMA6_BACKEND', desktop_backend == 'plasma6')
@@ -145,4 +152,5 @@ summary({
   'X11 keyboard'  : get_option('x11_keyboard_conf'),
   'privileged group': get_option('privileged-group'),
   'desktop backend'  : desktop_backend,
+  'backend module dir': backend_module_dir,
 }, section : 'Configuration')
