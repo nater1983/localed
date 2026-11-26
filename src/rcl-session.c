@@ -109,6 +109,49 @@ rcl_session_uid_is_unique_active_local(GDBusConnection *connection, guint64 uid)
 }
 
 
+gboolean
+rcl_session_is_unique_active_graphical(GDBusConnection *connection,
+                                      guint uid, const gchar *session_path)
+{
+  g_autoptr(GVariant) reply = NULL;
+  g_autoptr(GVariant) sessions = NULL;
+  GVariantIter iter;
+  const gchar *id, *user, *seat, *path;
+  guint session_uid, eligible = 0;
+  gboolean matches = FALSE;
+
+  if (!connection || !session_path)
+    return FALSE;
+
+  reply = rcl_session_list(connection, 2000, NULL);
+  if (!reply)
+    return FALSE;
+
+  g_variant_get(reply, "(@a(susso))", &sessions);
+  g_variant_iter_init(&iter, sessions);
+  while (g_variant_iter_next(&iter, "(&su&s&s&o)", &id, &session_uid,
+                             &user, &seat, &path))
+  {
+    g_autoptr(GVariant) result = NULL;
+    g_autoptr(GVariant) props = NULL;
+
+    if (!*seat)
+      continue;
+    result = rcl_session_get_properties(connection, path, 2000, NULL);
+    if (!result)
+      return FALSE;
+    g_variant_get(result, "(@a{sv})", &props);
+    if (!rcl_session_is_active_local_user(props, seat) ||
+        !rcl_session_is_graphical(props, NULL))
+      continue;
+    if (++eligible > 1)
+      return FALSE;
+    matches = session_uid == uid && g_strcmp0(path, session_path) == 0;
+  }
+
+  return eligible == 1 && matches;
+}
+
 gchar *
 rcl_session_find_bus_address(GDBusConnection *connection, guint uid,
                              const gchar *session_path,
