@@ -106,12 +106,14 @@ instance_session_changed(RclBackend *backend, gboolean active, guint uid,
     RclSessionClaim *claim = value;
     if (claim->instance != backend)
       continue;
+    gboolean was_ready = claim->ready;
     claim->ready = active && uid == claim->uid &&
                    g_strcmp0(id, claim->id) == 0 &&
                    g_strcmp0(path, claim->path) == 0;
     if (!claim->ready && self->owner == backend)
       set_owner(self, NULL);
-    schedule_reconcile(self);
+    if (was_ready != claim->ready || !self->owner)
+      schedule_reconcile(self);
     return;
   }
 }
@@ -325,6 +327,13 @@ sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
 
   if (changed || !self->owner)
     schedule_reconcile(self);
+  else if (!self->reconciling)
+  {
+    /* A periodic console discovery report can be unchanged even when an
+     * unclaimed graphical session has appeared. Recheck the current owner's
+     * global eligibility without restarting a healthy helper. */
+    rcl_backend_refresh(self->owner);
+  }
 }
 
 gboolean
