@@ -12,7 +12,7 @@ G_BEGIN_DECLS
  * Modules using static GTypes must remain resident once their factory
  * has been called, even if the factory fails or the instance is stopped.
  */
-#define RCL_BACKEND_MODULE_ABI_VERSION 2u
+#define RCL_BACKEND_MODULE_ABI_VERSION 3u
 #define RCL_BACKEND_MODULE_QUERY_SYMBOL "rcl_backend_module_query"
 
 typedef struct {
