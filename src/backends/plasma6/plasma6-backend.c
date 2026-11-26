@@ -56,12 +56,6 @@ struct _RclPlasma6Backend
   guint helper_restart_id;
 
   GSubprocess *settings_helper;
-  GFileMonitor *locale_monitor;
-  gchar *locale_config_path;
-  gchar *last_locale;
-  gchar *requested_locale;
-  GCancellable *locale_cancellable;
-  gboolean locale_sync_pending;
   GDataInputStream *settings_stream;
   GCancellable *settings_cancellable;
   RclLocaleDaemon *daemon; /* borrowed; owned by the main daemon state */
@@ -107,7 +101,6 @@ static gchar *find_session_bus_address(RclPlasma6Backend *self,
 static void settings_helper_read_next(RclPlasma6Backend *self);
 static gboolean helper_restart_cb(gpointer user_data);
 static void restart_settings_helper(RclPlasma6Backend *self);
-static void sync_plasma_locale(RclPlasma6Backend *self);
 
 
 typedef struct
@@ -155,225 +148,6 @@ plasma6_console_keymap_lookup(const gchar *layout, const gchar *variant)
       return plasma6_console_keymaps[i].keymap;
 
   return NULL;
-}
-
-gchar *
-rcl_plasma6_backend_locale_from_localerc(const gchar *contents, GError **error)
-{
-  g_autoptr(GKeyFile) key_file = NULL;
-  g_autofree gchar *locale = NULL;
-  const gchar *p;
-
-  g_return_val_if_fail(contents != NULL, NULL);
-  key_file = g_key_file_new();
-  if (!g_key_file_load_from_data(key_file, contents, -1, G_KEY_FILE_NONE, error))
-    return NULL;
-
-  locale = g_key_file_get_string(key_file, "Formats", "LANG", error);
-  if (!locale)
-    return NULL;
-
-  /* LANG is a single locale identifier. Keep its codeset and modifier. */
-  for (p = locale; *p; p++)
-    if (!(g_ascii_isalnum(*p) || *p == '_' || *p == '-' ||
-          *p == '.' || *p == '@'))
-      break;
-
-  if (p == locale || *p || p - locale > 128)
-  {
-    g_set_error_literal(error, G_KEY_FILE_ERROR, G_KEY_FILE_ERROR_INVALID_VALUE,
-                        _("Invalid LANG value in Plasma [Formats]"));
-    return NULL;
-  }
-
-  return g_steal_pointer(&locale);
-}
-
-typedef struct
-{
-  RclPlasma6Backend *backend;
-  gchar *locale;
-} PlasmaLocaleCall;
-
-static void
-plasma_locale_call_free(PlasmaLocaleCall *call)
-{
-  g_clear_object(&call->backend);
-  g_free(call->locale);
-  g_free(call);
-}
-
-static void
-plasma_locale_call_cb(GObject *source_object,
-                      GAsyncResult *result,
-                      gpointer user_data)
-{
-  PlasmaLocaleCall *call = user_data;
-  RclPlasma6Backend *self = call->backend;
-  GError *error = NULL;
-  GVariant *reply;
-
-  reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source_object),
-                                        result, &error);
-  self->locale_sync_pending = FALSE;
-  g_clear_object(&self->locale_cancellable);
-
-  if (reply)
-  {
-    g_variant_unref(reply);
-    g_free(self->last_locale);
-    self->last_locale = g_strdup(call->locale);
-    g_debug("synchronized Plasma 6 locale: LANG=%s",
-            call->locale);
-  }
-  else if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-  {
-    g_warning("could not synchronize Plasma 6 locale: %s",
-              error ? error->message : "unknown D-Bus error");
-  }
-  g_clear_error(&error);
-
-  /*
-   * The file may have changed again while the request was in flight.
-   * Re-read it now and immediately submit the newest value if necessary.
-   */
-  if (!self->stopping && self->active)
-    sync_plasma_locale(self);
-
-  plasma_locale_call_free(call);
-}
-
-static void
-sync_plasma_locale(RclPlasma6Backend *self)
-{
-  gchar *contents = NULL;
-  gchar *locale = NULL;
-  gchar *assignment = NULL;
-  const gchar *locale_values[2] = { NULL, NULL };
-  GError *error = NULL;
-  PlasmaLocaleCall *call;
-
-  if (!self->active || !self->locale_config_path || self->stopping)
-    return;
-
-  if (!g_file_get_contents(self->locale_config_path, &contents, NULL, &error))
-  {
-    g_debug("could not read Plasma locale configuration %s: %s",
-            self->locale_config_path, error->message);
-    g_clear_error(&error);
-    return;
-  }
-
-  locale = rcl_plasma6_backend_locale_from_localerc(contents, &error);
-  if (!locale)
-  {
-    g_debug("Plasma locale configuration has no usable Formats/LANG value: %s",
-            error ? error->message : "unknown configuration error");
-    g_clear_error(&error);
-    goto out;
-  }
-
-  g_free(self->requested_locale);
-  self->requested_locale = g_strdup(locale);
-
-  if (g_strcmp0(locale, self->last_locale) == 0)
-    goto out;
-
-  /*
-   * SetLocale is handled by this same localed process. A synchronous call
-   * would block the main loop that must dispatch the method and therefore
-   * deadlock until the D-Bus timeout. Queue it asynchronously instead.
-   */
-  if (self->locale_sync_pending)
-    goto out;
-
-  assignment = g_strconcat("LANG=", locale, NULL);
-  locale_values[0] = assignment;
-
-  self->locale_cancellable = g_cancellable_new();
-  self->locale_sync_pending = TRUE;
-
-  call = g_new0(PlasmaLocaleCall, 1);
-  call->backend = g_object_ref(self);
-  call->locale = g_strdup(locale);
-
-  g_dbus_connection_call(self->connection,
-                         "org.freedesktop.locale1",
-                         "/org/freedesktop/locale1",
-                         "org.freedesktop.locale1",
-                         "SetLocale",
-                         g_variant_new("(^asb)", locale_values, FALSE),
-                         G_VARIANT_TYPE("()"),
-                         G_DBUS_CALL_FLAGS_NONE,
-                         G_MAXINT,
-                         self->locale_cancellable,
-                         plasma_locale_call_cb,
-                         call);
-
-out:
-  g_free(assignment);
-  g_free(locale);
-  g_free(contents);
-}
-
-static void
-locale_config_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other_file,
-                          GFileMonitorEvent event, gpointer user_data)
-{
-  RclPlasma6Backend *self = RCL_PLASMA6_BACKEND(user_data);
-  gchar *path;
-  (void) monitor; (void) other_file; (void) event;
-  if (!file || !self->locale_config_path)
-    return;
-  path = g_file_get_path(file);
-  if (g_strcmp0(path, self->locale_config_path) == 0)
-    sync_plasma_locale(self);
-  g_free(path);
-}
-
-static void
-stop_locale_monitor(RclPlasma6Backend *self)
-{
-  g_clear_object(&self->locale_monitor);
-  if (self->locale_cancellable)
-    g_cancellable_cancel(self->locale_cancellable);
-  g_clear_object(&self->locale_cancellable);
-  self->locale_sync_pending = FALSE;
-  g_clear_pointer(&self->locale_config_path, g_free);
-  g_clear_pointer(&self->last_locale, g_free);
-  g_clear_pointer(&self->requested_locale, g_free);
-}
-
-static void
-start_locale_monitor(RclPlasma6Backend *self)
-{
-  struct passwd *pw;
-  gchar *config_dir;
-  GFile *directory;
-  GError *error = NULL;
-  stop_locale_monitor(self);
-  if (!self->active || self->stopping)
-    return;
-  pw = getpwuid((uid_t) self->active->uid);
-  if (!pw)
-    return;
-  config_dir = g_build_filename(pw->pw_dir, ".config", NULL);
-  self->locale_config_path = g_build_filename(config_dir, "plasma-localerc", NULL);
-  directory = g_file_new_for_path(config_dir);
-  self->locale_monitor = g_file_monitor_directory(
-      directory, G_FILE_MONITOR_WATCH_MOVES, NULL, &error);
-  g_object_unref(directory);
-  g_free(config_dir);
-  if (!self->locale_monitor)
-  {
-    g_debug("could not monitor Plasma locale configuration: %s",
-            error ? error->message : "unknown error");
-    g_clear_error(&error);
-  }
-  else
-    g_signal_connect(self->locale_monitor, "changed",
-                     G_CALLBACK(locale_config_changed_cb), self);
-  sync_plasma_locale(self);
 }
 
 static void
@@ -1340,7 +1114,6 @@ refresh_sessions(RclPlasma6Backend *self)
       g_debug("no unambiguous active local Plasma 6 session");
 
     restart_settings_helper(self);
-    start_locale_monitor(self);
   }
 
   active_session_free(candidate);
@@ -1549,7 +1322,6 @@ connection_closed_cb(GDBusConnection *connection,
   unsubscribe_signals(self);
   self->logind_available = FALSE;
   stop_settings_helper(self);
-  stop_locale_monitor(self);
   self->connection_closed_id = 0;
   g_clear_object(&self->connection);
 
@@ -1621,7 +1393,6 @@ rcl_plasma6_backend_stop(RclPlasma6Backend *self)
 
   self->stopping = TRUE;
   stop_settings_helper(self);
-  stop_locale_monitor(self);
 
   if (self->reconnect_id)
   {
