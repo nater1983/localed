@@ -18,7 +18,31 @@ All notable changes to `localed` are documented in this file.
 - Cancel pending session refreshes when the system-bus connection closes. Retain the 100 ms refresh delay and 2500 ms reconnect delay.
 - Keep desktop-specific identification and keyboard helper lifecycle management in the respective backends. Each backend retains its own session monitor instance pending backend manager development.
 
-### Validation
+### Refactoring — Phase 3: Loadable desktop backend modules
+- Replace the compiled-in GNOME and Plasma 6 backends with independently loadable GModule modules (`gnome.so` and `plasma.so`) under the configured library directory.
+- Introduce a versioned native module descriptor, generic backend interface and backend manager. The current internal module ABI is 6; install matching daemon and module builds together. Restrict host symbol exports to the module API and each module's exports to its query entry point.
+- Support `desktop-backend=none|gnome|plasma6|both`, including simultaneous loading of both modules. The current Meson default is `both`.
+- Retain a single user-side input-sources helper executable with explicit backend selection when both readers are compiled in.
+- Separate discovery instances from session-bound operational instances. Retain inactive session instances across VT switches, remove obsolete claims, and bind each operational instance to its original UID, session ID and object path.
+- Reconcile complete discovery snapshots across configured backends; revoke writes on invalidation or inspection failure and grant ownership only after fresh discovery and readiness checks. Independently revalidate the unique active local graphical session before keyboard writes, including unsupported graphical desktops in the arbitration check.
+- Harden helper cancellation, asynchronous callback lifetimes, monitor shutdown, D-Bus name loss/reconnection and daemon signal cleanup. Stop helpers when write permission is revoked or a session becomes inactive.
+
+### Fixed — Phase 3: Slackware console-launched desktops
+- Recognize X11 sessions launched with `startx` even when elogind reports `Type=tty` and an empty Desktop property. Require a root-owned, non-group/world-writable Xorg executable, appropriate process ownership and exact elogind session membership, then independently verify the desktop and session bus.
+- Include verified console-launched X11 sessions in shared graphical write arbitration. Ordinary console logins remain ineligible for keyboard synchronization; AccountsService locale synchronization remains independent.
+- Recheck console sessions at 2.5-second intervals to detect desktop startup and exit without relying on logind session creation or removal. Revalidate the existing writer on unchanged discovery reports without deliberately restarting a healthy helper.
+- Treat a nonmatching desktop as a normal discovery result. Suppress repeated successful identification and rejection messages; report operational session transitions, helper activity, ownership changes and actual errors.
+
+### Tests — Phase 3
+- Add regression coverage for the module descriptor, session binding, multi-backend arbitration, inactive instance retention, invalidated discovery, unchanged discovery revalidation, cleanup, host symbol visibility and console graphical classification/Xorg executable trust.
+- Add `tests/run-backend-matrix.sh` to build and test all four backend configurations with separate temporary configuration paths and serial test execution.
+- Before the console-session changes, the four-configuration matrix passed (none: 5, GNOME: 7, Plasma 6: 7, both: 8 test suites). The revised matrix has not yet been confirmed after adding the console classification tests.
+- Live GNOME Wayland testing verified input-source switching, AccountsService updates, VT deactivation/reactivation, instance retention, helper restart, normal non-debug operation and SIGTERM cleanup without leftover helper processes (before ABI 6).
+- Live Plasma 6 X11 testing on Slackware via `startx` verified console-session detection, correct desktop selection with both modules installed, session bus discovery, exclusive write ownership, initial synchronization, US-to-Spanish and Spanish-to-US keyboard changes, and VT deactivation/reactivation with no new instance creation logged. Short resource sampling showed stable helper PID, file descriptors, thread count and memory; this does not establish absence of leaks.
+- Verified reduced discovery logging on the running Plasma session. Identical snapshots after VT reactivation still appear to trigger redundant console-keymap writes; suppression is a follow-up, not an implemented fix.
+- Remaining release validation: updated build matrix, sanitizer testing (ASan/UBSan/LSan), GNOME regression after ABI 6, Plasma Xorg exit/restart and graceful shutdown, simultaneous desktop sessions, and final source review.
+
+### Validation — Phase 2
 - All five existing Meson test suites passed with the Plasma 6 backend enabled after each Phase 2 refactoring stage (zero failures). GNOME regression and live desktop testing after the refactoring, and sanitizer validation, remain for final release validation.
 - Verified AccountsService-only locale synchronization on Plasma 6.7.6 with an elogind TTY login session, switching between es_ES.UTF-8 and en_US.UTF-8 after removing the desktop-specific monitor.
 - Plasma 6.7.6 runtime testing verified primary locale updates, regional format changes, and translation preference additions and reordering before consolidation. Other Plasma releases remain unverified.
