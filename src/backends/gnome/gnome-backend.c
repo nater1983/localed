@@ -54,6 +54,10 @@ struct _RclGnomeBackend
   gboolean write_enabled;
 
   ActiveSession *active;
+  gchar *bound_id;
+  gchar *bound_path;
+  guint bound_uid;
+  gboolean ever_started;
 };
 
 static void rcl_gnome_backend_iface_init(RclBackendInterface *iface);
@@ -864,6 +868,11 @@ refresh_sessions(RclGnomeBackend *self)
 
     (void) user;
 
+    if (self->bound_path && (uid != self->bound_uid ||
+        g_strcmp0(id, self->bound_id) != 0 ||
+        g_strcmp0(object_path, self->bound_path) != 0))
+      continue;
+
     found = query_session(self, id, uid, seat, object_path);
     if (!found)
       continue;
@@ -947,6 +956,7 @@ rcl_gnome_backend_start(RclGnomeBackend *self, GError **error)
 {
   g_return_val_if_fail(RCL_IS_GNOME_BACKEND(self), FALSE);
   (void) error;
+  self->ever_started = TRUE;
   self->stopping = FALSE;
   return rcl_session_monitor_start(self->monitor);
 }
@@ -988,6 +998,8 @@ rcl_gnome_backend_dispose(GObject *object)
 
   rcl_gnome_backend_stop(self);
   g_clear_pointer(&self->monitor, rcl_session_monitor_free);
+  g_clear_pointer(&self->bound_id, g_free);
+  g_clear_pointer(&self->bound_path, g_free);
   G_OBJECT_CLASS(rcl_gnome_backend_parent_class)->dispose(object);
 }
 
@@ -1040,12 +1052,31 @@ rcl_gnome_backend_iface_set_write_enabled(RclBackend *backend, gboolean enabled)
     restart_settings_helper(self);
 }
 
+static gboolean
+rcl_gnome_backend_iface_bind_session(RclBackend *backend, guint uid,
+                                    const gchar *id, const gchar *path,
+                                    GError **error)
+{
+  RclGnomeBackend *self = RCL_GNOME_BACKEND(backend);
+  if (self->ever_started || self->bound_path)
+  {
+    g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_BUSY,
+                        "Backend session binding is immutable after binding or startup");
+    return FALSE;
+  }
+  self->bound_uid = uid;
+  self->bound_id = g_strdup(id);
+  self->bound_path = g_strdup(path);
+  return TRUE;
+}
+
 static void
 rcl_gnome_backend_iface_init(RclBackendInterface *iface)
 {
   iface->start = rcl_gnome_backend_iface_start;
   iface->stop = rcl_gnome_backend_iface_stop;
   iface->set_write_enabled = rcl_gnome_backend_iface_set_write_enabled;
+  iface->bind_session = rcl_gnome_backend_iface_bind_session;
 }
 RclBackend *
 rcl_gnome_backend_new(RclLocaleDaemon *daemon)
