@@ -148,51 +148,44 @@ reconcile_cb(gpointer data)
   RclSessionClaim *claim;
 
   self->reconcile_id = 0;
-  if (!self->started || g_hash_table_size(self->sessions) != 1)
-  {
-    set_owner(self, NULL);
+  if (!self->started)
     return G_SOURCE_REMOVE;
-  }
+
+  /* Every discovered session gets its own instance, even while writes
+   * are blocked by competing claims. */
+  if (g_hash_table_size(self->sessions) != 1)
+    set_owner(self, NULL);
+
+  g_hash_table_iter_init(&iter, self->sessions);
+  while (g_hash_table_iter_next(&iter, NULL, &value))
+    ensure_session_instance(self, value);
+
+  if (g_hash_table_size(self->sessions) != 1)
+    return G_SOURCE_REMOVE;
+
   g_hash_table_iter_init(&iter, self->sessions);
   g_hash_table_iter_next(&iter, NULL, &value);
   claim = value;
-  if (!ensure_session_instance(self, claim) || !claim->ready)
-    set_owner(self, NULL);
-  else
-    set_owner(self, claim->instance);
+  set_owner(self, claim->ready ? claim->instance : NULL);
   return G_SOURCE_REMOVE;
 }
 
 static void
-active_session_changed(RclBackend *backend, gboolean active, guint uid,
-                       const gchar *id, const gchar *path, const gchar *seat,
-                       const gchar *type, const gchar *desktop, gpointer data)
+sessions_changed(RclBackend *backend, GVariant *snapshot, gpointer data)
 {
   RclBackendManager *self = data;
   GHashTableIter iter;
+  GVariantIter entries;
   gpointer key, value;
   const gchar *module_id = NULL;
-  (void) seat;
-  (void) type;
-  (void) desktop;
+  const gchar *id, *path;
+  guint uid;
+  gboolean changed = FALSE;
+  g_autoptr(GHashTable) seen =
+    g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
   if (!self->started)
     return;
-
-  /* Revoke immediately, then coalesce reports from both monitors.
-   * No candidate may write until ownership is reconciled. */
-  set_owner(self, NULL);
-  /* Replace only this monitor's previous claim. Distinct modules may
-   * claim the same session; both claims must remain visible to arbitration. */
-  g_hash_table_iter_init(&iter, self->sessions);
-  while (g_hash_table_iter_next(&iter, NULL, &value))
-    if (((RclSessionClaim *) value)->monitor == backend)
-    {
-      RclSessionClaim *old = value;
-      if (old->instance)
-        g_signal_handlers_disconnect_by_data(old->instance, self);
-      g_hash_table_iter_remove(&iter);
-    }
 
   g_hash_table_iter_init(&iter, self->backends);
   while (g_hash_table_iter_next(&iter, &key, &value))
@@ -201,21 +194,60 @@ active_session_changed(RclBackend *backend, gboolean active, guint uid,
       module_id = key;
       break;
     }
+  if (!module_id)
+    return;
 
-  if (module_id && active && id && *id && path &&
-      g_variant_is_object_path(path))
+  /* A malformed report must not leave stale authorization behind. */
+  if (snapshot && g_variant_is_of_type(snapshot, G_VARIANT_TYPE("a(uso)")))
   {
-    RclSessionClaim *claim = g_new0(RclSessionClaim, 1);
-    claim->monitor = backend;
-    claim->module_id = g_strdup(module_id);
-    claim->id = g_strdup(id);
-    claim->path = g_strdup(path);
-    claim->uid = uid;
-    g_hash_table_insert(self->sessions,
-                        g_strdup_printf("%s:%s", module_id, path), claim);
+    g_variant_iter_init(&entries, snapshot);
+    while (g_variant_iter_next(&entries, "(u&s&o)", &uid, &id, &path))
+    {
+      g_autofree gchar *session_key = NULL;
+      RclSessionClaim *claim;
+
+      if (!*id || !g_str_has_prefix(path, "/org/freedesktop/login1/session/"))
+        continue;
+
+      session_key = g_strdup_printf("%s:%s", module_id, path);
+      g_hash_table_add(seen, g_strdup(session_key));
+      claim = g_hash_table_lookup(self->sessions, session_key);
+
+      if (claim && claim->uid == uid && g_strcmp0(claim->id, id) == 0)
+        continue;
+
+      set_owner(self, NULL);
+      changed = TRUE;
+      if (claim && claim->instance)
+        g_signal_handlers_disconnect_by_data(claim->instance, self);
+
+      claim = g_new0(RclSessionClaim, 1);
+      claim->monitor = backend;
+      claim->module_id = g_strdup(module_id);
+      claim->id = g_strdup(id);
+      claim->path = g_strdup(path);
+      claim->uid = uid;
+      g_hash_table_replace(self->sessions, g_steal_pointer(&session_key), claim);
+    }
   }
 
-  schedule_reconcile(self);
+  /* Preserve unchanged instances, removing only claims absent from
+   * this monitor's latest complete report. */
+  g_hash_table_iter_init(&iter, self->sessions);
+  while (g_hash_table_iter_next(&iter, &key, &value))
+  {
+    RclSessionClaim *claim = value;
+    if (claim->monitor != backend || g_hash_table_contains(seen, key))
+      continue;
+    set_owner(self, NULL);
+    changed = TRUE;
+    if (claim->instance)
+      g_signal_handlers_disconnect_by_data(claim->instance, self);
+    g_hash_table_iter_remove(&iter);
+  }
+
+  if (changed || !self->owner)
+    schedule_reconcile(self);
 }
 
 gboolean
@@ -261,15 +293,16 @@ rcl_backend_manager_load(RclBackendManager *self, const gchar *id,
   backend = rcl_backend_module_create(descriptor, self->daemon, error);
   if (!backend)
     return FALSE;
-  if (!g_signal_lookup("active-session-changed", G_OBJECT_TYPE(backend)))
+  if (!g_signal_lookup("active-session-changed", G_OBJECT_TYPE(backend)) ||
+      !g_signal_lookup("sessions-changed", G_OBJECT_TYPE(backend)))
   {
     g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
                 "Desktop backend %s does not report active sessions", id);
     g_object_unref(backend);
     return FALSE;
   }
-  g_signal_connect(backend, "active-session-changed",
-                   G_CALLBACK(active_session_changed), self);
+  g_signal_connect(backend, "sessions-changed",
+                   G_CALLBACK(sessions_changed), self);
   g_hash_table_insert(self->modules, g_strdup(id), (gpointer) descriptor);
   g_hash_table_insert(self->backends, g_strdup(id), backend);
   return TRUE;
