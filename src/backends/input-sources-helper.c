@@ -13,27 +13,42 @@
 
 #if HAVE_GNOME_BACKEND
 #include "gnome/gnome-input-sources-helper.h"
-#elif HAVE_PLASMA6_BACKEND
+#endif
+#if HAVE_PLASMA6_BACKEND
 #include "plasma6/plasma6-input-sources-helper.h"
 #endif
 
 int
 main(int argc, char **argv)
 {
-  (void) argc;
-  (void) argv;
-
   setlocale(LC_ALL, "");
   bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR);
   bind_textdomain_codeset(GETTEXT_PACKAGE, "UTF-8");
   textdomain(GETTEXT_PACKAGE);
 
-#if HAVE_GNOME_BACKEND
-  return rcl_gnome_input_sources_helper_run();
-#elif HAVE_PLASMA6_BACKEND
-  return rcl_plasma6_input_sources_helper_run();
-#else
-  g_printerr("%s\n", _("localed-input-sources-helper: no desktop input-source backend was selected"));
-  return 1;
+  /* Keep the legacy no-argument invocation for single-backend builds.
+   * Explicit selection is required when both readers are compiled in. */
+  const gchar *id = NULL;
+  if (argc == 2)
+    id = argv[1];
+  else if (argc == 1)
+  {
+#if HAVE_GNOME_BACKEND && !HAVE_PLASMA6_BACKEND
+    id = "gnome";
+#elif HAVE_PLASMA6_BACKEND && !HAVE_GNOME_BACKEND
+    id = "plasma6";
 #endif
+  }
+
+#if HAVE_GNOME_BACKEND
+  if (g_strcmp0(id, "gnome") == 0)
+    return rcl_gnome_input_sources_helper_run();
+#endif
+#if HAVE_PLASMA6_BACKEND
+  if (g_strcmp0(id, "plasma6") == 0)
+    return rcl_plasma6_input_sources_helper_run();
+#endif
+  (void) id;
+  g_printerr("%s\\n", _("localed-input-sources-helper: select a compiled desktop backend (gnome or plasma6)"));
+  return 1;
 }
