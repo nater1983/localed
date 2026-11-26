@@ -23,9 +23,7 @@ localed_inc = [
   include_directories('.'),
 ]
 
-if get_option('desktop-backend') == 'gnome'
-  localed_sources += files('backends/gnome/gnome-backend.c')
-elif get_option('desktop-backend') == 'plasma6'
+if get_option('desktop-backend') == 'plasma6'
   localed_sources += files('backends/plasma6/plasma6-backend.c')
 endif
 
@@ -36,8 +34,24 @@ executable(
   include_directories   : localed_inc,
   install               : true,
   install_dir           : get_option('libexecdir'),
-  gnu_symbol_visibility : 'hidden',
+  gnu_symbol_visibility : 'default',
+  export_dynamic        : true,
 )
+
+if get_option('desktop-backend') == 'gnome'
+  gnome_module = shared_module(
+    'gnome',
+    'backends/gnome/gnome-backend.c',
+    'backends/gnome/gnome-module.c',
+    dependencies          : localed_deps,
+    include_directories   : localed_inc,
+    name_prefix           : '',
+    gnu_symbol_visibility : 'hidden',
+    override_options      : ['b_lundef=false'],
+    install               : true,
+    install_dir           : backend_module_dir,
+  )
+endif
 
 input_sources_helper_sources = files('backends/input-sources-helper.c')
 
