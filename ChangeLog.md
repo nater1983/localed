@@ -6,10 +6,11 @@ All notable changes to `localed` are documented in this file.
 
 ### Changed
 - Use AccountsService as the sole automatic primary locale synchronization path for GNOME and Plasma 6; remove the Plasma-specific locale file monitor and parser.
-- Require an unambiguous active local graphical session and privileged-group membership for automatic AccountsService updates.
+- Require an unambiguous active local user session, including TTY sessions and privileged-group membership for automatic AccountsService updates.
 - Skip unchanged shell locale file writes and isolate the C-shell companion path alongside the configured Bourne-shell script.
 
 ### Validation
+- Verified AccountsService-only locale synchronization on Plasma 6.7.6 with an elogind TTY login session, switching between es_ES.UTF-8 and en_US.UTF-8 after removing the desktop-specific monitor.
 - Plasma 6.7.6 runtime testing verified primary locale updates, regional format changes, and translation preference additions and reordering before consolidation. Other Plasma releases remain unverified.
 - Add regression coverage for duplicate locale writes and missing companion recovery.
 
