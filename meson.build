@@ -104,18 +104,6 @@ conf.set_quoted('RCL_RC_KEYMAP_TOGGLE_FILE',
                 get_option('rc_keymap') + '.toggle')
 conf.set_quoted('RCL_X11_KEYBOARD_FILE', get_option('x11_keyboard_conf'))
 
-desktop_backend = get_option('desktop-backend')
-conf.set10('HAVE_GNOME_BACKEND', desktop_backend == 'gnome')
-conf.set10('HAVE_PLASMA6_BACKEND', desktop_backend == 'plasma6')
-
-input_sources_helper_dir = get_option('libexecdir')
-if not input_sources_helper_dir.startswith('/')
-  input_sources_helper_dir = join_paths(prefix, input_sources_helper_dir)
-endif
-conf.set_quoted('RCL_INPUT_SOURCES_HELPER',
-                join_paths(input_sources_helper_dir, 'localed-input-sources-helper'))
-
-
 configure_file(
   output        : 'config.h',
   configuration : conf,
@@ -143,5 +131,4 @@ summary({
   'console keymap': get_option('rc_keymap'),
   'X11 keyboard'  : get_option('x11_keyboard_conf'),
   'privileged group': get_option('privileged-group'),
-  'desktop backend'  : desktop_backend,
 }, section : 'Configuration')

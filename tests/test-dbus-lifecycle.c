@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Nathaniel Russell
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * Exercise AccountsService name monitoring and repeated lifecycle cleanup
+ * Exercise locale1 D-Bus authorization and repeated lifecycle cleanup
  * against an isolated in-process D-Bus daemon. No host system bus is touched.
  */
 #include "config.h"
@@ -13,10 +13,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "rcl-accounts-service.h"
 #include "rcl-locale.h"
 
-#define TEST_ACCOUNTS_NAME "org.freedesktop.Accounts"
 
 typedef struct
 {
@@ -92,132 +90,27 @@ iterate_for(guint milliseconds)
 }
 
 static void
-request_accounts_name(Fixture *fixture, gboolean acquire)
-{
-  GError *error = NULL;
-  GVariant *reply;
-  guint result;
-
-  reply = g_dbus_connection_call_sync(
-    fixture->client,
-    "org.freedesktop.DBus",
-    "/org/freedesktop/DBus",
-    "org.freedesktop.DBus",
-    acquire ? "RequestName" : "ReleaseName",
-    acquire
-      ? g_variant_new("(su)", TEST_ACCOUNTS_NAME, 0u)
-      : g_variant_new("(s)", TEST_ACCOUNTS_NAME),
-    G_VARIANT_TYPE(acquire ? "(u)" : "(u)"),
-    G_DBUS_CALL_FLAGS_NONE, 3000, NULL, &error);
-
-  g_assert_no_error(error);
-  g_assert_nonnull(reply);
-  g_variant_get(reply, "(u)", &result);
-  g_variant_unref(reply);
-
-  if (acquire)
-    g_assert_true(result == 1u || result == 4u); /* PRIMARY_OWNER / ALREADY_OWNER */
-  else
-    g_assert_cmpuint(result, ==, 1u); /* RELEASED */
-}
-
-static void
-test_accounts_name_lifecycle(Fixture *fixture, gconstpointer user_data)
-{
-  RclLocaleDaemon *daemon;
-  RclAccountsService *service;
-
-  daemon = g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
-  g_assert_nonnull(daemon);
-  service = rcl_accounts_service_new(daemon);
-  g_assert_nonnull(service);
-
-  /* Appearance triggers a PropertiesChanged subscription; disappearance
-   * removes it. Repeat to catch stale watch/subscription identifiers. */
-  g_assert_true(rcl_accounts_service_start(service, NULL));
-  iterate_for(50);
-  request_accounts_name(fixture, TRUE);
-  iterate_for(100);
-  request_accounts_name(fixture, FALSE);
-  iterate_for(100);
-
-  rcl_accounts_service_stop(service);
-  rcl_accounts_service_stop(service); /* stop is intentionally idempotent */
-
-  g_object_unref(service);
-  g_object_unref(daemon);
-}
-
-static void
 test_repeated_start_stop_cleanup(Fixture *fixture, gconstpointer user_data)
 {
   for (guint i = 0; i < 20; i++) {
     RclLocaleDaemon *daemon =
       g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
-    RclAccountsService *service =
-      rcl_accounts_service_new(daemon);
 
     g_assert_nonnull(daemon);
-    g_assert_nonnull(service);
 
     /* Exercise real object registration and repeated shutdown cleanup. */
     g_assert_true(rcl_daemon_startup(RCL_DAEMON(daemon),
                                      fixture->client));
-    g_assert_true(rcl_accounts_service_start(service, NULL));
     iterate_for(5);
 
-    rcl_accounts_service_stop(service);
     rcl_daemon_shutdown(RCL_DAEMON(daemon));
     rcl_daemon_shutdown(RCL_DAEMON(daemon));
-    g_object_unref(service);
     g_object_unref(daemon);
 
     /* Drain queued name-watch/closed callbacks after each disposal. */
     iterate_for(5);
   }
 }
-
-static void
-test_system_bus_restart(Fixture *fixture, gconstpointer user_data)
-{
-  RclLocaleDaemon *daemon =
-    g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
-  RclAccountsService *service = rcl_accounts_service_new(daemon);
-
-  g_assert_nonnull(daemon);
-  g_assert_nonnull(service);
-  g_assert_true(rcl_accounts_service_start(service, NULL));
-  iterate_for(100);
-
-  /* Stop the private test bus. The monitor must discard its closed
-   * connection and retry against a newly started bus daemon. */
-  g_test_dbus_down(fixture->bus);
-  iterate_for(100);
-
-  if (fixture->client) {
-    g_clear_object(&fixture->client);
-  }
-
-  g_test_dbus_up(fixture->bus);
-  g_free(fixture->address);
-  fixture->address = g_strdup(g_test_dbus_get_bus_address(fixture->bus));
-  g_assert_nonnull(fixture->address);
-  g_setenv("DBUS_SYSTEM_BUS_ADDRESS", fixture->address, TRUE);
-  fixture->client = connect_test_bus(fixture->address);
-
-  /* The production retry interval is 2.5 seconds. */
-  iterate_for(2800);
-
-  request_accounts_name(fixture, TRUE);
-  iterate_for(100);
-  request_accounts_name(fixture, FALSE);
-  iterate_for(100);
-
-  rcl_accounts_service_stop(service);
-  g_object_unref(service);
-  g_object_unref(daemon);
-}
-
 
 /* A minimal PolicyKit Authority used to exercise the daemon's direct D-Bus
  * authorization path without invoking the host polkitd or modifying files. */
@@ -819,47 +712,6 @@ test_polkit_cancellation(Fixture *fixture, gconstpointer user_data)
   g_object_unref(daemon_bus);
 }
 
-/* A repeated automatic locale update must not replace either file.
- * A missing companion must still be recreated. */
-static void
-test_accounts_duplicate_locale(Fixture *fixture, gconstpointer user_data)
-{
-  GError *error = NULL;
-  GStatBuf sh_before, csh_before, sh_after, csh_after;
-  RclLocaleDaemon *daemon;
-
-  g_assert_cmpstr(RCL_LANG_SH_FILE, !=, "/etc/profile.d/lang.sh");
-  g_assert_cmpstr(RCL_LANG_CSH_FILE, !=, "/etc/profile.d/lang.csh");
-  g_assert_cmpstr(RCL_LANG_SH_FILE, !=, RCL_LANG_CSH_FILE);
-  daemon = RCL_LOCALE_DAEMON(rcl_daemon_new());
-
-  g_assert_true(rcl_locale_daemon_set_language_from_accounts(
-      daemon, "en_GB.UTF-8", &error));
-  g_assert_no_error(error);
-  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_before), ==, 0);
-  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_before), ==, 0);
-
-  g_assert_true(rcl_locale_daemon_set_language_from_accounts(
-      daemon, "en_GB.UTF-8", &error));
-  g_assert_no_error(error);
-  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_after), ==, 0);
-  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_after), ==, 0);
-  g_assert_true(sh_before.st_ino == sh_after.st_ino);
-  g_assert_true(csh_before.st_ino == csh_after.st_ino);
-
-  g_assert_cmpint(g_unlink(RCL_LANG_CSH_FILE), ==, 0);
-  g_assert_true(rcl_locale_daemon_set_language_from_accounts(
-      daemon, "en_GB.UTF-8", &error));
-  g_assert_no_error(error);
-  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_after), ==, 0);
-  g_assert_true(sh_before.st_ino == sh_after.st_ino);
-  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_after), ==, 0);
-
-  g_assert_cmpint(g_unlink(RCL_LANG_SH_FILE), ==, 0);
-  g_assert_cmpint(g_unlink(RCL_LANG_CSH_FILE), ==, 0);
-  g_object_unref(daemon);
-}
-
 static void
 call_locale_method(Fixture *fixture, GDBusConnection *daemon_bus,
                    PolkitFixture *polkit, const gchar *method,
@@ -997,13 +849,32 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_assert_null(strstr(after, "LC_COLLATE"));
   g_clear_pointer(&after, g_free);
 
-  /* Keep the standard systemd-compatible replacement method. */
+  /* Retain the existing replacement behavior of SetLocale. */
   call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
   g_assert_no_error(polkit.client_error);
   g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
   g_assert_no_error(error);
   g_assert_null(strstr(after, "LC_TIME"));
   g_assert_nonnull(strstr(after, "export LANG=\"en_US.UTF-8\""));
+
+  /* Repeating an authorized identical update must not replace either file. */
+  {
+    GStatBuf sh_before, csh_before, sh_after, csh_after;
+    g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_before), ==, 0);
+    g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_before), ==, 0);
+    call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
+    g_assert_no_error(polkit.client_error);
+    g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_after), ==, 0);
+    g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_after), ==, 0);
+    g_assert_true(sh_before.st_ino == sh_after.st_ino);
+    g_assert_true(csh_before.st_ino == csh_after.st_ino);
+    g_assert_cmpint(g_unlink(RCL_LANG_CSH_FILE), ==, 0);
+    call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
+    g_assert_no_error(polkit.client_error);
+    g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_after), ==, 0);
+    g_assert_true(sh_before.st_ino == sh_after.st_ino);
+    g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_after), ==, 0);
+  }
 
   polkit_fixture_free(&polkit);
   rcl_daemon_shutdown(daemon);
@@ -1023,17 +894,11 @@ main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
 
-  g_test_add("/dbus/accounts-duplicate-locale", Fixture, NULL,
-             fixture_setup, test_accounts_duplicate_locale, fixture_teardown);
   g_test_add("/dbus/partial-locale-update", Fixture, NULL,
              fixture_setup, test_partial_locale_update, fixture_teardown);
 
-  g_test_add("/dbus/accounts-name-lifecycle", Fixture, NULL,
-             fixture_setup, test_accounts_name_lifecycle, fixture_teardown);
   g_test_add("/dbus/repeated-start-stop-cleanup", Fixture, NULL,
              fixture_setup, test_repeated_start_stop_cleanup, fixture_teardown);
-  g_test_add("/dbus/system-bus-restart", Fixture, NULL,
-             fixture_setup, test_system_bus_restart, fixture_teardown);
   g_test_add("/dbus/invalid-x11-before-polkit", Fixture, NULL,
              fixture_setup, test_invalid_x11_keyboard_rejected_before_polkit,
              fixture_teardown);

@@ -18,14 +18,12 @@ The daemon follows the same general service pattern as
 - Validates Xorg XKB configuration before accepting or reporting values.
 - Uses Polkit for authorization, with a configurable privileged group
   (default: `wheel`).
-- Integrates with AccountsService when it is available at runtime.
-- Provides optional desktop input-source integration through a build-time
-  backend selection.
-- Does not require systemd; it uses D-Bus and a logind-compatible session
-  manager for desktop session discovery.
+- Does not require systemd, elogind, AccountsService or any desktop environment.
+- System configuration changes require authorized locale1 requests; personal
+  desktop settings remain owned by the desktop.
 
-GNOME and Plasma 6 use AccountsService for automatic primary locale
-synchronization. Neither desktop backend monitors locale configuration files.
+Desktop integration is maintained separately in the [localed-desktop source tree](https://github.com/nater1983/localed/tree/localed-desktop).
+It is not part of the core daemon.
 
 ## Dependencies
 
@@ -34,18 +32,9 @@ synchronization. Neither desktop backend monitors locale configuration files.
 | GLib / GIO | `glib-2.0`, `gio-2.0`, `gio-unix-2.0` | 2.56 |
 | Polkit | `polkit-gobject-1` | 0.113 |
 | D-Bus daemon | — | Runtime requirement |
-| logind-compatible service | — | Runtime requirement for desktop session discovery |
 
 The daemon is activated by `dbus-daemon` through D-Bus system-service
 activation (`[D-BUS Service]`). There is no systemd dependency.
-AccountsService integration is optional at runtime: `localed` monitors its
-D-Bus name and synchronizes account language changes when the service is
-available. No AccountsService development library is required.
-
-The GNOME input-source backend uses GIO/GSettings and the GNOME session's
-D-Bus connection. It does not add a separate helper executable or a separate
-build-time GNOME library dependency.
-
 On Debian/Ubuntu:
 
 ```sh
@@ -62,39 +51,11 @@ dnf install glib2-devel polkit-devel \
 
 ## Building
 
-The default build does not enable a desktop integration backend:
+Build the standalone system configuration daemon:
 
 ```sh
 meson setup build
 meson compile -C build
-```
-
-To build the GNOME input-source backend:
-
-```sh
-meson setup build-gnome -Ddesktop-backend=gnome
-meson compile -C build-gnome
-```
-
-To build the KDE Plasma 6 input-source backend:
-
-```sh
-meson setup build-plasma6 -Ddesktop-backend=plasma6
-meson compile -C build-plasma6
-```
-
-The backend is selected with the `desktop-backend` Meson option:
-
-| Option | Description |
-|---|---|
-| `none` | Default. Build localed without a desktop-specific input-source backend. |
-| `gnome` | Build the GNOME session and input-source integration. |
-| `plasma6` | Build the KDE Plasma 6 session and input-source integration. |
-
-For example, to explicitly select the default configuration:
-
-```sh
-meson setup build -Ddesktop-backend=none
 ```
 
 Automated tests are disabled by default and can be enabled for development
@@ -104,22 +65,6 @@ or package validation:
 meson setup build-tests -Dtests=true
 meson compile -C build-tests
 meson test -C build-tests --print-errorlogs
-```
-
-To include the GNOME backend tests:
-
-```sh
-meson setup build-gnome-tests -Ddesktop-backend=gnome -Dtests=true
-meson compile -C build-gnome-tests
-meson test -C build-gnome-tests --print-errorlogs
-```
-
-To include the Plasma 6 backend tests:
-
-```sh
-meson setup build-plasma6-tests -Ddesktop-backend=plasma6 -Dtests=true
-meson compile -C build-plasma6-tests
-meson test -C build-plasma6-tests --print-errorlogs
 ```
 
 The SlackBuild enables the test targets and runs the suite before installing
@@ -158,96 +103,8 @@ meson install -C build
 For a system-wide installation, configure with `--prefix=/usr` and install
 with the required privileges.
 
-All backend configurations install the same daemon and helper executable
-names under `libexecdir` (normally `/usr/libexec`):
-
-```text
-/usr/libexec/
-├── localed
-└── localed-input-sources-helper
-```
-
-There is one input-sources helper executable. Desktop-specific helper code
-is compiled into that executable when its backend is selected; GNOME does not
-install a separately named GNOME helper.
-
-## Desktop input-source integration
-
-Desktop integration is optional and selected at build time with
-`-Ddesktop-backend`. The default is `none`, keeping the daemon independent
-of desktop-specific APIs.
-
-### GNOME
-
-Build with:
-
-```sh
-meson setup build-gnome -Ddesktop-backend=gnome
-```
-
-When enabled, the GNOME backend:
-
-- Watches logind for GNOME session changes.
-- Identifies the active local GNOME session and its user.
-- Locates and connects to that user's GNOME session bus.
-- Reads the GNOME input-source settings through GSettings.
-- Monitors changes to the GNOME input-source list and active source.
-- Synchronizes the complete GNOME XKB layout, variant, and options list to
-  the configured Xorg keyboard file.
-- Synchronizes the active GNOME source to Slackware's console keymap when a
-  matching console keymap mapping is available.
-
-The complete XKB layout list and the active console keymap are deliberately
-handled separately. For example, if GNOME has `us` and `es` configured
-but `us` is active, the Xorg configuration contains `us,es` while
-`rc.keymap` uses `us`. Switching the active GNOME source to `es` changes
-the console keymap to `es` without removing either XKB layout from the
-Xorg configuration.
-
-The GNOME backend is compiled into `localed`; its session settings reader
-is compiled into the shared `localed-input-sources-helper` executable.
-The helper executable name and installation path are the same for every
-backend configuration.
-
-
-### KDE Plasma 6
-
-Build with:
-
-```sh
-meson setup build-plasma6 -Ddesktop-backend=plasma6
-```
-
-The Plasma 6 backend communicates with KWin over the user's session bus:
-
-- Service: `org.kde.keyboard`
-- Object path: `/Layouts`
-- Interface: `org.kde.KeyboardLayouts`
-
-It calls `getLayoutsList()` to retrieve the ordered `a(sss)` layout list and
-`getLayout()` to retrieve the active layout index. KWin's `LayoutNames`
-tuple contains `shortName`, `displayName`, and `longName`; the second
-field is **not** an XKB variant. The helper reads `VariantList` and
-`Options` from the session user's `~/.config/kxkbrc` and aligns variants
-with the ordered layout list.
-
-The helper monitors KWin's `layoutChanged` and `layoutListChanged` signals.
-Active-layout changes update the Slackware console keymap, while layout-list
-changes refresh the complete XKB layout, variant, and options configuration
-in the configured Xorg keyboard file. The existing XKB validation and
-console-keymap mapping are reused.
-
-As with GNOME, the Plasma-specific reader is compiled into the single
-`localed-input-sources-helper` executable. No separate Plasma helper binary
-or KDE development library is required; communication uses GIO/GDBus.
-
-### Adding other desktop environments
-
-The backend interface is intended to keep desktop-specific integration out
-of the locale daemon's core. Future desktop integrations can add their
-implementation behind the same interface and build-time selection. They
-should reuse the single `localed-input-sources-helper` executable rather
-than install a separate helper binary for each desktop.
+The daemon is installed under `libexecdir` (normally `/usr/libexec/localed`).
+The `localectl` client is installed under `bindir`. No desktop helper is installed.
 
 ## D-Bus interface quick reference
 
@@ -318,8 +175,6 @@ simple literal locale assignments, not arbitrary shell programs.
 The standard `SetLocale` D-Bus method retains its replacement semantics;
 the bundled client uses the new `UpdateLocale` extension instead. Upgrade
 the daemon and client together; older daemons do not expose `UpdateLocale`.
-Automatic desktop synchronization is unchanged by this maintenance fix and
-may still replace existing regional locale settings.
 
 ## Keyboard conversion
 
@@ -329,21 +184,6 @@ keymap to an X11 layout (or vice versa). The table covers common
 single-layout keymaps (`us`, `de`, `fr`, `gb`, `es`, `ru`, `se`,
 etc.). No conversion is attempted when no match is found, rather than
 guessing.
-
-## AccountsService integration
-
-When `org.freedesktop.Accounts` is available on the system bus, `localed`
-subscribes to account `Language` property changes and applies them for
-accounts in the configured privileged group (default: `wheel`) with the
-only active local user session (including TTY-based desktop sessions). The monitor reconnects when
-AccountsService appears or restarts. Without AccountsService, automatic
-desktop locale synchronization is unavailable; manual locale changes
-through locale1 remain supported. Plasma 6.7.6 was runtime-tested with
-SetLanguage; other Plasma versions have not yet been runtime-verified.
-Because D-Bus property-change signals do not identify the original caller,
-this integration cannot perform caller-based Polkit authorization. Other
-users should request system-wide changes through the
-`org.freedesktop.locale1` D-Bus methods, which are authorized by Polkit.
 
 ## Adding a translation
 

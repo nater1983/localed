@@ -131,18 +131,6 @@ GType rcl_locale_daemon_get_type ( void ) G_GNUC_CONST;
  * the initial property values.
  */
 void rcl_daemon_sync_dbus_properties ( RclLocaleDaemon *daemon );
-gboolean rcl_locale_daemon_set_language_from_accounts (
-    RclLocaleDaemon *daemon, const gchar *language, GError **error );
-#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
-/* Trusted in-process keyboard configuration entry points used by the GNOME
- * input-source backend. They bypass D-Bus/Polkit inside the daemon. */
-gboolean rcl_locale_daemon_set_vconsole_keyboard_internal (
-    RclLocaleDaemon *daemon, const gchar *keymap,
-    const gchar *keymap_toggle, GError **error );
-gboolean rcl_locale_daemon_set_x11_keyboard_internal (
-    RclLocaleDaemon *daemon, const gchar *layout, const gchar *model,
-    const gchar *variant, const gchar *options, GError **error );
-#endif /* HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND */
 
 #ifdef RCL_LOCALE_TESTING
 /* Inject a failure for the next matching configuration-file rename. */

@@ -16,9 +16,8 @@ It exposes the same locale and keyboard properties as
 on systemd-based distributions, allowing desktop tools such as
 .B gnome-control-center
 to read and edit the system locale and keyboard configuration on
-systems that use
-.B elogind
-and a D-Bus/PolKit stack without systemd.
+systems that use a D-Bus/PolKit stack without systemd.
+Neither elogind nor desktop-specific services are required.
 .PP
 .B localed
 does not poll or hold any files open for writing on its own initiative.
@@ -230,18 +229,6 @@ client. Its set commands call the locale1 D-Bus methods with
 so an authentication agent may prompt when required. Its status command
 reads D-Bus properties; its list commands enumerate locally installed
 locale and keyboard data and do not change system configuration.
-.SS AccountsService integration
-When the system-bus name
-.B org.freedesktop.Accounts
-is available,
-.B localed
-monitors account language-property changes and synchronizes the language
-for accounts belonging to the configured privileged group (default
-.BR wheel ). The integration is optional and follows AccountsService
-name appearance and disappearance. A PropertiesChanged signal does not
-identify its original caller, so this bridge cannot perform caller-based
-PolKit authorization. Other users must use the locale1 D-Bus methods,
-where PolKit evaluates the actual D-Bus caller.
 .SH FILES
 .TP
 .I /etc/profile.d/lang.sh

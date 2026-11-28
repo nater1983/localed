@@ -62,11 +62,11 @@ would disrupt active administration. Back up the locale file before testing.
 This specifically tests cancellation caused by daemon shutdown; step 6 tests
 the agent/user cancellation path.
 
-## 2. Real system-bus name reacquisition and AccountsService reconnection
+## 2. Real system-bus name reacquisition
 
 The following harness launches localed against a **private** D-Bus daemon,
-kills and restarts that bus, then verifies both the locale1 name and the
-AccountsService name watch are re-established. It does not touch the host
+kills and restarts that bus, then verifies the locale1 name is re-established.
+It does not touch the host
 system bus or installed configuration files.
 
 Build localed with tests enabled, then run:
@@ -79,7 +79,6 @@ Expected final lines:
 
 ```
 PASS: locale1 name reacquired after system-bus restart
-PASS: AccountsService connection and name watch re-established
 ```
 
 The test requires `dbus-daemon` and `gdbus`. It starts localed with
@@ -88,24 +87,3 @@ This also verifies that `--replace` is treated as a startup-only instruction:
 after the initial name acquisition, the daemon must remain alive and reacquire
 locale1 when the system bus restarts.
 
-## 3. AccountsService reconnection on the actual Slackware system bus
-
-The private-bus harness above verifies the same connection/watch logic in a
-controlled environment. To verify the installed AccountsService daemon on
-Slackware without restarting the system bus:
-
-1. Start localed with debug logging enabled (or temporarily enable
-   `daemon.debug` in syslog).
-2. Confirm the log reports `subscribed to AccountsService`.
-3. Restart AccountsService using the service manager appropriate to the
-   installed package. Do not restart D-Bus.
-4. Confirm localed logs `AccountsService disappeared` followed by
-   `subscribed to AccountsService`.
-5. Change the Language property of a test user who is in the configured
-   privileged group and confirm the locale bridge processes the update.
-   Restore the original locale after the check.
-
-Do not infer successful reconnection solely from the daemon remaining alive:
-the second `subscribed to AccountsService` message is the observable
-confirmation that the name watch fired and a PropertiesChanged subscription
-was installed again.
