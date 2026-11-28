@@ -299,6 +299,27 @@ read from Slackware's `lang.sh` script, not `/etc/locale.conf`. The console
 keymap is managed through Slackware's `rc.keymap` script, not
 `/etc/vconsole.conf`.
 
+## Partial system locale updates
+
+The bundled `localectl` preserves existing locale settings that were not
+named in the command:
+
+```sh
+localectl set-locale LANG=en_US.UTF-8
+localectl set-locale LC_COLLATE=C
+localectl set-locale LC_COLLATE=
+localectl unset-locale LC_COLLATE
+```
+
+The final two commands are equivalent. An empty value removes the named
+assignment from both `lang.sh` and `lang.csh`. Other existing assignments,
+including `LANGUAGE`, are preserved. The daemon reads the files after
+Polkit authorization and updates them transactionally. This supports
+simple literal locale assignments, not arbitrary shell programs.
+The standard `SetLocale` D-Bus method retains its replacement semantics;
+the bundled client uses the new `UpdateLocale` extension instead.
+Automatic desktop synchronization is unchanged by this maintenance fix.
+
 ## Keyboard conversion
 
 `SetVConsoleKeyboard` and `SetX11Keyboard` both accept a `convert`
