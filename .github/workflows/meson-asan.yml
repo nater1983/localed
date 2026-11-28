@@ -37,10 +37,7 @@ jobs:
           meson setup build-asan \
             --buildtype=debug \
             -Db_sanitize=address,undefined \
-            -Dtests=true \
-            -Dlang_sh="$RUNNER_TEMP/localed-test-config/lang.sh" \
-            -Drc_keymap="$RUNNER_TEMP/localed-test-config/rc.keymap" \
-            -Dx11_keyboard_conf="$RUNNER_TEMP/localed-test-config/00-keyboard.conf"
+            -Dtests=true
 
       - name: Validate SlackBuild shell syntax
         run: bash -n localed.SlackBuild
@@ -48,12 +45,25 @@ jobs:
       - name: Compile
         run: meson compile -C build-asan
 
+      # The external harness starts a real daemon; keep that daemon's
+      # configuration isolated separately from the normal test build.
+      - name: Build isolated daemon for private-bus reconnect test
+        run: |
+          meson setup build-reconnect \
+            --buildtype=debug \
+            -Db_sanitize=address,undefined \
+            -Dtests=false \
+            -Dlang_sh="$RUNNER_TEMP/localed-test-config/lang.sh" \
+            -Drc_keymap="$RUNNER_TEMP/localed-test-config/rc.keymap" \
+            -Dx11_keyboard_conf="$RUNNER_TEMP/localed-test-config/00-keyboard.conf"
+          meson compile -C build-reconnect
+
       - name: Exercise D-Bus reconnect and --replace on a private bus
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           G_SLICE: always-malloc
-        run: sh tests/test-slackware-dbus-restart.sh "$PWD/build-asan/src/localed"
+        run: sh tests/test-slackware-dbus-restart.sh "$PWD/build-reconnect/src/localed"
 
       - name: Run tests with leak detection
         env:

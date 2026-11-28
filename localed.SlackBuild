@@ -73,9 +73,6 @@ find . ! -type l -type f ! -perm /111 ! -perm 644 -exec chmod -f 644 {} +
 
 export CFLAGS="$SLKCFLAGS"
 export CXXFLAGS="$SLKCFLAGS"
-# Keep test-only paths out of the installed daemon. The integration tests
-# deliberately refuse to write to the host's /etc configuration files.
-mkdir -p "$SRC/test-config"
 
 MESON_ARGS=(
   --prefix=/usr
@@ -97,9 +94,6 @@ mkdir meson-test
 cd meson-test
 meson setup "${MESON_ARGS[@]}" \
   -Dtests=true \
-  -Dlang_sh="$SRC/test-config/lang.sh" \
-  -Drc_keymap="$SRC/test-config/rc.keymap" \
-  -Dx11_keyboard_conf="$SRC/test-config/00-keyboard.conf" \
   .. || exit 1
 "${NINJA:=ninja}" $NUMJOBS || exit 1
 meson test --print-errorlogs || exit 1

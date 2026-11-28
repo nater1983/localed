@@ -7,6 +7,12 @@ file_mode_test = executable(
 
 test('configuration file mode preservation', file_mode_test)
 
+# Give only the D-Bus test harness a private configuration root. Each
+# fixture creates a unique directory here; production config.h is unchanged.
+test_config = configuration_data()
+test_config.set_quoted('RCL_TEST_CONFIG_ROOT', meson.current_build_dir())
+configure_file(output: 'rcl-test-config.h', configuration: test_config)
+
 dbus_lifecycle_test = executable(
   'test-dbus-lifecycle',
   [

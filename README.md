@@ -67,6 +67,14 @@ meson compile -C build-tests
 meson test -C build-tests --print-errorlogs
 ```
 
+The D-Bus test executable automatically creates a private configuration
+directory for each fixture under the build's tests directory, independently
+of the daemon's configured paths. No manual path overrides are necessary.
+The production daemon retains its normal configuration paths even with
+`-Dtests=true`. The external private-bus reconnect shell harness starts a
+real daemon; use a separately configured daemon with isolated paths for
+that harness.
+
 The SlackBuild enables the test targets and runs the suite before installing
 the package. Test executables are not installed into the resulting package.
 

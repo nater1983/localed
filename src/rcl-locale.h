@@ -174,4 +174,31 @@ void rcl_locale_test_fail_rename_to ( const gchar *destination );
 #define RCL_X11_KEYBOARD_FILE  "/etc/X11/xorg.conf.d/00-keyboard.conf"
 #endif
 
+#ifdef RCL_LOCALE_TESTING
+/* Test-only paths are supplied by the D-Bus fixture. Never inherit the
+ * production configuration paths, even in a build using the defaults. */
+typedef enum
+{
+  RCL_TEST_LANG_SH,
+  RCL_TEST_LANG_CSH,
+  RCL_TEST_RC_KEYMAP,
+  RCL_TEST_RC_KEYMAP_TOGGLE,
+  RCL_TEST_X11_KEYBOARD,
+  RCL_TEST_FILE_COUNT
+} RclLocaleTestFile;
+
+const gchar *rcl_locale_test_get_path ( RclLocaleTestFile file );
+
+#undef RCL_LANG_SH_FILE
+#undef RCL_LANG_CSH_FILE
+#undef RCL_RC_KEYMAP_FILE
+#undef RCL_RC_KEYMAP_TOGGLE_FILE
+#undef RCL_X11_KEYBOARD_FILE
+#define RCL_LANG_SH_FILE          (rcl_locale_test_get_path(RCL_TEST_LANG_SH))
+#define RCL_LANG_CSH_FILE         (rcl_locale_test_get_path(RCL_TEST_LANG_CSH))
+#define RCL_RC_KEYMAP_FILE        (rcl_locale_test_get_path(RCL_TEST_RC_KEYMAP))
+#define RCL_RC_KEYMAP_TOGGLE_FILE (rcl_locale_test_get_path(RCL_TEST_RC_KEYMAP_TOGGLE))
+#define RCL_X11_KEYBOARD_FILE     (rcl_locale_test_get_path(RCL_TEST_X11_KEYBOARD))
+#endif
+
 G_END_DECLS

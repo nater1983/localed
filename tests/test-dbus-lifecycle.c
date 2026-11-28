@@ -6,6 +6,9 @@
  * against an isolated in-process D-Bus daemon. No host system bus is touched.
  */
 #include "config.h"
+#include "rcl-test-config.h"
+
+#include <errno.h>
 
 #include <gio/gio.h>
 #include <glib.h>
@@ -22,7 +25,63 @@ typedef struct
   gchar *address;
   gchar *previous_system_bus_address;
   GDBusConnection *client;
+  gchar *config_dir;
 } Fixture;
+
+/* Only one fixture is active in a test process. Each gets a fresh private
+ * directory, so separate test processes and repeated runs cannot collide. */
+static gchar *test_paths[RCL_TEST_FILE_COUNT];
+
+const gchar *
+rcl_locale_test_get_path(RclLocaleTestFile file)
+{
+  g_assert_cmpuint((guint) file, <, RCL_TEST_FILE_COUNT);
+  g_assert_nonnull(test_paths[file]);
+  return test_paths[file];
+}
+
+static void
+fixture_config_setup(Fixture *fixture)
+{
+  static const gchar *const names[RCL_TEST_FILE_COUNT] = {
+    [RCL_TEST_LANG_SH] = "lang.sh",
+    [RCL_TEST_LANG_CSH] = "lang.csh",
+    [RCL_TEST_RC_KEYMAP] = "rc.keymap",
+    [RCL_TEST_RC_KEYMAP_TOGGLE] = "rc.keymap.toggle",
+    [RCL_TEST_X11_KEYBOARD] = "00-keyboard.conf"
+  };
+
+  fixture->config_dir = g_build_filename(RCL_TEST_CONFIG_ROOT,
+                                        "locale1-test-XXXXXX", NULL);
+  if (!g_mkdtemp(fixture->config_dir))
+    g_error("Cannot create isolated test configuration: %s", g_strerror(errno));
+
+  for (guint i = 0; i < RCL_TEST_FILE_COUNT; i++) {
+    g_assert_null(test_paths[i]);
+    test_paths[i] = g_build_filename(fixture->config_dir, names[i], NULL);
+  }
+
+  /* Retain independent fail-closed checks before any daemon is constructed. */
+  g_assert_cmpstr(RCL_LANG_SH_FILE, !=, "/etc/profile.d/lang.sh");
+  g_assert_cmpstr(RCL_LANG_CSH_FILE, !=, "/etc/profile.d/lang.csh");
+  g_assert_cmpstr(RCL_RC_KEYMAP_FILE, !=, "/etc/rc.d/rc.keymap");
+  g_assert_cmpstr(RCL_RC_KEYMAP_TOGGLE_FILE, !=, "/etc/rc.d/rc.keymap.toggle");
+  g_assert_cmpstr(RCL_X11_KEYBOARD_FILE, !=, "/etc/X11/xorg.conf.d/00-keyboard.conf");
+}
+
+static void
+fixture_config_teardown(Fixture *fixture)
+{
+  for (guint i = 0; i < RCL_TEST_FILE_COUNT; i++) {
+    if (g_unlink(test_paths[i]) != 0 && errno != ENOENT)
+      g_error("Cannot remove test file %s: %s", test_paths[i], g_strerror(errno));
+    g_clear_pointer(&test_paths[i], g_free);
+  }
+  if (g_rmdir(fixture->config_dir) != 0)
+    g_error("Cannot remove test directory %s: %s",
+            fixture->config_dir, g_strerror(errno));
+  g_clear_pointer(&fixture->config_dir, g_free);
+}
 
 static GDBusConnection *
 connect_test_bus(const gchar *address)
@@ -44,6 +103,7 @@ connect_test_bus(const gchar *address)
 static void
 fixture_setup(Fixture *fixture, gconstpointer user_data)
 {
+  fixture_config_setup(fixture);
   fixture->bus = g_test_dbus_new(G_TEST_DBUS_NONE);
   g_test_dbus_up(fixture->bus);
 
@@ -75,6 +135,7 @@ fixture_teardown(Fixture *fixture, gconstpointer user_data)
     g_unsetenv("DBUS_SYSTEM_BUS_ADDRESS");
   g_free(fixture->previous_system_bus_address);
   g_free(fixture->address);
+  fixture_config_teardown(fixture);
 }
 
 static void
@@ -364,9 +425,8 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   gchar *expected_path = g_strdup(RCL_X11_KEYBOARD_FILE);
 
   /*
-   * This test writes a real configuration file.  Require an explicitly
-   * isolated Meson test path so a developer's /etc/X11 configuration can
-   * never be overwritten by the test.
+   * The fixture supplies isolated configuration paths. Keep the explicit
+   * safety assertions as a second line of defense.
    */
   g_assert_cmpstr(expected_path, !=, "/etc/X11/xorg.conf.d/00-keyboard.conf");
   g_assert_cmpstr(RCL_RC_KEYMAP_FILE, !=, "/etc/rc.d/rc.keymap");
