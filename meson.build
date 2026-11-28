@@ -97,6 +97,7 @@ conf.set_quoted('SYSCONFDIR',      sysconfdir)
 # x11_keyboard_conf: path to the Xorg input class keyboard config file.
 conf.set_quoted('PRIVILEGED_GROUP',     get_option('privileged-group'))
 conf.set_quoted('RCL_LANG_SH_FILE',     get_option('lang_sh'))
+conf.set_quoted('RCL_LANG_CSH_FILE', join_paths(import('fs').parent(get_option('lang_sh')), 'lang.csh'))
 conf.set_quoted('RCL_RC_KEYMAP_FILE',    get_option('rc_keymap'))
 conf.set_quoted('RCL_RC_KEYMAP_TOGGLE_FILE',
                 get_option('rc_keymap') + '.toggle')
