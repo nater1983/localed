@@ -26,7 +26,7 @@ and
 methods. The daemon validates and persists the settings, performs
 PolKit authorization, and emits property-change signals.
 Upgrade the client and daemon together. Explicit removals and LANGUAGE
-priority lists use the localed-specific UpdateLocale extension.
+translation preferences use the localed-specific UpdateLocale extension.
 .PP
 Changing settings does not require running
 .B localectl
@@ -69,7 +69,7 @@ Does not require root.
 .BI set-locale " LOCALE | KEY=value [KEY=value ...]"
 Merge named system locale variables through SetLocale. A bare locale is
 interpreted as LANG. LANGUAGE fallback and redundant-value simplification
-follow upstream behavior. Empty assignments and LANGUAGE priority lists
+follow upstream behavior. Empty assignments and explicit LANGUAGE preferences
 select UpdateLocale for the entire request; that extension changes only
 named variables and preserves other assignments.
 .I KEY

@@ -180,23 +180,38 @@ systemd v262 source: merge existing values, derive LANGUAGE when applicable,
 and remove redundant assignments equal to LANG. Empty values and duplicate
 keys are rejected by that standard method. A single bare locale is supported.
 
-The client routes requests containing empty assignments or LANGUAGE priority
-lists through the explicitly nonstandard `UpdateLocale` extension, which
+The client routes requests containing empty assignments or explicit LANGUAGE
+preferences through the explicitly nonstandard `UpdateLocale` extension, which
 preserves unspecified assignments and can remove named keys from both
 scripts. The entire request uses one method, not multiple calls.
 Both methods read snapshots after Polkit authorization and update both
 scripts transactionally without inventing C-shell-only LC_COLLATE defaults.
-Upgrade the daemon and bundled client together. Installed-locale validation
-remains a separate compatibility task.
+Upgrade the daemon and bundled client together. Requested locale names are
+checked against installed glibc locales using `newlocale()` without changing
+the daemon's process locale. C and POSIX are always accepted. The
+`UpdateLocale` LANGUAGE extension validates colon-separated translation
+preferences syntactically rather than requiring each language to be an
+installed glibc locale. Explicit removals and existing unspecified settings
+are preserved. Missing locales are rejected; localed does not generate
+locales automatically.
 
-## Keyboard conversion
+## Keyboard validation and conversion
+
+Nonempty console keymap and toggle names must identify installed readable
+`.map` or `.map.gz` files under `/usr/share/keymaps`, `/usr/share/kbd/keymaps`
+or `/usr/lib/kbd/keymaps`. The daemon searches subdirectories and supports
+file aliases but does not follow symlink directories. Invalid requests fail
+before Polkit and are checked again after authorization. Empty values retain
+reset semantics. This verifies file availability, not map contents; no
+keymap is loaded during validation.
+
 
 `SetVConsoleKeyboard` and `SetX11Keyboard` both accept a `convert`
 boolean. When `true`, a built-in mapping table translates the console
 keymap to an X11 layout (or vice versa). The table covers common
 single-layout keymaps (`us`, `de`, `fr`, `gb`, `es`, `ru`, `se`,
-etc.). No conversion is attempted when no match is found, rather than
-guessing.
+etc.). No conversion is attempted when no match is found or the derived
+console keymap is unavailable, rather than persisting an unusable keymap.
 
 ## Adding a translation
 

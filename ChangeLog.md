@@ -11,6 +11,12 @@ All notable changes to `localed` are documented in this file.
 - Keep duplicate-write regression coverage through authorized locale1 calls instead of the internal AccountsService setter.
 
 ### Fixed
+- Add a dedicated console keymap validation module that searches standard installed keymap directories for readable .map/.map.gz files, including file aliases.
+- Reject missing or unsafe keymap and toggle requests before Polkit and recheck after authorization. Do not persist an unavailable console mapping derived from X11 conversion.
+- Add isolated keymap discovery and D-Bus invalid-request regression tests without touching host maps or loading the console.
+- Validate requested locale names against installed glibc locale data using a separate rcl-locale-validation module and newlocale/freelocale without changing process locale.
+- Accept C/POSIX, preserve explicit removals and route explicit LANGUAGE preferences through UpdateLocale, validating their syntax without requiring translation codes to be installed locales.
+- Reject unavailable locale requests before writing either script; add portable validation and D-Bus regression tests, with an en_AU locale generated in the disposable CI runner archive for language fallback coverage. Avoid LOCPATH in sanitizer CI due to glibc bug 25770.
 - Match systemd v262 SetLocale merge, LANGUAGE fallback, duplicate/empty-value rejection and redundant-variable simplification while retaining transactional Slackware writes.
 - Use standard SetLocale for ordinary localectl updates; retain UpdateLocale as an explicit extension for removal and LANGUAGE priority lists.
 - Stop generating a C-shell-only LC_COLLATE default; keep both scripts consistent for standard SetLocale requests.
