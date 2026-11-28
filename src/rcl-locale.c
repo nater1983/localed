@@ -514,7 +514,7 @@ write_x11_keyboard_conf( const gchar *path,
      * dedicated user on hardened setups) can read it.  g_file_set_contents()
      * creates the temp file 0600; chmod it to 0644 before the rename so the
      * final file is always accessible, even when localed creates it from
-     * scratch.  Mirrors the g_chmod() calls in rcl_write_lang_sh() and
+     * scratch.  Mirrors the mode-preservation logic in the locale writers and
      * rcl_write_rc_keymap_toggle(). */
     if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
       ok = FALSE;
@@ -998,309 +998,6 @@ rcl_read_lang_sh( const gchar *path )
   return table;
 }
 
-/*
- * rcl_write_lang_sh:
- * Write updated locale variable assignments back to /etc/profile.d/lang.sh,
- * preserving any lines not in known_keys (comments, unrecognised exports,
- * etc.) using a read-modify-write strategy.
- *
- * known_keys / new_values are parallel NULL-terminated arrays of const gchar *.
- * A NULL or empty new_values[i] removes that key from the file.
- * All written values are double-quoted and preceded by "export ".
- *
- * The write is atomic (temp file + rename).
- */
-/* Compare generated content against the actual file, not cached state. */
-static gboolean
-locale_file_matches(const gchar *path, const GString *desired)
-{
-  GStatBuf st;
-  g_autofree gchar *contents = NULL;
-  gsize length = 0;
-
-  return g_lstat(path, &st) == 0 && S_ISREG(st.st_mode) &&
-         g_file_get_contents(path, &contents, &length, NULL) &&
-         length == desired->len &&
-         memcmp(contents, desired->str, length) == 0;
-}
-
-static gboolean
-rcl_write_lang_sh( const gchar         *path,
-                   const gchar *const  *known_keys,
-                   const gchar *const  *new_values,
-                   GError             **error )
-{
-  GHashTable    *new_vals;
-  GString       *out;
-  gchar         *contents = NULL;
-  GError        *read_error = NULL;
-  gchar        **lines;
-  gsize          i;
-  gchar         *tmp_path;
-  gboolean       ok;
-  gchar         *dir;
-
-  dir = g_path_get_dirname( path );
-  if( g_mkdir_with_parents( dir, 0755 ) != 0 && errno != EEXIST )
-  {
-    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 _("mkdir -p %s: %s"), dir, g_strerror(errno) );
-    g_free( dir );
-    return FALSE;
-  }
-  g_free( dir );
-  /* Read the existing file before constructing the replacement.  A missing
-   * file is expected on first use; permission and I/O errors are not.  Do
-   * not silently replace a file that we were unable to read and preserve. */
-  if( !g_file_get_contents( path, &contents, NULL, &read_error ) )
-  {
-    if( !g_error_matches( read_error, G_FILE_ERROR, G_FILE_ERROR_NOENT ) )
-    {
-      g_prefix_error( &read_error, "read %s: ", path );
-      g_propagate_error( error, read_error );
-      return FALSE;
-    }
-    g_clear_error( &read_error );
-  }
-
-  /* Build the updated value map from the incoming arrays.
-   * Ownership contract: keys and values are borrowed pointers into the
-   * caller's static/stack arrays (locale_variable_names[], language_fallback_map[],
-   * and the locale GStrv).  NULL destructors are intentional — g_hash_table_unref
-   * must NOT free them.  Any future caller passing heap-allocated strings must
-   * either switch to g_hash_table_new_full with g_free destructors or dup first. */
-  new_vals = g_hash_table_new_full( g_str_hash, g_str_equal, NULL, NULL );
-  for( i = 0; known_keys[i] != NULL; i++ )
-    g_hash_table_replace( new_vals,
-                          (gpointer) known_keys[i],
-                          (gpointer) (new_values[i] ? new_values[i] : "") );
-
-  out = g_string_new( "# Written by localed - see localed(8)\n" );
-
-  /* Re-read the file to preserve non-locale lines.
-   *
-   * Trust assumption: lang.sh is a root-owned file under /etc.  Non-locale
-   * lines (comments, PATH exports, etc.) are copied verbatim from the
-   * existing file without further sanitisation.  An attacker who can already
-   * write to lang.sh has full root-level control of the login environment
-   * by other means, so preserving those lines does not widen the attack
-   * surface beyond what already exists.  Any caller that sources user-
-   * supplied content into lang.sh before calling this function violates
-   * that assumption and must sanitise the content itself. */
-  if( contents != NULL )
-  {
-    lines = g_strsplit( contents, "\n", -1 );
-    g_free( contents );
-
-    for( i = 0; lines[i] != NULL; i++ )
-    {
-      gchar *line = g_strstrip( lines[i] );
-      gchar *rest, *eq, *key;
-      gboolean is_locale_export = FALSE;
-
-      if( line[0] == '\0' )
-        continue;
-
-      /* Drop old "Written by localed" header; we wrote a fresh one above */
-      if( strstr( line, "Written by localed" ) )
-        continue;
-
-      if( line[0] == '#' )
-      {
-        g_string_append_printf( out, "%s\n", line );
-        continue;
-      }
-
-      if( strncmp( line, "export ", 7 ) == 0 )
-      {
-        rest = line + 7;
-        while( *rest == ' ' || *rest == '\t' )
-          rest++;
-        eq = strchr( rest, '=' );
-        if( eq )
-        {
-          key = g_strndup( rest, (gsize)(eq - rest) );
-          g_strstrip( key );
-          if( rcl_locale_variable_is_known( key ) )
-            is_locale_export = TRUE;
-          g_free( key );
-        }
-      }
-
-      if( !is_locale_export )
-        g_string_append_printf( out, "%s\n", line );
-      /* Known locale exports are rewritten below in canonical order */
-    }
-
-    g_strfreev( lines );
-  }
-
-  /* Append locale variables in canonical order */
-  {
-    guint j;
-    for( j = 0; locale_variable_names[j] != NULL; j++ )
-    {
-      const gchar *val = g_hash_table_lookup( new_vals,
-                                              locale_variable_names[j] );
-      if( val && val[0] != '\0' )
-        g_string_append_printf( out, "export %s=\"%s\"\n",
-                                locale_variable_names[j], val );
-    }
-  }
-
-  g_hash_table_unref( new_vals );
-
-  if (locale_file_matches(path, out))
-  {
-    g_string_free(out, TRUE);
-    return TRUE;
-  }
-
-  tmp_path = g_strdup_printf( "%s.XXXXXX", path );
-  {
-    int fd = g_mkstemp( tmp_path );
-    if( fd == -1 )
-    {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   _("create temporary file for %s: %s"), path, g_strerror(errno) );
-      g_free( tmp_path );
-      g_string_free( out, TRUE );
-      return FALSE;
-    }
-    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
-    {
-      g_free( tmp_path );
-      g_string_free( out, TRUE );
-      return FALSE;
-    }
-  }
-  ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
-
-  if( ok )
-  {
-    /* lang.sh must be world-executable (0755) so login shells can source it.
-     * /etc/profile sources files in /etc/profile.d/ via '.', which requires
-     * execute permission.  g_file_set_contents() creates the temp file 0600;
-     * chmod it to 0755 before the rename so the final file is always
-     * accessible, even when localed creates it from scratch. */
-    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
-    {
-      ok = FALSE;
-    }
-
-    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
-    {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   _("rename(%s, %s): %s"), tmp_path, path, g_strerror(errno) );
-      ok = FALSE;
-    }
-  }
-
-  if( !ok )
-    rcl_file_cleanup_temporary( tmp_path, error );
-
-  g_free( tmp_path );
-  g_string_free( out, TRUE );
-  return ok;
-}
-
-/* Write the C-shell counterpart of Slackware's system locale settings.
- * lang.csh intentionally retains Slackware's LC_COLLATE=C default; lang.sh
- * does not force LC_COLLATE, so Bourne-shell users follow LANG unless an
- * explicit LC_COLLATE was selected. */
-static gboolean
-rcl_write_lang_csh( const gchar         *path,
-                    const gchar *const  *known_keys,
-                    const gchar *const  *new_values,
-                    GError             **error )
-{
-  GHashTable *values;
-  GString *out;
-  gchar *dir, *tmp_path;
-  gboolean ok = FALSE;
-  guint i;
-  const gchar *lang, *collate;
-
-  dir = g_path_get_dirname(path);
-  if( g_mkdir_with_parents(dir, 0755) != 0 && errno != EEXIST )
-  {
-    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                _("mkdir -p %s: %s"), dir, g_strerror(errno));
-    g_free(dir);
-    return FALSE;
-  }
-  g_free(dir);
-  values = g_hash_table_new(g_str_hash, g_str_equal);
-  for( i = 0; known_keys[i] != NULL; i++ )
-    g_hash_table_replace(values, (gpointer)known_keys[i],
-                         (gpointer)(new_values[i] ? new_values[i] : ""));
-
-  out = g_string_new("#!/bin/csh\n");
-  g_string_append(out, "# Written by localed - see localed(8)\n");
-  g_string_append(out, "# Set the system locale.\n");
-
-  lang = g_hash_table_lookup(values, "LANG");
-  if( lang && lang[0] )
-    g_string_append_printf(out, "setenv LANG %s\n", lang);
-
-  for( i = 1; locale_variable_names[i] != NULL; i++ )
-  {
-    const gchar *key = locale_variable_names[i];
-    const gchar *value = g_hash_table_lookup(values, key);
-    if( value && value[0] && g_strcmp0(key, "LC_COLLATE") != 0 )
-      g_string_append_printf(out, "setenv %s %s\n", key, value);
-  }
-
-  collate = g_hash_table_lookup(values, "LC_COLLATE");
-  if( !collate || !collate[0] )
-    collate = "C";
-  g_string_append_printf(out, "setenv LC_COLLATE %s\n", collate);
-  g_string_append(out, "# End of /etc/profile.d/lang.csh\n");
-
-  g_hash_table_unref(values);
-
-  if (locale_file_matches(path, out))
-  {
-    g_string_free(out, TRUE);
-    return TRUE;
-  }
-
-  tmp_path = g_strdup_printf("%s.XXXXXX", path);
-  {
-    int fd = g_mkstemp(tmp_path);
-    if( fd == -1 )
-    {
-      g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                  _("create temporary file for %s: %s"), path, g_strerror(errno));
-      g_free(tmp_path);
-      g_string_free(out, TRUE);
-      return FALSE;
-    }
-    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
-    {
-      g_free( tmp_path );
-      g_string_free( out, TRUE );
-      return FALSE;
-    }
-  }
-
-  ok = g_file_set_contents(tmp_path, out->str, (gssize)out->len, error);
-  if( ok && !rcl_file_apply_mode_for_write(tmp_path, path, 0755, error) )
-    ok = FALSE;
-  if( ok && g_rename(tmp_path, path) != 0 )
-  {
-    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                _("rename(%s, %s): %s"), tmp_path, path, g_strerror(errno));
-    ok = FALSE;
-  }
-  if( !ok )
-    rcl_file_cleanup_temporary(tmp_path, error);
-
-  g_free(tmp_path);
-  g_string_free(out, TRUE);
-  return ok;
-}
-
 /* Build the canonical "KEY=value" GStrv for the Locale property from
    whatever known LANG/LANGUAGE/LC_xxx keys are present in RCL_LANG_SH_FILE. */
 static gchar **
@@ -1564,11 +1261,9 @@ auth_ctx_free( AuthCtx *ctx )
   g_free( ctx );
 }
 
-static gboolean rcl_write_locale_files( const gchar *const *known_keys,
-                                         const gchar *const *new_values,
-                                         GError **error );
 static gboolean rcl_patch_locale_files( const gchar *const *known_keys,
                                          const gchar *const *new_values,
+                                         gboolean merge,
                                          GError **error );
 static gboolean rcl_write_vconsole_files( const gchar *keymap,
                                           const gchar *keymap_toggle,
@@ -1589,223 +1284,102 @@ static gboolean rcl_write_vconsole_x11_files( const gchar *keymap,
 
 /* ---- operation handlers: run only after a successful authorisation ---- */
 
-static void
-do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
-               gboolean partial, GDBusMethodInvocation *invocation )
+/* Match systemd v262's locale-name syntax for the standard method.
+ * Installed-locale validation is a separate compatibility task. The
+ * extension retains its safe LANGUAGE-list and explicit removal syntax. */
+static gboolean
+rcl_standard_locale_value_is_valid(const gchar *value)
 {
-  const gchar *known_keys[ G_N_ELEMENTS(locale_variable_names) ];
-  const gchar *new_values[ G_N_ELEMENTS(locale_variable_names) ];
-  guint   i, n_known = 0;
+  return value && *value && strlen(value) < 128 &&
+         strspn(value, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-@")
+           == strlen(value) &&
+         !g_str_equal(value, ".") && !g_str_equal(value, "..");
+}
+
+static void
+do_set_locale(RclLocaleDaemon *daemon, gchar **locale,
+              gboolean partial, GDBusMethodInvocation *invocation)
+{
+  const gchar *known_keys[G_N_ELEMENTS(locale_variable_names)];
+  const gchar *new_values[G_N_ELEMENTS(locale_variable_names)];
+  gboolean seen[G_N_ELEMENTS(locale_variable_names)] = { FALSE };
+  guint n_known = 0;
   GError *error = NULL;
 
-  /*
-   * Bare-locale shorthand: if exactly one string with no '=' is provided,
-   * treat it as LANG=<value>, matching upstream systemd-localed behaviour.
-   * Example: SetLocale(["en_US.UTF-8"], true)  ->  LANG=en_US.UTF-8
-   */
-  if( locale[0] != NULL && locale[1] == NULL && strchr(locale[0], '=') == NULL )
+  if (locale[0] && !locale[1] && !strchr(locale[0], '='))
   {
-    if( !rcl_locale_value_is_safe( locale[0] ) )
+    if (!(partial ? (*locale[0] && rcl_locale_value_is_safe(locale[0]))
+                  : rcl_standard_locale_value_is_valid(locale[0])))
     {
-      g_dbus_method_invocation_return_error( invocation,
-        G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-        "Invalid locale specification: '%s'", locale[0] );
+      g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+          G_DBUS_ERROR_INVALID_ARGS, "Invalid locale specification: '%s'", locale[0]);
       return;
     }
-    gchar *expanded = g_strdup_printf( "LANG=%s", locale[0] );
-    g_free( locale[0] );
+    gchar *expanded = g_strdup_printf("LANG=%s", locale[0]);
+    g_free(locale[0]);
     locale[0] = expanded;
   }
 
-  /* Reject oversized arrays before doing any per-entry work.
-   * The maximum useful number of entries equals the number of known locale
-   * variables; anything larger is either a client bug or a DoS attempt.
-   * G_N_ELEMENTS includes the NULL sentinel, so subtract 1 for the count. */
+  if (partial && !locale[0])
   {
-    guint n_entries = 0;
-    while( locale[n_entries] != NULL )
-      n_entries++;
-    if( n_entries > G_N_ELEMENTS(locale_variable_names) - 1 )
-    {
-      g_dbus_method_invocation_return_error( invocation,
-        G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-        "Too many locale entries (max %u)",
-        (guint)(G_N_ELEMENTS(locale_variable_names) - 1) );
-      return;
-    }
+    g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+        G_DBUS_ERROR_INVALID_ARGS, "UpdateLocale requires at least one assignment");
+    return;
   }
-
-  if( partial && !locale[0] )
+  if (g_strv_length(locale) >= G_N_ELEMENTS(locale_variable_names))
   {
-    g_dbus_method_invocation_return_error( invocation,
-      G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-      "UpdateLocale requires at least one assignment" );
+    g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+        G_DBUS_ERROR_INVALID_ARGS, "Too many locale entries (max %u)",
+        (guint)(G_N_ELEMENTS(locale_variable_names) - 1));
     return;
   }
 
-  /* Validate every entry first; reject the whole call on the first bad one,
-     same semantics as systemd-localed. */
-  for( i = 0; locale[i] != NULL; i++ )
+  for (guint i = 0; locale[i]; i++)
   {
-    gchar *eq = strchr( locale[i], '=' );
-    g_autofree gchar *key = NULL;
-    const gchar *val;
-
-    if( !eq )
+    const gchar *eq = strchr(locale[i], '=');
+    guint k;
+    if (!eq)
     {
-      g_dbus_method_invocation_return_error( invocation,
-        G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-        "Locale assignment '%s' is not of the form KEY=value", locale[i] );
+      g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+          G_DBUS_ERROR_INVALID_ARGS, "Locale assignment '%s' is not of the form KEY=value", locale[i]);
       return;
     }
-
-    key = g_strndup( locale[i], (gsize)(eq - locale[i]) );
-    val = eq + 1;
-
-    if( !rcl_locale_variable_is_known( key ) )
-    {
-      g_dbus_method_invocation_return_error( invocation,
-        G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-        "Unknown locale variable '%s'", key );
-      return;
-    }
-
-    if( partial )
-    {
-      guint j;
-      for( j = 0; j < i; j++ )
-      {
-        const gchar *previous = strchr(locale[j], '=');
-        if( previous && (gsize)(previous - locale[j]) == strlen(key) &&
-            strncmp(locale[j], key, strlen(key)) == 0 )
-        {
-          g_dbus_method_invocation_return_error(invocation,
-            G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-            "Duplicate locale variable '%s'", key);
-          return;
-        }
-      }
-    }
-
-    if( val[0] != '\0' && !rcl_locale_value_is_safe( val ) )
-    {
-      g_dbus_method_invocation_return_error( invocation,
-        G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-        "Invalid value for %s", key );
-      return;
-    }
-  }
-
-  /* Build the known_keys/new_values pair arrays. SetLocale replaces the
-     whole locale set (systemd semantics): rcl_write_lang_sh() drops every
-     known locale export from the file and re-emits only these, so any
-     variable not supplied in the call is removed. */
-  for( i = 0; locale_variable_names[i] != NULL; i++ )
-  {
-    guint j;
-    const gchar *match = NULL;
-
-    for( j = 0; locale[j] != NULL; j++ )
-    {
-      gchar *eq = strchr( locale[j], '=' );
-      gsize  klen = eq ? (gsize)(eq - locale[j]) : 0;
-      if( eq && strncmp( locale[j], locale_variable_names[i], klen ) == 0 &&
-          locale_variable_names[i][klen] == '\0' )
-      {
-        match = eq + 1;
+    g_autofree gchar *key = g_strndup(locale[i], eq - locale[i]);
+    for (k = 0; locale_variable_names[k]; k++)
+      if (g_str_equal(key, locale_variable_names[k]))
         break;
-      }
-    }
-
-    if( match )
+    if (!locale_variable_names[k] || seen[k])
     {
-      known_keys[n_known] = locale_variable_names[i];
-      new_values[n_known] = match;
-      n_known++;
+      g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+          G_DBUS_ERROR_INVALID_ARGS, "%s locale variable '%s'",
+          seen[k] ? "Duplicate" : "Unknown", key);
+      return;
     }
+    if (!(partial ? rcl_locale_value_is_safe(eq + 1)
+                  : rcl_standard_locale_value_is_valid(eq + 1)))
+    {
+      g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+          G_DBUS_ERROR_INVALID_ARGS, "Invalid value for %s", key);
+      return;
+    }
+    seen[k] = TRUE;
+    known_keys[n_known] = locale_variable_names[k];
+    new_values[n_known++] = eq + 1;
   }
   known_keys[n_known] = NULL;
   new_values[n_known] = NULL;
 
-  if( partial )
+  /* Both methods use the same snapshot/rollback transaction, after
+   * authorization. Only SetLocale merges and simplifies the full state. */
+  if (!rcl_patch_locale_files(known_keys, new_values, !partial, &error))
   {
-    if( !rcl_patch_locale_files(known_keys, new_values, &error) )
-    {
-      rcl_daemon_sync_dbus_properties(daemon);
-      g_dbus_method_invocation_return_gerror(invocation, error);
-      g_error_free(error);
-      return;
-    }
     rcl_daemon_sync_dbus_properties(daemon);
-    g_dbus_method_invocation_return_value(invocation, NULL);
+    g_dbus_method_invocation_return_gerror(invocation, error);
+    g_error_free(error);
     return;
   }
-
-  /*
-   * LANGUAGE auto-derivation (gap 1 vs systemd 257).
-   *
-   * If LANG was supplied in this call but LANGUAGE was not, check the
-   * language-fallback table.  If a match is found, inject LANGUAGE into
-   * the write arrays so it is persisted atomically in the same
-   * write_key_value_file() call.
-   *
-   * Conditions for the injection:
-   *   a) LANG= is being set by this call (match != NULL for "LANG")
-   *   b) LANGUAGE= is NOT being set by this call
-   *   c) rcl_find_language_fallback() returns a non-NULL chain
-   *
-   * The injected LANGUAGE value is appended to known_keys/new_values
-   * (the arrays are sized G_N_ELEMENTS(locale_variable_names) so there is
-   * always room for one more entry before the NULL sentinel).
-   */
-  {
-    gboolean lang_set      = FALSE;
-    gboolean language_set  = FALSE;
-    guint    k;
-
-    for( k = 0; k < n_known; k++ )
-    {
-      if( g_strcmp0( known_keys[k], "LANG"     ) == 0 ) lang_set     = TRUE;
-      if( g_strcmp0( known_keys[k], "LANGUAGE" ) == 0 ) language_set = TRUE;
-    }
-
-    if( lang_set && !language_set )
-    {
-      /* Find the LANG value we are about to write */
-      const gchar *lang_value = NULL;
-      for( k = 0; k < n_known; k++ )
-        if( g_strcmp0( known_keys[k], "LANG" ) == 0 )
-        {
-          lang_value = new_values[k];
-          break;
-        }
-
-      if( lang_value && lang_value[0] != '\0' )
-      {
-        const gchar *fallback = rcl_find_language_fallback( lang_value );
-        if( fallback )
-        {
-          g_debug( "LANG=%s -> auto-setting LANGUAGE=%s", lang_value, fallback );
-          known_keys[n_known] = "LANGUAGE";
-          new_values[n_known] = fallback;
-          n_known++;
-          known_keys[n_known] = NULL;
-          new_values[n_known] = NULL;
-        }
-      }
-    }
-  }
-
-  if( !rcl_write_locale_files( known_keys, new_values, &error ) )
-  {
-    rcl_daemon_sync_dbus_properties( daemon );
-    g_dbus_method_invocation_return_gerror( invocation, error );
-    g_error_free( error );
-    return;
-  }
-
-  rcl_daemon_sync_dbus_properties( daemon );
-  g_dbus_method_invocation_return_value( invocation, NULL );
+  rcl_daemon_sync_dbus_properties(daemon);
+  g_dbus_method_invocation_return_value(invocation, NULL);
 }
 
 static void
@@ -2123,36 +1697,6 @@ check_polkit_async( AuthCtx *ctx, const gchar *action_id, gboolean interactive )
 /* Commit the two Slackware locale files as one logical operation.  Each
  * individual rename is atomic; if the second write fails, restore the first
  * file so callers do not observe a knowingly mixed locale configuration. */
-static gboolean
-rcl_write_locale_files( const gchar *const *known_keys,
-                        const gchar *const *new_values, GError **error )
-{
-  RclFileSnapshot sh = { 0 }, csh = { 0 };
-  GError *write_error = NULL, *rollback_error = NULL;
-  gboolean ok = FALSE;
-
-  if( !rcl_file_snapshot_take( &sh, RCL_LANG_SH_FILE, &write_error ) ||
-      !rcl_file_snapshot_take( &csh, RCL_LANG_CSH_FILE, &write_error ) )
-    goto fail;
-  if( !rcl_write_lang_sh( RCL_LANG_SH_FILE, known_keys, new_values, &write_error ) )
-    goto fail;
-  if( !rcl_write_lang_csh( RCL_LANG_CSH_FILE, known_keys, new_values, &write_error ) )
-  {
-    if( !rcl_file_snapshot_restore( &sh, &rollback_error ) )
-      rcl_report_rollback_failure( &write_error, rollback_error );
-    goto fail;
-  }
-  ok = TRUE;
-  goto out;
-
-fail:
-  rcl_report_write_failure( error, write_error );
-out:
-  rcl_file_snapshot_clear( &sh );
-  rcl_file_snapshot_clear( &csh );
-  return ok;
-}
-
 /* Identify a simple Slackware locale assignment without interpreting or
  * executing shell code. Keep every unrelated line byte-for-byte. */
 static gchar *
@@ -2356,19 +1900,17 @@ rcl_locale_write_patch(const RclFileSnapshot *snapshot, GString *contents,
   return ok;
 }
 
-/* Seed a missing companion from the other script without rereading disk
- * or executing shell code. Unsupported known assignments fail closed. */
-static GString *
-rcl_locale_seed_companion(const gchar *contents, gboolean from_csh,
-                          GError **error)
+/* Read only literal known assignments from a transaction snapshot.
+ * Reject complex statements rather than losing values during a merge. */
+static GHashTable *
+rcl_locale_snapshot_entries(const gchar *contents, gboolean from_csh,
+                            GError **error)
 {
   g_autoptr(GHashTable) entries = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                         g_free, g_free);
   g_auto(GStrv) lines = g_strsplit(contents ? contents : "", "\n", -1);
-  GString *out;
-  guint i;
 
-  for (i = 0; lines[i]; i++)
+  for (guint i = 0; lines[i]; i++)
   {
     g_autofree gchar *key = rcl_locale_assignment_key(lines[i], from_csh);
     gchar *value;
@@ -2383,10 +1925,21 @@ rcl_locale_seed_companion(const gchar *contents, gboolean from_csh,
     }
     g_hash_table_replace(entries, g_steal_pointer(&key), value);
   }
+  return g_steal_pointer(&entries);
+}
 
+/* Seed a missing companion without rereading disk or executing shell code. */
+static GString *
+rcl_locale_seed_companion(const gchar *contents, gboolean from_csh,
+                          GError **error)
+{
+  g_autoptr(GHashTable) entries = rcl_locale_snapshot_entries(contents, from_csh, error);
+  GString *out;
+  if (!entries)
+    return NULL;
   out = g_string_new(from_csh ? "# Written by localed - see localed(8)\n"
                               : "#!/bin/csh\n# Written by localed - see localed(8)\n");
-  for (i = 0; locale_variable_names[i]; i++)
+  for (guint i = 0; locale_variable_names[i]; i++)
     rcl_locale_append_assignment(out, locale_variable_names[i],
         g_hash_table_lookup(entries, locale_variable_names[i]), !from_csh);
   return out;
@@ -2396,13 +1949,15 @@ rcl_locale_seed_companion(const gchar *contents, gboolean from_csh,
  * requests cannot interleave between the snapshot and the final rename. */
 static gboolean
 rcl_patch_locale_files(const gchar *const *keys, const gchar *const *values,
-                       GError **error)
+                       gboolean merge, GError **error)
 {
   RclFileSnapshot sh = {0}, csh = {0};
   g_autoptr(GString) sh_new = NULL;
   g_autoptr(GString) csh_new = NULL;
   g_autoptr(GString) csh_seed = NULL;
   g_autoptr(GString) sh_seed = NULL;
+  g_autoptr(GHashTable) merged = NULL;
+  const gchar *merged_values[G_N_ELEMENTS(locale_variable_names)] = { NULL };
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE;
 
@@ -2429,6 +1984,46 @@ rcl_patch_locale_files(const gchar *const *keys, const gchar *const *values,
     if (!csh_seed)
       goto fail;
   }
+  if (merge)
+  {
+    /* lang.sh is the authoritative system locale, with lang.csh recovery
+     * if it is absent. Match v262: derive LANGUAGE from incoming LANG,
+     * merge omitted variables, then simplify values identical to LANG. */
+    const gchar *incoming_lang = NULL;
+    gboolean incoming_language = FALSE;
+    const gchar *lang;
+    merged = rcl_locale_snapshot_entries(sh.existed ? sh.contents : sh_seed->str,
+                                         FALSE, &write_error);
+    if (!merged)
+      goto fail;
+    for (guint i = 0; keys[i]; i++)
+    {
+      if (g_str_equal(keys[i], "LANG"))
+        incoming_lang = values[i];
+      if (g_str_equal(keys[i], "LANGUAGE"))
+        incoming_language = TRUE;
+      g_hash_table_replace(merged, g_strdup(keys[i]), g_strdup(values[i]));
+    }
+    if (incoming_lang && !incoming_language)
+    {
+      const gchar *fallback = rcl_find_language_fallback(incoming_lang);
+      if (fallback)
+        g_hash_table_replace(merged, g_strdup("LANGUAGE"), g_strdup(fallback));
+    }
+
+    lang = g_hash_table_lookup(merged, "LANG");
+    for (guint i = 0; locale_variable_names[i]; i++)
+    {
+      const gchar *value = g_hash_table_lookup(merged, locale_variable_names[i]);
+      /* Empty values and redundant non-LANG assignments are absent in
+       * the desired state. Keep the array indexed by the canonical keys. */
+      if (value && *value && (i == 0 || g_strcmp0(value, lang) != 0))
+        merged_values[i] = value;
+    }
+    keys = locale_variable_names;
+    values = merged_values;
+  }
+
   sh_new = rcl_locale_patch_contents(sh.existed ? sh.contents : sh_seed->str,
                                     keys, values, FALSE, &write_error);
   if (!sh_new)

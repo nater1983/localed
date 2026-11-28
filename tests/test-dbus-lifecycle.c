@@ -834,6 +834,11 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   const gchar *duplicate[] = { "LC_TIME=C", "LC_TIME=POSIX", NULL };
   const gchar *empty[] = { NULL };
   const gchar *replace[] = { "LANG=en_US.UTF-8", NULL };
+  const gchar *redundant[] = { "LC_TIME=en_US.UTF-8", NULL };
+  const gchar *bare[] = { "en_AU", NULL };
+  const gchar *restore[] = { "LANG=en_US.UTF-8", "LC_TIME=en_GB.UTF-8", NULL };
+  const gchar *explicit_language[] = { "LANG=en_AU", "LANGUAGE=en_GB", NULL };
+  const gchar *bad_standard[] = { "LANGUAGE=en_US:en", NULL };
   g_autoptr(GError) error = NULL;
   GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
   GDBusConnection *polkit_bus = connect_test_bus(fixture->address);
@@ -909,13 +914,61 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_assert_null(strstr(after, "LC_COLLATE"));
   g_clear_pointer(&after, g_free);
 
-  /* Retain the existing replacement behavior of SetLocale. */
+  /* Standard SetLocale rejects empty and duplicate assignments. */
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", unset);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", duplicate);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", bad_standard);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+
+  /* Match systemd v262 merge semantics and keep the companion consistent. */
   call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
   g_assert_no_error(polkit.client_error);
   g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
   g_assert_no_error(error);
-  g_assert_null(strstr(after, "LC_TIME"));
+  g_assert_nonnull(strstr(after, "LC_TIME=en_GB.UTF-8"));
   g_assert_nonnull(strstr(after, "export LANG=\"en_US.UTF-8\""));
+  g_assert_nonnull(strstr(after, "LANGUAGE=\"en_US:en\""));
+  g_assert_null(strstr(after, "LC_COLLATE"));
+  g_clear_pointer(&after, g_free);
+
+  /* A value identical to LANG is simplified away from both scripts. */
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", redundant);
+  g_assert_no_error(polkit.client_error);
+  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_null(strstr(after, "LC_TIME"));
+  g_clear_pointer(&after, g_free);
+  g_assert_true(g_file_get_contents(RCL_LANG_CSH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_null(strstr(after, "LC_TIME"));
+  g_clear_pointer(&after, g_free);
+
+  /* Bare LANG triggers fallback; explicit LANGUAGE wins over fallback. */
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", bare);
+  g_assert_no_error(polkit.client_error);
+  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(after, "LANGUAGE=\"en_AU:en_GB\""));
+  g_clear_pointer(&after, g_free);
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", explicit_language);
+  g_assert_no_error(polkit.client_error);
+  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(after, "LANGUAGE=\"en_GB\""));
+  g_clear_pointer(&after, g_free);
+
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", restore);
+  g_assert_no_error(polkit.client_error);
+
+  /* An empty array preserves the current settings (after simplification). */
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", empty);
+  g_assert_no_error(polkit.client_error);
+  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(after, "LC_TIME=\"en_GB.UTF-8\""));
+  g_clear_pointer(&after, g_free);
 
   /* Repeating an authorized identical update must not replace either file. */
   {

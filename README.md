@@ -163,10 +163,10 @@ read from Slackware's `lang.sh` script, not `/etc/locale.conf`. The console
 keymap is managed through Slackware's `rc.keymap` script, not
 `/etc/vconsole.conf`.
 
-## Partial system locale updates
+## System locale updates
 
-The bundled `localectl` preserves existing locale settings that were not
-named in the command:
+The bundled `localectl` uses standard `SetLocale` for ordinary locale
+updates and merges unspecified variables from existing configuration:
 
 ```sh
 localectl set-locale LANG=en_US.UTF-8
@@ -175,14 +175,19 @@ localectl set-locale LC_COLLATE=
 localectl unset-locale LC_COLLATE
 ```
 
-The final two commands are equivalent. An empty value removes the named
-assignment from both `lang.sh` and `lang.csh`. Other existing assignments,
-including `LANGUAGE`, are preserved. The daemon reads the files after
-Polkit authorization and updates them transactionally. This supports
-simple literal locale assignments, not arbitrary shell programs.
-The standard `SetLocale` D-Bus method retains its replacement semantics;
-the bundled client uses the new `UpdateLocale` extension instead. Upgrade
-the daemon and client together; older daemons do not expose `UpdateLocale`.
+The final two commands are equivalent. Standard `SetLocale` follows the
+systemd v262 source: merge existing values, derive LANGUAGE when applicable,
+and remove redundant assignments equal to LANG. Empty values and duplicate
+keys are rejected by that standard method. A single bare locale is supported.
+
+The client routes requests containing empty assignments or LANGUAGE priority
+lists through the explicitly nonstandard `UpdateLocale` extension, which
+preserves unspecified assignments and can remove named keys from both
+scripts. The entire request uses one method, not multiple calls.
+Both methods read snapshots after Polkit authorization and update both
+scripts transactionally without inventing C-shell-only LC_COLLATE defaults.
+Upgrade the daemon and bundled client together. Installed-locale validation
+remains a separate compatibility task.
 
 ## Keyboard conversion
 

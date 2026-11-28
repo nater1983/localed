@@ -11,9 +11,12 @@ All notable changes to `localed` are documented in this file.
 - Keep duplicate-write regression coverage through authorized locale1 calls instead of the internal AccountsService setter.
 
 ### Fixed
+- Match systemd v262 SetLocale merge, LANGUAGE fallback, duplicate/empty-value rejection and redundant-variable simplification while retaining transactional Slackware writes.
+- Use standard SetLocale for ordinary localectl updates; retain UpdateLocale as an explicit extension for removal and LANGUAGE priority lists.
+- Stop generating a C-shell-only LC_COLLATE default; keep both scripts consistent for standard SetLocale requests.
 - Automatically isolate D-Bus regression test configuration in unique temporary directories under the build tree; retain production paths and safety assertions even when tests are enabled.
 - Test the default Meson configuration in sanitizer CI and keep the external private-bus daemon separately isolated.
-- Forward-port 0.3.2 partial system locale updates through the authorized UpdateLocale D-Bus extension and localectl unset-locale, preserving standard SetLocale replacement semantics.
+- Forward-port 0.3.2 partial system locale updates through the authorized UpdateLocale D-Bus extension and localectl unset-locale; the earlier replacement behavior is superseded by the upstream merge correction above.
 - Retain unrelated assignments in both Slackware locale scripts, with transactional rollback and missing-companion recovery.
 - Carry forward partial-update and duplicate-write regression coverage through authorized locale1 calls.
 

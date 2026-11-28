@@ -79,7 +79,8 @@ void       rcl_daemon_set_debug  ( RclDaemon *daemon, gboolean debug );
 
   Methods:
     SetLocale         (as locale, b interactive)
-      – replaces the complete system locale assignment set
+      – merges supplied nonempty assignments with current locale settings,
+        derives LANGUAGE when applicable and removes redundant values
     UpdateLocale      (as locale, b interactive)
       – changes only named assignments; empty values remove those keys
     SetVConsoleKeyboard(s keymap, s keymap_toggle, b convert, b interactive)
