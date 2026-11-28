@@ -139,6 +139,13 @@ fail. Requires the
 .B org.freedesktop.locale1.set-locale
 PolKit action.
 .TP
+.B UpdateLocale(as locale, b interactive)
+Localed extension to change only explicitly named locale assignments.
+Omitted variables remain unchanged. Empty values remove the named
+assignment from both shell scripts. Invalid, duplicate or empty requests
+are rejected. Requires the same PolKit action as SetLocale.
+The standard SetLocale replacement semantics remain unchanged.
+.TP
 .B SetVConsoleKeyboard(s keymap, s keymap_toggle, b convert, b interactive)
 Writes
 .I keymap
