@@ -85,7 +85,9 @@ static GSubprocess *
 spawn_companion(const gchar *path, gboolean debug, GError **error)
 {
   g_autoptr(GSubprocessLauncher) launcher = NULL;
-  const gchar *argv[] = { path, debug ? "--debug" : NULL, NULL };
+  const gchar *argv[] = {
+    path, "--managed-companion", debug ? "--debug" : NULL, NULL
+  };
 
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_NONE);
   g_subprocess_launcher_set_child_setup(
