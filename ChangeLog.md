@@ -4,6 +4,11 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.4.0] - Unreleased
 
+### Fixed
+- Forward-port 0.3.2 partial system locale updates through the authorized UpdateLocale D-Bus extension and localectl unset-locale, preserving standard SetLocale replacement semantics.
+- Retain unrelated assignments in both Slackware locale scripts, with transactional rollback and missing-companion recovery.
+- Carry forward the partial-update regression coverage; preserve the 0.4.0 duplicate AccountsService update tests.
+
 ### Changed
 - Use AccountsService as the sole automatic primary locale synchronization path for GNOME and Plasma 6; remove the Plasma-specific locale file monitor and parser.
 - Require an unambiguous active local user session, including TTY sessions and privileged-group membership for automatic AccountsService updates.
@@ -23,6 +28,37 @@ All notable changes to `localed` are documented in this file.
 - Verified AccountsService-only locale synchronization on Plasma 6.7.6 with an elogind TTY login session, switching between es_ES.UTF-8 and en_US.UTF-8 after removing the desktop-specific monitor.
 - Plasma 6.7.6 runtime testing verified primary locale updates, regional format changes, and translation preference additions and reordering before consolidation. Other Plasma releases remain unverified.
 - Add regression coverage for duplicate locale writes and missing companion recovery.
+
+## [0.3.2] - 2026-11-28
+
+Maintenance release for partial system locale updates.
+
+### Fixed
+- Make localectl set-locale update only explicitly named locale variables,
+  preserving the other assignments in both Slackware locale scripts.
+- Treat empty values as removal of the named assignment, including LC_COLLATE.
+- Read existing configuration after Polkit authorization, preserve unrelated
+  lines, and roll back if updating the companion file fails.
+- Seed a missing companion from existing literal locale assignments.
+- Derive the C-shell companion path from the configured locale script directory
+  to support isolated testing.
+
+### Added
+- Add localectl unset-locale for explicit removal of one or more variables.
+- Add the Polkit-authorized UpdateLocale D-Bus extension without changing
+  standard SetLocale replacement semantics.
+
+### Tests
+- Cover partial updates, removal, authorization denial, invalid requests,
+  rollback, missing companion recovery and SetLocale compatibility.
+- Slackware compilation and Plasma 6 regression suite: 5/5 passed.
+- GNOME and Plasma 6 AddressSanitizer/UndefinedBehaviorSanitizer builds:
+  5/5 test suites passed for each backend, with leak detection enabled.
+- Live GNOME-session testing verified independent LANG changes, preservation
+  of LC_TIME and LC_COLLATE, removal with unset-locale and empty values,
+  and consistent system locale status without keyboard changes.
+- Automatic desktop locale synchronization and per-user locale management
+  are unchanged by this release.
 
 ## [0.3.1] - 2026-11-23
 

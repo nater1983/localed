@@ -18,6 +18,11 @@
       <arg direction="in"  type="b"  name="interactive"/>
     </method>
 
+    <method name="UpdateLocale">
+      <arg direction="in"  type="as" name="locale"/>
+      <arg direction="in"  type="b"  name="interactive"/>
+    </method>
+
     <method name="SetVConsoleKeyboard">
       <arg direction="in"  type="s"  name="keymap"/>
       <arg direction="in"  type="s"  name="keymap_toggle"/>
