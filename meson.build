@@ -109,7 +109,7 @@ if not desktop_companion_dir.startswith('/')
   desktop_companion_dir = join_paths(prefix, desktop_companion_dir)
 endif
 conf.set_quoted('RCL_DESKTOP_COMPANION',
-                join_paths(desktop_companion_dir, 'localed-desktop'))
+                join_paths(desktop_companion_dir, 'localed-input-sources-helper'))
 
 configure_file(
   output        : 'config.h',
@@ -138,5 +138,5 @@ summary({
   'console keymap': get_option('rc_keymap'),
   'X11 keyboard'  : get_option('x11_keyboard_conf'),
   'privileged group': get_option('privileged-group'),
-  'optional desktop companion': join_paths(desktop_companion_dir, 'localed-desktop'),
+  'optional desktop companion': join_paths(desktop_companion_dir, 'localed-input-sources-helper'),
 }, section : 'Configuration')
