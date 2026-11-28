@@ -47,7 +47,7 @@ option(
   'privileged-group',
   type        : 'string',
   value       : 'wheel',
-  description : 'Group allowed to change locale/keyboard without authentication',
+  description : 'Group eligible for AccountsService language synchronization',
 )
 
 option(

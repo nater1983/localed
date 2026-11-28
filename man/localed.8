@@ -214,20 +214,22 @@ The policy defaults require
 .B auth_admin
 for inactive or remote callers and
 .B auth_admin_keep
-for an active local session. A PolKit rule installed at
-.I /usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules
-additionally grants unconditional access to members of the privileged
-group selected at build time (default
-.RB ` wheel ',
-see the
+for an active local session. PolKit may temporarily retain an
+authorization. Localed no longer installs a rule that grants
+unconditional authorization based on group membership. Site-specific
+administrator rules may still affect the effective policy.
+.PP
+When upgrading a manual installation, inspect and remove the obsolete
+vendor rule from the old installation prefix if it is the former
+localed rule. Normal Slackware package upgrades remove obsolete
+package-owned files. Administrator-managed rules are not removed.
+The
 .B privileged-group
-meson option), so desktop session tools are not prompted for a password
-on every locale or keyboard change. Group membership changes only take
-effect for new login sessions.
+meson option applies only to the AccountsService bridge.
 .PP
 These PolKit actions govern D-Bus callers, including the bundled
 .BR localectl (1)
-client. Its set commands call the locale1 D-Bus methods with
+client. Its set and unset commands call the locale1 D-Bus methods with
 .I interactive=true
 so an authentication agent may prompt when required. Its status command
 reads D-Bus properties; its list commands enumerate locally installed
@@ -301,10 +303,6 @@ is called.
 .TP
 .I /usr/share/polkit-1/actions/org.freedesktop.locale1.policy
 PolKit action declarations and default authorization requirements.
-.TP
-.I /usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules
-PolKit rule granting the configured privileged group unconditional
-access to both locale1 actions.
 .SH "SEE ALSO"
 .BR localectl (1),
 .BR polkit (8),

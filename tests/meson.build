@@ -102,3 +102,13 @@ if get_option('desktop-backend') == 'plasma6'
     env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
   )
 endif
+
+# Meson already requires Python; use its standard library to verify the
+# actual configured installation manifest and shipped Polkit defaults.
+polkit_test_python = import('python').find_installation()
+test(
+  'Polkit policy and installation manifest',
+  polkit_test_python,
+  args : [files('test-polkit-policy.py'),
+          meson.project_source_root(), meson.project_build_root()],
+)

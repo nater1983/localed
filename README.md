@@ -16,8 +16,8 @@ The daemon follows the same general service pattern as
 - Watches configuration files with inotify and emits D-Bus
   `PropertiesChanged` notifications when values change.
 - Validates Xorg XKB configuration before accepting or reporting values.
-- Uses Polkit for authorization, with a configurable privileged group
-  (default: `wheel`).
+- Uses Polkit policy for public locale and keyboard configuration requests,
+  without granting unconditional authorization to members of `wheel`.
 - Integrates with AccountsService when it is available at runtime.
 - Provides optional desktop input-source integration through a build-time
   backend selection.
@@ -172,6 +172,27 @@ names under `libexecdir` (normally `/usr/libexec`):
 There is one input-sources helper executable. Desktop-specific helper code
 is compiled into that executable when its backend is selected; GNOME does not
 install a separately named GNOME helper.
+
+### Authorization and upgrading
+
+The shipped Polkit policy uses `auth_admin` for inactive and remote
+callers and `auth_admin_keep` for active local callers. Authentication
+may be cached temporarily by Polkit. Group membership alone does not
+authorize locale1 D-Bus configuration requests through localed.
+
+The former vendor rule
+`/usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules` is no longer
+installed. When upgrading a Slackware package with `upgradepkg`, the
+obsolete file is removed if it was owned exclusively by the old package.
+For an earlier manual installation, inspect the old rule under the
+installation prefix and remove it if it is the former localed vendor
+rule. A new Meson installation does not uninstall old files. Do not
+remove unrelated or administrator-managed rules under `/etc/polkit-1`.
+
+The `privileged-group` build option remains for the AccountsService
+bridge only; it does not configure a Polkit authorization bypass.
+Desktop backend internal keyboard writes and AccountsService
+synchronization are not changed by this authorization correction.
 
 ## Desktop input-source integration
 

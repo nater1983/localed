@@ -116,6 +116,14 @@ meson setup "${MESON_ARGS[@]}" \
   .. || exit 1
 "${NINJA:=ninja}" $NUMJOBS || exit 1
 DESTDIR="$PKG" "$NINJA" install || exit 1
+
+# The old passwordless vendor rule must not enter the new package.
+# upgradepkg removes obsolete package-owned files on upgrade.
+if [ -e "$PKG/usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules" ] ||
+   [ -L "$PKG/usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules" ]; then
+  echo "Obsolete locale1 authorization rule in package staging area" >&2
+  exit 1
+fi
 cd "$SRC"
 
 # localectl is installed by meson (install_data).
