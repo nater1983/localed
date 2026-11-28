@@ -2,6 +2,28 @@
 
 All notable changes to `localed` are documented in this file.
 
+## [0.3.2] - Unreleased
+
+### Fixed
+- Make localectl set-locale update only explicitly named locale variables,
+  preserving the other assignments in both Slackware locale scripts.
+- Treat empty values as removal of the named assignment, including LC_COLLATE.
+- Read existing configuration after Polkit authorization, preserve unrelated
+  lines, and roll back if updating the companion file fails.
+- Seed a missing companion from existing literal locale assignments.
+- Derive the C-shell companion path from the configured locale script directory
+  to support isolated testing.
+
+### Added
+- Add localectl unset-locale for explicit removal of one or more variables.
+- Add the Polkit-authorized UpdateLocale D-Bus extension without changing
+  standard SetLocale replacement semantics.
+
+### Tests
+- Cover partial updates, removal, authorization denial, invalid requests,
+  rollback, missing companion recovery and SetLocale compatibility.
+- Slackware compilation and runtime testing remain pending.
+
 ## [0.3.1] - 2026-11-23
 
 Maintenance release for Plasma 6 locale synchronization.
