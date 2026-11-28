@@ -1097,8 +1097,8 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
   g_assert_no_error(polkit.client_error);
   assert_locale_files(
-      "# Keep sh\nexport LANG=\\"en_AU.UTF-8\\"\nexport LC_TIME=en_GB.UTF-8\n"
-      "export LC_MESSAGES=C\nexport LC_COLLATE=\\"C\\"\n",
+      "# Keep sh\nexport LANG=\"en_AU.UTF-8\"\nexport LC_TIME=en_GB.UTF-8\n"
+      "export LC_MESSAGES=C\nexport LC_COLLATE=\"C\"\n",
       "# Keep csh\nsetenv LANG en_AU.UTF-8\nsetenv LC_TIME en_GB.UTF-8\n"
       "setenv LC_COLLATE C\nsetenv LC_MESSAGES C\n");
 
@@ -1113,7 +1113,7 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", unset);
   g_assert_no_error(polkit.client_error);
   assert_locale_files(
-      "# Keep sh\nexport LANG=\\"en_AU.UTF-8\\"\nexport LC_TIME=en_GB.UTF-8\n"
+      "# Keep sh\nexport LANG=\"en_AU.UTF-8\"\nexport LC_TIME=en_GB.UTF-8\n"
       "export LC_MESSAGES=C\n",
       "# Keep csh\nsetenv LANG en_AU.UTF-8\nsetenv LC_TIME en_GB.UTF-8\n"
       "setenv LC_MESSAGES C\n");
@@ -1125,8 +1125,8 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_clear_pointer(&after, g_free);
   g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
   g_assert_no_error(error);
-  g_assert_nonnull(strstr(after, "export LC_TIME=\\"en_GB.UTF-8\\""));
-  g_assert_nonnull(strstr(after, "export LC_MESSAGES=\\"C\\""));
+  g_assert_nonnull(strstr(after, "export LC_TIME=\"en_GB.UTF-8\""));
+  g_assert_nonnull(strstr(after, "export LC_MESSAGES=\"C\""));
   g_assert_null(strstr(after, "LC_COLLATE"));
 
   /* Full replacement clears omitted overrides in both files. */
