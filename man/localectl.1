@@ -18,7 +18,7 @@ system D-Bus service to query and change locale and keyboard settings.
 Configuration changes are sent to
 .B localed
 using the
-.B SetLocale,
+.B UpdateLocale,
 .B SetVConsoleKeyboard,
 and
 .B SetX11Keyboard
@@ -64,7 +64,9 @@ narrows the output to en_US locales only.
 Does not require root.
 .TP
 .BI set-locale " KEY=value [KEY=value ...]"
-Set one or more locale variables.
+Update only the named system locale variables. Existing omitted variables
+remain unchanged. Empty values remove the named assignments from both
+locale scripts.
 .I KEY
 must be one of
 .BR LANG ,
@@ -86,6 +88,10 @@ Each assignment is sent to the daemon over D-Bus and persisted using the Slackwa
 Passing an empty value (e.g.
 .BR LC_TIME= )
 removes that key from the file.
+.TP
+.BI unset-locale " KEY [KEY ...]"
+Remove the named locale variables, preserving all others. Equivalent to
+passing empty values to set-locale; the same PolKit authorization applies.
 .TP
 .BI set-keymap " KEYMAP [KEYMAP_TOGGLE]"
 Set the virtual console keymap (and optionally the toggle keymap).
@@ -164,6 +170,10 @@ Set multiple locale variables at once:
 localectl set-locale LANG=en_US.UTF-8 LC_TIME=en_GB.UTF-8
 .EE
 .RE
+.PP
+.EX
+localectl unset-locale LC_COLLATE
+.EE
 .PP
 Set the console keymap:
 .PP
