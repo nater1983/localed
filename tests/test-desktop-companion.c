@@ -9,7 +9,7 @@ static gchar *
 make_program(const gchar *directory, const gchar *script)
 {
   g_autoptr(GError) error = NULL;
-  gchar *path = g_build_filename(directory, "localed-desktop", NULL);
+  gchar *path = g_build_filename(directory, "localed-input-sources-helper", NULL);
 
   g_assert_true(g_file_set_contents(path, script, -1, &error));
   g_assert_no_error(error);
@@ -63,7 +63,8 @@ test_child_exit(void)
 
   g_assert_no_error(error);
   g_assert_nonnull(directory);
-  path = make_program(directory, "#!/bin/sh\nexit 7\n");
+  path = make_program(directory,
+    "#!/bin/sh\n[ \"$#\" -eq 1 ] && [ \"$1\" = --managed-companion ] || exit 99\nexit 7\n");
 
   child = rcl_desktop_companion_spawn_for_test(path, &error);
   g_assert_no_error(error);
