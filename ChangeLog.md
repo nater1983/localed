@@ -5,7 +5,7 @@ All notable changes to `localed` are documented in this file.
 ## [0.4.0] - Unreleased
 
 ### Removed — Desktop integration extraction
-- Move GNOME, Plasma 6 and AccountsService integration into the separate localed-desktop project source tree.
+- Desktop integration (GNOME, KDE Plasma 6, AccountsService and shared session monitoring) has been moved to the separate [localed-desktop](https://github.com/nater1983/localed-desktop) project.
 - Remove automatic account and desktop-to-system synchronization, session discovery, input-source helpers and the desktop-backend build option from the core daemon.
 - Retain the locale1 D-Bus interface, authorization, native configuration, transaction handling and 0.3.2 maintenance fixes.
 - Keep duplicate-write regression coverage through authorized locale1 calls instead of the internal AccountsService setter.
@@ -13,14 +13,13 @@ All notable changes to `localed` are documented in this file.
 ### Fixed
 - Forward-port 0.3.2 partial system locale updates through the authorized UpdateLocale D-Bus extension and localectl unset-locale, preserving standard SetLocale replacement semantics.
 - Retain unrelated assignments in both Slackware locale scripts, with transactional rollback and missing-companion recovery.
-- Carry forward the partial-update regression coverage; preserve the 0.4.0 duplicate AccountsService update tests.
+- Carry forward partial-update and duplicate-write regression coverage through authorized locale1 calls.
 
 ### Changed
-- Use AccountsService as the sole automatic primary locale synchronization path for GNOME and Plasma 6; remove the Plasma-specific locale file monitor and parser.
-- Require an unambiguous active local user session, including TTY sessions and privileged-group membership for automatic AccountsService updates.
 - Skip unchanged shell locale file writes and isolate the C-shell companion path alongside the configured Bourne-shell script.
 
-### Refactoring — Phase 2: Shared session infrastructure
+### Earlier development — desktop integration (subsequently moved to localed-desktop)
+- Consolidate automatic locale synchronization through AccountsService and require an unambiguous active local session with privileged-group membership; these changes were subsequently extracted from the core.
 - Introduce `rcl-session.c` and `rcl-session.h` to centralize elogind session discovery, active local user eligibility, graphical session eligibility, and unambiguous UID validation.
 - Reuse the shared session validation in AccountsService and the GNOME and Plasma 6 backends. Preserve TTY-based locale synchronization while retaining graphical-session and desktop verification requirements for keyboard integration.
 - Centralize the `ListSessions`, `GetAll`, and `GetSessionByPID` D-Bus operations while preserving existing timeouts and error handling.
@@ -30,7 +29,8 @@ All notable changes to `localed` are documented in this file.
 - Keep desktop-specific identification and keyboard helper lifecycle management in the respective backends. Each backend retains its own session monitor instance pending backend manager development.
 
 ### Validation
-- All five existing Meson test suites passed with the Plasma 6 backend enabled after each Phase 2 refactoring stage (zero failures). GNOME regression and live desktop testing after the refactoring, and sanitizer validation, remain for final release validation.
+- Desktop-independent core passed the AddressSanitizer and UndefinedBehaviorSanitizer CI workflow for PR #16, including regression and private-bus reconnect testing.
+- Earlier desktop-integration validation (before extraction): All five existing Meson test suites passed with the Plasma 6 backend enabled after each Phase 2 refactoring stage (zero failures). Live desktop testing of the extracted companion remains separate from core release validation.
 - Verified AccountsService-only locale synchronization on Plasma 6.7.6 with an elogind TTY login session, switching between es_ES.UTF-8 and en_US.UTF-8 after removing the desktop-specific monitor.
 - Plasma 6.7.6 runtime testing verified primary locale updates, regional format changes, and translation preference additions and reordering before consolidation. Other Plasma releases remain unverified.
 - Add regression coverage for duplicate locale writes and missing companion recovery.

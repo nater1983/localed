@@ -22,7 +22,7 @@ The daemon follows the same general service pattern as
 - System configuration changes require authorized locale1 requests; personal
   desktop settings remain owned by the desktop.
 
-Desktop integration is maintained separately in the [localed-desktop source tree](https://github.com/nater1983/localed/tree/localed-desktop).
+Desktop integration is maintained separately in the [localed-desktop source tree](https://github.com/nater1983/localed-desktop).
 It is not part of the core daemon.
 
 ## Dependencies
