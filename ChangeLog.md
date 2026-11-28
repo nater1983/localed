@@ -2,7 +2,9 @@
 
 All notable changes to `localed` are documented in this file.
 
-## [0.3.2] - Unreleased
+## [0.3.2] - 2026-11-28
+
+Maintenance release for partial system locale updates.
 
 ### Fixed
 - Make localectl set-locale update only explicitly named locale variables,
@@ -22,7 +24,14 @@ All notable changes to `localed` are documented in this file.
 ### Tests
 - Cover partial updates, removal, authorization denial, invalid requests,
   rollback, missing companion recovery and SetLocale compatibility.
-- Slackware compilation and runtime testing remain pending.
+- Slackware compilation and Plasma 6 regression suite: 5/5 passed.
+- GNOME and Plasma 6 AddressSanitizer/UndefinedBehaviorSanitizer builds:
+  5/5 test suites passed for each backend, with leak detection enabled.
+- Live GNOME-session testing verified independent LANG changes, preservation
+  of LC_TIME and LC_COLLATE, removal with unset-locale and empty values,
+  and consistent system locale status without keyboard changes.
+- Automatic desktop locale synchronization and per-user locale management
+  are unchanged by this release.
 
 ## [0.3.1] - 2026-11-23
 
