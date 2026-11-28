@@ -11,7 +11,7 @@ All notable changes to `localed` are documented in this file.
 - Keep duplicate-write regression coverage through authorized locale1 calls instead of the internal AccountsService setter.
 
 ### Added
-- Discover and start the optional standalone localed-desktop executable after acquiring locale1, with core-only fallback when absent or unavailable.
+- Discover and start the optional standalone localed-input-sources-helper executable (provided by localed-desktop) after acquiring locale1, with core-only fallback when absent or unavailable.
 - Preserve observation-only startup, use the configured trusted libexec path, and stop the owned companion on name loss and shutdown without an automatic respawn loop.
 - Add isolated companion lifecycle tests and a --no-desktop-companion override.
 
