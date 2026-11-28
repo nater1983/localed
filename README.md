@@ -317,8 +317,10 @@ including `LANGUAGE`, are preserved. The daemon reads the files after
 Polkit authorization and updates them transactionally. This supports
 simple literal locale assignments, not arbitrary shell programs.
 The standard `SetLocale` D-Bus method retains its replacement semantics;
-the bundled client uses the new `UpdateLocale` extension instead.
-Automatic desktop synchronization is unchanged by this maintenance fix.
+the bundled client uses the new `UpdateLocale` extension instead. Upgrade
+the daemon and client together; older daemons do not expose `UpdateLocale`.
+Automatic desktop synchronization is unchanged by this maintenance fix and
+may still replace existing regional locale settings.
 
 ## Keyboard conversion
 
