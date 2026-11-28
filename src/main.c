@@ -34,6 +34,7 @@
 #include <locale.h>
 
 #include "rcl-locale.h"
+#include "rcl-desktop-companion.h"
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
 
@@ -54,6 +55,8 @@ typedef struct RclState
   gboolean    debug;
   gboolean    verbose;
   gboolean    replace;
+  gboolean    no_desktop_companion;
+  GSubprocess *desktop_companion;
 
   /*
    * Ownership state.
@@ -79,8 +82,43 @@ typedef struct RclState
 /* ───────────────────────────────────────────── */
 
 static void
+rcl_stop_desktop_companion(RclState *state)
+{
+  if (!state->desktop_companion)
+    return;
+
+  rcl_desktop_companion_stop(state->desktop_companion);
+  g_clear_object(&state->desktop_companion);
+}
+
+static void
+rcl_start_desktop_companion(RclState *state)
+{
+  g_autoptr(GError) error = NULL;
+
+  if (state->no_desktop_companion || state->exiting ||
+      state->desktop_companion || geteuid() != 0)
+    return;
+
+  state->desktop_companion = rcl_desktop_companion_start(
+    RCL_DESKTOP_COMPANION, state->debug, &error);
+
+  if (state->desktop_companion)
+    g_message("Started optional desktop companion: %s", RCL_DESKTOP_COMPANION);
+  else if (error)
+    g_message("Desktop companion unavailable; continuing core-only: %s",
+              error->message);
+  else
+    g_debug("Desktop companion not installed; continuing core-only");
+
+  /* No respawn timer: an absent or failed companion is not a core error. */
+}
+
+static void
 rcl_state_free(RclState *state)
 {
+  rcl_stop_desktop_companion(state);
+
   if (state->sync_id)
   {
     g_source_remove(state->sync_id);
@@ -214,6 +252,8 @@ rcl_main_reconnect_cb(gpointer user_data)
     state->bus_closed_id = 0;
   }
 
+  rcl_stop_desktop_companion(state);
+
   /* Unregister locale1 before releasing the old connection. */
   rcl_daemon_shutdown(state->daemon);
   g_clear_object(&state->bus_connection);
@@ -243,6 +283,7 @@ rcl_main_name_acquired(GDBusConnection *connection,
   state->replace = FALSE;
 
   LOG(state, "name acquired: %s", name);
+  rcl_start_desktop_companion(state);
 }
 
 /* ───────────────────────────────────────────── */
@@ -265,6 +306,7 @@ rcl_main_name_lost(GDBusConnection *connection,
     return;
 
   LOG(state, "D-Bus name lost: %s", name);
+  rcl_stop_desktop_companion(state);
 
   if (!state->has_name)
   {
@@ -485,6 +527,7 @@ gint main(gint argc, gchar **argv)
   gboolean debug   = FALSE;
   gboolean verbose = FALSE;
   gboolean replace = FALSE;
+  gboolean no_desktop_companion = FALSE;
 
   RclState *state;
 
@@ -502,6 +545,8 @@ gint main(gint argc, gchar **argv)
     { "replace", 'r', 0, G_OPTION_ARG_NONE, &replace, N_("Replace existing daemon"),        NULL },
     { "verbose", 'v', 0, G_OPTION_ARG_NONE, &verbose, N_("Verbose output"),                 NULL },
     { "debug",   'd', 0, G_OPTION_ARG_NONE, &debug,   N_("Debug output (implies verbose)"), NULL },
+    { "no-desktop-companion", 0, 0, G_OPTION_ARG_NONE, &no_desktop_companion,
+      N_("Do not start the optional desktop companion"), NULL },
     { NULL }
   };
 
@@ -530,6 +575,7 @@ gint main(gint argc, gchar **argv)
   state->debug   = debug;
   state->verbose = verbose;
   state->replace = replace;
+  state->no_desktop_companion = no_desktop_companion;
 
   rcl_daemon_set_debug(state->daemon, debug);
 
