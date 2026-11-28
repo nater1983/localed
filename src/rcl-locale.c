@@ -464,10 +464,10 @@ rcl_render_x11_keyboard(const gchar *layout, const gchar *model,
   g_string_append(out, "Section \"InputClass\"\n");
   g_string_append(out, "    Identifier \"system-keyboard\"\n");
   g_string_append(out, "    MatchIsKeyboard \"on\"\n");
-  g_string_append_printf(out, "    Option \"XkbLayout\" \"%s\"\n", layout);
-  g_string_append_printf(out, "    Option \"XkbModel\" \"%s\"\n", model);
-  g_string_append_printf(out, "    Option \"XkbVariant\" \"%s\"\n", variant);
-  g_string_append_printf(out, "    Option \"XkbOptions\" \"%s\"\n", options);
+  g_string_append_printf(out, "    Option \"XkbLayout\" \"%s\"\n", layout ? layout : "");
+  g_string_append_printf(out, "    Option \"XkbModel\" \"%s\"\n", model ? model : "");
+  g_string_append_printf(out, "    Option \"XkbVariant\" \"%s\"\n", variant ? variant : "");
+  g_string_append_printf(out, "    Option \"XkbOptions\" \"%s\"\n", options ? options : "");
   g_string_append(out, "EndSection\n");
   return out;
 }

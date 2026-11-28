@@ -535,6 +535,29 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_assert_nonnull(strstr(contents, "loadkeys \"ch-fr\""));
   g_free(contents);
 
+  /* The X11-to-console direction must also be idempotent. */
+  {
+    GStatBuf vc_stat, x11_stat;
+    g_assert_cmpint(g_stat(RCL_RC_KEYMAP_FILE, &vc_stat), ==, 0);
+    g_assert_cmpint(g_stat(expected_path, &x11_stat), ==, 0);
+    rcl_locale_test_fail_rename_to(RCL_RC_KEYMAP_FILE);
+    polkit_fixture.client_done = FALSE;
+    polkit_fixture.check_seen = FALSE;
+    g_clear_error(&polkit_fixture.client_error);
+    g_dbus_connection_call(
+      fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+      "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetX11Keyboard",
+      g_variant_new("(ssssbb)", "ch", "pc105", "fr", "", TRUE, TRUE),
+      NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+      polkit_client_call_done, &polkit_fixture);
+    iterate_until(&polkit_fixture, polkit_condition, 5000);
+    rcl_locale_test_fail_rename_to(NULL);
+    g_assert_true(polkit_fixture.check_seen);
+    g_assert_no_error(polkit_fixture.client_error);
+    assert_locale_file_unchanged(RCL_RC_KEYMAP_FILE, &vc_stat);
+    assert_locale_file_unchanged(expected_path, &x11_stat);
+  }
+
   /*
    * Exercise the opposite direction as well: the Slackware "uk" keymap
    * converts to X11 layout "gb".
