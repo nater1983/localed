@@ -33,26 +33,13 @@ test_input_sources_start_stop(void)
 {
   GTestDBus *bus = g_test_dbus_new(G_TEST_DBUS_NONE);
   RclBackend *backend;
-  RclLocaleDaemon *daemon;
   GError *error = NULL;
   guint i;
 
   g_test_dbus_up(bus);
   g_setenv("DBUS_SYSTEM_BUS_ADDRESS", g_test_dbus_get_bus_address(bus), TRUE);
 
-  daemon = g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
-  g_assert_nonnull(daemon);
-
-  /* The desktop backend must write through the in-process API without
-   * requiring a locale1 D-Bus method call or Polkit authorization. */
-  g_assert_true(rcl_locale_daemon_set_x11_keyboard_internal(
-      daemon, "us,fr", "", "", "", &error));
-  g_assert_no_error(error);
-  g_assert_true(rcl_locale_daemon_set_vconsole_keyboard_internal(
-      daemon, "fr", "", &error));
-  g_assert_no_error(error);
-
-  backend = rcl_gnome_backend_new(daemon);
+  backend = rcl_gnome_backend_new();
 
   for (i = 0; i < 2; i++)
   {
@@ -62,7 +49,6 @@ test_input_sources_start_stop(void)
   }
 
   g_object_unref(backend);
-  g_object_unref(daemon);
 
   g_unsetenv("DBUS_SYSTEM_BUS_ADDRESS");
   g_test_dbus_down(bus);

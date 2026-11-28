@@ -7,7 +7,7 @@
 #pragma once
 
 #include <gio/gio.h>
-#include "rcl-locale.h"
+#include "rcl-locale-client.h"
 #include "../backend-interface.h"
 
 /* Helper snapshot: layouts, variants, options, active layout, active variant. */
@@ -19,7 +19,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE(RclGnomeBackend, rcl_gnome_backend,
                      RCL, GNOME_BACKEND, GObject)
 
-RclBackend *rcl_gnome_backend_new(RclLocaleDaemon *daemon);
+RclBackend *rcl_gnome_backend_new(void);
 gboolean rcl_gnome_backend_start(RclGnomeBackend *self, GError **error);
 void rcl_gnome_backend_stop(RclGnomeBackend *self);
 

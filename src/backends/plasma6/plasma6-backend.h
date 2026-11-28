@@ -6,7 +6,7 @@
 #pragma once
 
 #include <gio/gio.h>
-#include "rcl-locale.h"
+#include "rcl-locale-client.h"
 #include "../backend-interface.h"
 
 /* Shared helper snapshot: layouts, variants, options, active layout, active variant. */
@@ -18,7 +18,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE(RclPlasma6Backend, rcl_plasma6_backend,
                      RCL, PLASMA6_BACKEND, GObject)
 
-RclBackend *rcl_plasma6_backend_new(RclLocaleDaemon *daemon);
+RclBackend *rcl_plasma6_backend_new(void);
 gboolean rcl_plasma6_backend_start(RclPlasma6Backend *self, GError **error);
 void rcl_plasma6_backend_stop(RclPlasma6Backend *self);
 

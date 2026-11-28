@@ -12,7 +12,6 @@
 
 struct _RclAccountsService {
   GObject parent_instance;
-  RclLocaleDaemon *daemon;
   GDBusConnection *connection;
   guint watch_id;
   guint subscription_id;
@@ -93,12 +92,12 @@ static void properties_changed(GDBusConnection *connection, const gchar *sender,
             ": no unambiguous active local user session", uid);
     goto out;
   }
-  if (!rcl_locale_daemon_set_language_from_accounts(self->daemon, language, &error)) {
+  if (!rcl_locale_client_set_language(language, &error)) {
     g_warning("AccountsService locale bridge: %s",
               error ? error->message : "unknown error");
     g_clear_error(&error);
   } else {
-    g_debug("applied AccountsService language change");
+    g_debug("processed AccountsService language change");
   }
 out:
   g_clear_pointer(&value, g_variant_unref);
@@ -275,7 +274,6 @@ static void rcl_accounts_service_dispose(GObject *object)
 {
   RclAccountsService *self = RCL_ACCOUNTS_SERVICE(object);
   rcl_accounts_service_stop(self);
-  g_clear_object(&self->daemon);
   G_OBJECT_CLASS(rcl_accounts_service_parent_class)->dispose(object);
 }
 static void rcl_accounts_service_class_init(RclAccountsServiceClass *klass)
@@ -284,11 +282,9 @@ static void rcl_accounts_service_class_init(RclAccountsServiceClass *klass)
 }
 static void rcl_accounts_service_init(RclAccountsService *self) { (void) self; }
 
-RclAccountsService *rcl_accounts_service_new(RclLocaleDaemon *daemon)
+RclAccountsService *rcl_accounts_service_new(void)
 {
   RclAccountsService *self;
-  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
   self = g_object_new(RCL_TYPE_ACCOUNTS_SERVICE, NULL);
-  self->daemon = g_object_ref(daemon);
   return self;
 }

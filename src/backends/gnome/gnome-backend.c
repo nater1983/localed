@@ -21,7 +21,7 @@
 #include <glib.h>
 
 #include "gnome-backend.h"
-#include "rcl-locale.h"
+#include "rcl-locale-client.h"
 #include "rcl-xkb-config.h"
 #include "rcl-session.h"
 #include "rcl-session-monitor.h"
@@ -48,7 +48,6 @@ struct _RclGnomeBackend
   GSubprocess *settings_helper;
   GDataInputStream *settings_stream;
   GCancellable *settings_cancellable;
-  RclLocaleDaemon *daemon; /* borrowed; owned by the main daemon state */
 
   gboolean stopping;
 
@@ -154,7 +153,6 @@ apply_gnome_settings(RclGnomeBackend *self, const gchar *line)
   gchar *layout = NULL;
   gchar *variant = NULL;
   gchar *option = NULL;
-  gchar *contents = NULL;
   gchar *current_layout = NULL;
   gchar *current_model = NULL;
   gchar *current_variant = NULL;
@@ -204,22 +202,19 @@ apply_gnome_settings(RclGnomeBackend *self, const gchar *line)
 
   /* GNOME does not expose an XKB model setting. Preserve the model already
    * configured by localed instead of clearing it on every source update. */
-  if (g_file_get_contents(RCL_X11_KEYBOARD_FILE, &contents, NULL, NULL))
+  if (!rcl_locale_client_get_x11(&current_layout, &current_model,
+                                 &current_variant, &current_options, &error))
   {
-    if (!rcl_xkb_config_parse(contents, &current_layout, &current_model,
-                              &current_variant, &current_options, &error))
-    {
-      g_debug("could not read existing XKB model: %s",
-              error ? error->message : "invalid Xorg configuration");
-      g_clear_error(&error);
-    }
+    g_debug("could not read system XKB properties: %s", error->message);
+    g_clear_error(&error);
+    goto out;
   }
 
   g_debug("synchronizing GNOME input sources: layouts=%s variants=%s",
           layout, variant);
 
-  if (!rcl_locale_daemon_set_x11_keyboard_internal(
-          self->daemon, layout, current_model ? current_model : "",
+  if (!rcl_locale_client_set_x11_keyboard(
+          layout, current_model ? current_model : "",
           variant, option, &error))
   {
     g_warning("could not synchronize GNOME XKB source list: %s",
@@ -237,8 +232,8 @@ apply_gnome_settings(RclGnomeBackend *self, const gchar *line)
   {
     g_debug("synchronizing active GNOME input source: %s+%s -> console keymap %s",
             active_layout, active_variant, console_keymap);
-    if (!rcl_locale_daemon_set_vconsole_keyboard_internal(
-            self->daemon, console_keymap, "", &error))
+    if (!rcl_locale_client_set_vconsole_keyboard(
+            console_keymap, "", &error))
     {
       g_warning("could not synchronize active GNOME console keymap: %s",
                 error ? error->message : "unknown error");
@@ -253,7 +248,6 @@ out:
   g_free(layout);
   g_free(variant);
   g_free(option);
-  g_free(contents);
   g_free(current_layout);
   g_free(current_model);
   g_free(current_variant);
@@ -1015,12 +1009,10 @@ rcl_gnome_backend_iface_init(RclBackendInterface *iface)
   iface->stop = rcl_gnome_backend_iface_stop;
 }
 RclBackend *
-rcl_gnome_backend_new(RclLocaleDaemon *daemon)
+rcl_gnome_backend_new(void)
 {
   RclGnomeBackend *self;
 
-  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
   self = g_object_new(RCL_TYPE_GNOME_BACKEND, NULL);
-  self->daemon = daemon;
   return RCL_BACKEND(self);
 }

@@ -47,7 +47,6 @@ struct _RclPlasma6Backend
   GSubprocess *settings_helper;
   GDataInputStream *settings_stream;
   GCancellable *settings_cancellable;
-  RclLocaleDaemon *daemon; /* borrowed; owned by the main daemon state */
 
   gboolean stopping;
 
@@ -153,7 +152,6 @@ apply_plasma6_settings(RclPlasma6Backend *self, const gchar *line)
   gchar *layout = NULL;
   gchar *variant = NULL;
   gchar *option = NULL;
-  gchar *contents = NULL;
   gchar *current_layout = NULL;
   gchar *current_model = NULL;
   gchar *current_variant = NULL;
@@ -203,15 +201,12 @@ apply_plasma6_settings(RclPlasma6Backend *self, const gchar *line)
 
   /* Plasma 6 does not expose an XKB model setting. Preserve the model already
    * configured by localed instead of clearing it on every source update. */
-  if (g_file_get_contents(RCL_X11_KEYBOARD_FILE, &contents, NULL, NULL))
+  if (!rcl_locale_client_get_x11(&current_layout, &current_model,
+                                 &current_variant, &current_options, &error))
   {
-    if (!rcl_xkb_config_parse(contents, &current_layout, &current_model,
-                              &current_variant, &current_options, &error))
-    {
-      g_debug("could not read existing XKB model: %s",
-              error ? error->message : "invalid Xorg configuration");
-      g_clear_error(&error);
-    }
+    g_debug("could not read system XKB properties: %s", error->message);
+    g_clear_error(&error);
+    goto out;
   }
 
   g_debug("synchronizing Plasma 6 input sources: layouts=%s variants=%s",
@@ -221,8 +216,8 @@ apply_plasma6_settings(RclPlasma6Backend *self, const gchar *line)
       g_strcmp0(current_variant, variant) != 0 ||
       g_strcmp0(current_options, option) != 0)
   {
-    if (!rcl_locale_daemon_set_x11_keyboard_internal(
-            self->daemon, layout, current_model ? current_model : "",
+    if (!rcl_locale_client_set_x11_keyboard(
+          layout, current_model ? current_model : "",
             variant, option, &error))
     {
       g_warning("could not synchronize Plasma 6 XKB source list: %s",
@@ -243,8 +238,8 @@ apply_plasma6_settings(RclPlasma6Backend *self, const gchar *line)
   {
     g_debug("synchronizing active Plasma 6 input source: %s+%s -> console keymap %s",
             active_layout, active_variant, console_keymap);
-    if (!rcl_locale_daemon_set_vconsole_keyboard_internal(
-            self->daemon, console_keymap, "", &error))
+    if (!rcl_locale_client_set_vconsole_keyboard(
+            console_keymap, "", &error))
     {
       g_warning("could not synchronize active Plasma 6 console keymap: %s",
                 error ? error->message : "unknown error");
@@ -259,7 +254,6 @@ out:
   g_free(layout);
   g_free(variant);
   g_free(option);
-  g_free(contents);
   g_free(current_layout);
   g_free(current_model);
   g_free(current_variant);
@@ -1020,12 +1014,10 @@ rcl_plasma6_backend_iface_init(RclBackendInterface *iface)
   iface->stop = rcl_plasma6_backend_iface_stop;
 }
 RclBackend *
-rcl_plasma6_backend_new(RclLocaleDaemon *daemon)
+rcl_plasma6_backend_new(void)
 {
   RclPlasma6Backend *self;
 
-  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
   self = g_object_new(RCL_TYPE_PLASMA6_BACKEND, NULL);
-  self->daemon = daemon;
   return RCL_BACKEND(self);
 }
