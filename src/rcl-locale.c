@@ -92,6 +92,11 @@ static const gchar locale1_introspection_xml[] =
   "      <arg name='locale'      type='as' direction='in'/>"
   "      <arg name='interactive' type='b'  direction='in'/>"
   "    </method>"
+  /* Localed extension: modify only the explicitly named assignments. */
+  "    <method name='UpdateLocale'>"
+  "      <arg name='locale'      type='as' direction='in'/>"
+  "      <arg name='interactive' type='b'  direction='in'/>"
+  "    </method>"
   "    <method name='SetVConsoleKeyboard'>"
   "      <arg name='keymap'        type='s' direction='in'/>"
   "      <arg name='keymap_toggle' type='s' direction='in'/>"
@@ -1416,6 +1421,7 @@ rcl_daemon_sync_dbus_properties( RclLocaleDaemon *daemon )
 typedef enum
 {
   OP_SET_LOCALE,
+  OP_UPDATE_LOCALE,
   OP_SET_VCONSOLE_KEYBOARD,
   OP_SET_X11_KEYBOARD,
 } LocaleOp;
@@ -1427,7 +1433,7 @@ typedef struct
   GCancellable           *cancellable;  /* owned ref to this daemon session */
   LocaleOp                op;
 
-  gchar  **locale;        /* OP_SET_LOCALE: owned GStrv */
+  gchar  **locale;        /* OP_SET_LOCALE / OP_UPDATE_LOCALE: owned GStrv */
 
   gchar   *keymap;        /* OP_SET_VCONSOLE_KEYBOARD */
   gchar   *keymap_toggle;
@@ -1535,6 +1541,9 @@ auth_ctx_free( AuthCtx *ctx )
 static gboolean rcl_write_locale_files( const gchar *const *known_keys,
                                          const gchar *const *new_values,
                                          GError **error );
+static gboolean rcl_patch_locale_files( const gchar *const *known_keys,
+                                         const gchar *const *new_values,
+                                         GError **error );
 static gboolean rcl_write_vconsole_files( const gchar *keymap,
                                           const gchar *keymap_toggle,
                                           GError **error );
@@ -1556,7 +1565,7 @@ static gboolean rcl_write_vconsole_x11_files( const gchar *keymap,
 
 static void
 do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
-               GDBusMethodInvocation *invocation )
+               gboolean partial, GDBusMethodInvocation *invocation )
 {
   const gchar *known_keys[ G_N_ELEMENTS(locale_variable_names) ];
   const gchar *new_values[ G_N_ELEMENTS(locale_variable_names) ];
@@ -1600,6 +1609,14 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
     }
   }
 
+  if( partial && !locale[0] )
+  {
+    g_dbus_method_invocation_return_error( invocation,
+      G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+      "UpdateLocale requires at least one assignment" );
+    return;
+  }
+
   /* Validate every entry first; reject the whole call on the first bad one,
      same semantics as systemd-localed. */
   for( i = 0; locale[i] != NULL; i++ )
@@ -1625,6 +1642,23 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
         G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
         "Unknown locale variable '%s'", key );
       return;
+    }
+
+    if( partial )
+    {
+      guint j;
+      for( j = 0; j < i; j++ )
+      {
+        const gchar *previous = strchr(locale[j], '=');
+        if( previous && (gsize)(previous - locale[j]) == strlen(key) &&
+            strncmp(locale[j], key, strlen(key)) == 0 )
+        {
+          g_dbus_method_invocation_return_error(invocation,
+            G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+            "Duplicate locale variable '%s'", key);
+          return;
+        }
+      }
     }
 
     if( val[0] != '\0' && !rcl_locale_value_is_safe( val ) )
@@ -1666,6 +1700,20 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
   }
   known_keys[n_known] = NULL;
   new_values[n_known] = NULL;
+
+  if( partial )
+  {
+    if( !rcl_patch_locale_files(known_keys, new_values, &error) )
+    {
+      rcl_daemon_sync_dbus_properties(daemon);
+      g_dbus_method_invocation_return_gerror(invocation, error);
+      g_error_free(error);
+      return;
+    }
+    rcl_daemon_sync_dbus_properties(daemon);
+    g_dbus_method_invocation_return_value(invocation, NULL);
+    return;
+  }
 
   /*
    * LANGUAGE auto-derivation (gap 1 vs systemd 257).
@@ -2047,7 +2095,10 @@ on_check_done( GObject *source, GAsyncResult *res, gpointer user_data )
   switch( ctx->op )
   {
     case OP_SET_LOCALE:
-      do_set_locale( ctx->daemon, ctx->locale, ctx->invocation );
+      do_set_locale( ctx->daemon, ctx->locale, FALSE, ctx->invocation );
+      break;
+    case OP_UPDATE_LOCALE:
+      do_set_locale( ctx->daemon, ctx->locale, TRUE, ctx->invocation );
       break;
     case OP_SET_VCONSOLE_KEYBOARD:
       do_set_vconsole_keyboard( ctx->daemon, ctx->keymap, ctx->keymap_toggle,
@@ -2180,6 +2231,309 @@ fail:
 out:
   rcl_file_snapshot_clear( &sh );
   rcl_file_snapshot_clear( &csh );
+  return ok;
+}
+
+/* Identify a simple Slackware locale assignment without interpreting or
+ * executing shell code. Keep every unrelated line byte-for-byte. */
+static gchar *
+rcl_locale_assignment_key(const gchar *line, gboolean csh)
+{
+  const gchar *p = line, *start;
+  const gchar *prefix = csh ? "setenv" : "export";
+  gsize length = strlen(prefix);
+
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (!g_str_has_prefix(p, prefix) || !g_ascii_isspace(p[length]))
+    return NULL;
+  p += length;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  start = p;
+  while (g_ascii_isalnum(*p) || *p == '_')
+    p++;
+  if (p == start)
+    return NULL;
+  length = (gsize)(p - start);
+  if (csh)
+  {
+    if (*p && !g_ascii_isspace(*p))
+      return NULL;
+  }
+  else
+  {
+    while (*p == ' ' || *p == '\t')
+      p++;
+    if (*p != '=')
+      return NULL;
+  }
+  return g_strndup(start, length);
+}
+
+/* A targeted line must contain just one simple assignment. Reject compound
+ * shell statements rather than accidentally removing a second variable. */
+static gchar *
+rcl_locale_assignment_value(const gchar *line, const gchar *key,
+                             gboolean csh)
+{
+  const gchar *p = line, *start;
+  gchar quote = '\0';
+  g_autofree gchar *value = NULL;
+
+  while (*p == ' ' || *p == '\t')
+    p++;
+  p += csh ? strlen("setenv") : strlen("export");
+  while (*p == ' ' || *p == '\t')
+    p++;
+  p += strlen(key);
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (!csh)
+    p++; /* The caller already verified '='. */
+  if (*p == '\'' || *p == '"')
+    quote = *p++;
+  start = p;
+  if (quote)
+  {
+    while (*p && *p != quote)
+      p++;
+    if (*p != quote)
+      return NULL;
+  }
+  else
+  {
+    while (*p && !g_ascii_isspace(*p))
+      p++;
+  }
+  value = g_strndup(start, p - start);
+  if (*value && !rcl_locale_value_is_safe(value))
+    return NULL;
+  if (quote)
+    p++;
+  if (*p && !g_ascii_isspace(*p))
+    return NULL;
+  while (g_ascii_isspace(*p))
+    p++;
+  return (!*p || *p == '#') ? g_steal_pointer(&value) : NULL;
+}
+
+static void
+rcl_locale_append_assignment(GString *out, const gchar *key,
+                             const gchar *value, gboolean csh)
+{
+  if (!value || !*value)
+    return;
+  if (out->len && out->str[out->len - 1] != '\n')
+    g_string_append_c(out, '\n');
+  if (csh)
+    g_string_append_printf(out, "setenv %s %s\n", key, value);
+  else
+    g_string_append_printf(out, "export %s=\"%s\"\n", key, value);
+}
+
+/* Build an update from the transaction snapshot, not from a cached D-Bus
+ * property. Absent/empty values remove only their named assignments. */
+static GString *
+rcl_locale_patch_contents(const gchar *contents, const gchar *const *keys,
+                          const gchar *const *values, gboolean csh,
+                          GError **error)
+{
+  GString *out = g_string_new(NULL);
+  gboolean seen[G_N_ELEMENTS(locale_variable_names)] = { FALSE };
+  guint i;
+  const gchar *line = contents;
+
+  if (line)
+  {
+    while (*line)
+    {
+      const gchar *end = strchr(line, '\n');
+      gsize length = end ? (gsize)(end - line) : strlen(line);
+      g_autofree gchar *copy = g_strndup(line, length);
+      g_autofree gchar *key = rcl_locale_assignment_key(copy, csh);
+      gboolean replace = FALSE;
+
+      for (i = 0; key && keys[i]; i++)
+        if (g_str_equal(key, keys[i]))
+        {
+          g_autofree gchar *previous = rcl_locale_assignment_value(copy, key, csh);
+          if (!previous)
+          {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                        "Cannot safely update complex shell assignment for %s", key);
+            g_string_free(out, TRUE);
+            return NULL;
+          }
+          /* Keep the first assignment's position and remove duplicates. */
+          if (!seen[i])
+          {
+            if (*previous && g_strcmp0(previous, values[i]) == 0)
+              g_string_append_len(out, line, length + (end != NULL));
+            else
+              rcl_locale_append_assignment(out, keys[i], values[i], csh);
+          }
+          seen[i] = TRUE;
+          replace = TRUE;
+          break;
+        }
+      if (!replace)
+        g_string_append_len(out, line, length + (end != NULL));
+      line += length + (end != NULL);
+    }
+  }
+  else
+  {
+    if (csh)
+      g_string_append(out, "#!/bin/csh\n");
+    g_string_append(out, "# Written by localed - see localed(8)\n");
+  }
+
+  for (i = 0; keys[i]; i++)
+    if (!seen[i])
+      rcl_locale_append_assignment(out, keys[i], values[i], csh);
+  return out;
+}
+
+static gboolean
+rcl_locale_write_patch(const RclFileSnapshot *snapshot, GString *contents,
+                       GError **error)
+{
+  g_autofree gchar *dir = g_path_get_dirname(snapshot->path);
+  g_autofree gchar *tmp = g_strdup_printf("%s.XXXXXX", snapshot->path);
+  int fd;
+  gboolean ok;
+
+  if (snapshot->existed && contents->len == snapshot->length &&
+      memcmp(contents->str, snapshot->contents, contents->len) == 0)
+    return TRUE;
+  if (g_mkdir_with_parents(dir, 0755) != 0)
+  {
+    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                _("mkdir -p %s: %s"), dir, g_strerror(errno));
+    return FALSE;
+  }
+  fd = g_mkstemp(tmp);
+  if (fd < 0)
+  {
+    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                _("create temporary file for %s: %s"), snapshot->path,
+                g_strerror(errno));
+    return FALSE;
+  }
+  if (!rcl_file_close_temporary(fd, tmp, snapshot->path, error))
+    return FALSE;
+  ok = g_file_set_contents(tmp, contents->str, contents->len, error);
+  if (ok)
+    ok = rcl_file_apply_mode_for_write(tmp, snapshot->path, 0755, error);
+  if (ok && rcl_locale_rename(tmp, snapshot->path) != 0)
+  {
+    g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                _("rename(%s, %s): %s"), tmp, snapshot->path, g_strerror(errno));
+    ok = FALSE;
+  }
+  if (!ok)
+    rcl_file_cleanup_temporary(tmp, error);
+  return ok;
+}
+
+/* Seed a missing companion from the other script without rereading disk
+ * or executing shell code. Unsupported known assignments fail closed. */
+static GString *
+rcl_locale_seed_companion(const gchar *contents, gboolean from_csh,
+                          GError **error)
+{
+  g_autoptr(GHashTable) entries = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                        g_free, g_free);
+  g_auto(GStrv) lines = g_strsplit(contents ? contents : "", "\n", -1);
+  GString *out;
+  guint i;
+
+  for (i = 0; lines[i]; i++)
+  {
+    g_autofree gchar *key = rcl_locale_assignment_key(lines[i], from_csh);
+    gchar *value;
+    if (!key || !rcl_locale_variable_is_known(key))
+      continue;
+    value = rcl_locale_assignment_value(lines[i], key, from_csh);
+    if (!value)
+    {
+      g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                  "Cannot safely copy complex locale assignment for %s", key);
+      return NULL;
+    }
+    g_hash_table_replace(entries, g_steal_pointer(&key), value);
+  }
+
+  out = g_string_new(from_csh ? "# Written by localed - see localed(8)\n"
+                              : "#!/bin/csh\n# Written by localed - see localed(8)\n");
+  for (i = 0; locale_variable_names[i]; i++)
+    rcl_locale_append_assignment(out, locale_variable_names[i],
+        g_hash_table_lookup(entries, locale_variable_names[i]), !from_csh);
+  return out;
+}
+
+/* Update both scripts in the main-loop authorization callback. Other daemon
+ * requests cannot interleave between the snapshot and the final rename. */
+static gboolean
+rcl_patch_locale_files(const gchar *const *keys, const gchar *const *values,
+                       GError **error)
+{
+  RclFileSnapshot sh = {0}, csh = {0};
+  g_autoptr(GString) sh_new = NULL;
+  g_autoptr(GString) csh_new = NULL;
+  g_autoptr(GString) csh_seed = NULL;
+  g_autoptr(GString) sh_seed = NULL;
+  GError *write_error = NULL, *rollback_error = NULL;
+  gboolean ok = FALSE;
+
+  if (!rcl_file_snapshot_take(&sh, RCL_LANG_SH_FILE, &write_error) ||
+      !rcl_file_snapshot_take(&csh, RCL_LANG_CSH_FILE, &write_error))
+    goto fail;
+  if ((sh.existed && memchr(sh.contents, '\0', sh.length)) ||
+      (csh.existed && memchr(csh.contents, '\0', csh.length)))
+  {
+    g_set_error_literal(&write_error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                        "Locale configuration contains embedded NUL bytes");
+    goto fail;
+  }
+
+  if (!sh.existed)
+  {
+    sh_seed = rcl_locale_seed_companion(csh.contents, TRUE, &write_error);
+    if (!sh_seed)
+      goto fail;
+  }
+  if (!csh.existed)
+  {
+    csh_seed = rcl_locale_seed_companion(sh.contents, FALSE, &write_error);
+    if (!csh_seed)
+      goto fail;
+  }
+  sh_new = rcl_locale_patch_contents(sh.existed ? sh.contents : sh_seed->str,
+                                    keys, values, FALSE, &write_error);
+  if (!sh_new)
+    goto fail;
+  csh_new = rcl_locale_patch_contents(csh.existed ? csh.contents : csh_seed->str,
+                                      keys, values, TRUE, &write_error);
+  if (!csh_new)
+    goto fail;
+
+  if (!rcl_locale_write_patch(&sh, sh_new, &write_error))
+    goto fail;
+  if (!rcl_locale_write_patch(&csh, csh_new, &write_error))
+  {
+    if (!rcl_file_snapshot_restore(&sh, &rollback_error))
+      rcl_report_rollback_failure(&write_error, rollback_error);
+    goto fail;
+  }
+  ok = TRUE;
+  goto out;
+fail:
+  rcl_report_write_failure(error, write_error);
+out:
+  rcl_file_snapshot_clear(&sh);
+  rcl_file_snapshot_clear(&csh);
   return ok;
 }
 
@@ -2353,7 +2707,8 @@ handle_method_call( GDBusConnection       *connection,
   RclLocaleDaemon *daemon = RCL_LOCALE_DAEMON( user_data );
   AuthCtx         *ctx;
 
-  if( g_strcmp0(method_name, "SetLocale") == 0 )
+  if( g_strcmp0(method_name, "SetLocale") == 0 ||
+      g_strcmp0(method_name, "UpdateLocale") == 0 )
   {
     gchar    **locale;
     gboolean   interactive;
@@ -2366,7 +2721,8 @@ handle_method_call( GDBusConnection       *connection,
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon     = g_object_ref( daemon );
     ctx->invocation = g_object_ref( invocation );
-    ctx->op         = OP_SET_LOCALE;
+    ctx->op         = g_strcmp0(method_name, "UpdateLocale") == 0
+                      ? OP_UPDATE_LOCALE : OP_SET_LOCALE;
     ctx->locale     = locale;
 
     check_polkit_async( ctx, RCL_LOCALE_POLKIT_SET_LOCALE, interactive );
