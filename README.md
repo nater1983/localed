@@ -180,14 +180,20 @@ systemd v262 source: merge existing values, derive LANGUAGE when applicable,
 and remove redundant assignments equal to LANG. Empty values and duplicate
 keys are rejected by that standard method. A single bare locale is supported.
 
-The client routes requests containing empty assignments or LANGUAGE priority
-lists through the explicitly nonstandard `UpdateLocale` extension, which
+The client routes requests containing empty assignments or explicit LANGUAGE
+preferences through the explicitly nonstandard `UpdateLocale` extension, which
 preserves unspecified assignments and can remove named keys from both
 scripts. The entire request uses one method, not multiple calls.
 Both methods read snapshots after Polkit authorization and update both
 scripts transactionally without inventing C-shell-only LC_COLLATE defaults.
-Upgrade the daemon and bundled client together. Installed-locale validation
-remains a separate compatibility task.
+Upgrade the daemon and bundled client together. Requested locale names are
+checked against installed glibc locales using `newlocale()` without changing
+the daemon's process locale. C and POSIX are always accepted. The
+`UpdateLocale` LANGUAGE extension validates colon-separated translation
+preferences syntactically rather than requiring each language to be an
+installed glibc locale. Explicit removals and existing unspecified settings
+are preserved. Missing locales are rejected; localed does not generate
+locales automatically.
 
 ## Keyboard conversion
 

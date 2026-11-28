@@ -26,7 +26,13 @@ jobs:
             meson \
             ninja-build \
             pkg-config \
-            dbus-daemon
+            dbus-daemon \
+            locales
+
+      - name: Generate private test locale for language fallback coverage
+        run: |
+          mkdir -p "$RUNNER_TEMP/localed-test-locales"
+          localedef --no-archive -i en_AU -f ISO-8859-1 "$RUNNER_TEMP/localed-test-locales/en_AU"
 
       - name: Configure isolated test paths
         run: |
@@ -67,6 +73,8 @@ jobs:
 
       - name: Run tests with leak detection
         env:
+          LOCPATH: ${{ runner.temp }}/localed-test-locales
+          RCL_TEST_REQUIRE_FALLBACK_LOCALE: "1"
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           G_SLICE: always-malloc

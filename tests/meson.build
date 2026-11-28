@@ -20,6 +20,7 @@ dbus_lifecycle_test = executable(
     '../src/rcl-file-transaction.c',
     '../src/rcl-xkb-config.c',
     '../src/rcl-locale.c',
+    '../src/rcl-locale-validation.c',
   ],
   dependencies        : [glib_dep, gio_dep, gio_unix],
   include_directories : [config_h_inc, include_directories('../src')],
@@ -58,3 +59,11 @@ xkb_config_test = executable(
 
 test('Xorg XKB configuration parsing', xkb_config_test)
 
+
+locale_validation_test = executable(
+  'test-locale-validation',
+  ['test-locale-validation.c', '../src/rcl-locale-validation.c'],
+  dependencies        : [glib_dep, gio_dep],
+  include_directories : include_directories('../src'),
+)
+test('locale syntax and availability validation', locale_validation_test)

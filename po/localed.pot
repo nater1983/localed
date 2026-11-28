@@ -207,3 +207,17 @@ msgstr ""
 #: data/org.freedesktop.locale1.policy:20
 msgid "Authentication is required to set the keyboard layout and model."
 msgstr ""
+
+#: src/rcl-locale-validation.c
+msgid "Not enough memory to validate locale"
+msgstr ""
+
+#: src/rcl-locale-validation.c
+#, c-format
+msgid "Specified locale is not installed: %s"
+msgstr ""
+
+#: src/rcl-locale-validation.c
+#, c-format
+msgid "Invalid locale value for %s"
+msgstr ""

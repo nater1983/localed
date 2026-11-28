@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "rcl-locale.h"
+#include "rcl-locale-validation.h"
 
 
 typedef struct
@@ -652,7 +653,7 @@ test_polkit_denial(Fixture *fixture, gconstpointer user_data)
   RclDaemon *daemon = rcl_daemon_new();
   guint registration_id;
   guint name_result;
-  const gchar *locale[] = { "LANG=en_US.UTF-8", NULL };
+  const gchar *locale[] = { "LANG=C", NULL };
 
   g_assert_no_error(error);
   g_assert_nonnull(node);
@@ -718,7 +719,7 @@ test_polkit_cancellation(Fixture *fixture, gconstpointer user_data)
   RclDaemon *daemon = rcl_daemon_new();
   guint registration_id;
   guint name_result;
-  const gchar *locale[] = { "LANG=en_US.UTF-8", NULL };
+  const gchar *locale[] = { "LANG=C", NULL };
 
   g_assert_no_error(error);
   g_assert_nonnull(node);
@@ -816,29 +817,32 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
     "#!/bin/csh\nsetenv LANG en_US.UTF-8\nsetenv LC_COLLATE C\n"
     "setenv LC_TIME en_GB.UTF-8\nsetenv LANGUAGE en_US:en\n";
   const gchar *changed_sh =
-    "# Keep this comment\nexport LANG=\"en_AU.UTF-8\"\n"
+    "# Keep this comment\nexport LANG=\"C\"\n"
     "export LC_COLLATE=C\nexport LC_TIME=en_GB.UTF-8\n"
     "export LANGUAGE=\"en_US:en\"\n";
   const gchar *changed_csh =
-    "#!/bin/csh\nsetenv LANG en_AU.UTF-8\nsetenv LC_COLLATE C\n"
+    "#!/bin/csh\nsetenv LANG C\nsetenv LC_COLLATE C\n"
     "setenv LC_TIME en_GB.UTF-8\nsetenv LANGUAGE en_US:en\n";
   const gchar *unset_sh =
-    "# Keep this comment\nexport LANG=\"en_AU.UTF-8\"\n"
+    "# Keep this comment\nexport LANG=\"C\"\n"
     "export LC_TIME=en_GB.UTF-8\nexport LANGUAGE=\"en_US:en\"\n";
   const gchar *unset_csh =
-    "#!/bin/csh\nsetenv LANG en_AU.UTF-8\nsetenv LC_TIME en_GB.UTF-8\n"
+    "#!/bin/csh\nsetenv LANG C\nsetenv LC_TIME en_GB.UTF-8\n"
     "setenv LANGUAGE en_US:en\n";
-  const gchar *lang[] = { "LANG=en_AU.UTF-8", NULL };
+  const gchar *lang[] = { "LANG=C", NULL };
   const gchar *unset[] = { "LC_COLLATE=", NULL };
   const gchar *invalid[] = { "LC_TIME=C", "UNKNOWN=C", NULL };
   const gchar *duplicate[] = { "LC_TIME=C", "LC_TIME=POSIX", NULL };
   const gchar *empty[] = { NULL };
-  const gchar *replace[] = { "LANG=en_US.UTF-8", NULL };
-  const gchar *redundant[] = { "LC_TIME=en_US.UTF-8", NULL };
+  const gchar *replace[] = { "LANG=POSIX", NULL };
+  const gchar *redundant[] = { "LC_TIME=POSIX", NULL };
   const gchar *bare[] = { "en_AU", NULL };
-  const gchar *restore[] = { "LANG=en_US.UTF-8", "LC_TIME=en_GB.UTF-8", NULL };
-  const gchar *explicit_language[] = { "LANG=en_AU", "LANGUAGE=en_GB", NULL };
+  const gchar *restore[] = { "LANG=POSIX", "LC_TIME=C", NULL };
+  const gchar *explicit_language[] = { "LANG=en_AU", "LANGUAGE=C", NULL };
   const gchar *bad_standard[] = { "LANGUAGE=en_US:en", NULL };
+  const gchar *missing_locale[] = { "LANG=zz_ZZ.localed_nonexistent_987654321", NULL };
+  const gchar *mixed_invalid[] = { "LANG=POSIX", "LC_TIME=zz_ZZ.localed_nonexistent_987654321", NULL };
+  const gchar *invalid_language[] = { "LANGUAGE=es::en", NULL };
   g_autoptr(GError) error = NULL;
   GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
   GDBusConnection *polkit_bus = connect_test_bus(fixture->address);
@@ -894,6 +898,21 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
   assert_locale_files(changed_sh, changed_csh);
 
+  /* Reject unavailable locales through either method, including a mixed
+   * request with a valid first assignment. Neither file may change. */
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", missing_locale);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  assert_locale_files(changed_sh, changed_csh);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", mixed_invalid);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  assert_locale_files(changed_sh, changed_csh);
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", mixed_invalid);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  assert_locale_files(changed_sh, changed_csh);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", invalid_language);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  assert_locale_files(changed_sh, changed_csh);
+
   rcl_locale_test_fail_rename_to(RCL_LANG_CSH_FILE);
   call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", unset);
   rcl_locale_test_fail_rename_to(NULL);
@@ -928,7 +947,7 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
   g_assert_no_error(error);
   g_assert_nonnull(strstr(after, "LC_TIME=en_GB.UTF-8"));
-  g_assert_nonnull(strstr(after, "export LANG=\"en_US.UTF-8\""));
+  g_assert_nonnull(strstr(after, "export LANG=\"POSIX\""));
   g_assert_nonnull(strstr(after, "LANGUAGE=\"en_US:en\""));
   g_assert_null(strstr(after, "LC_COLLATE"));
   g_clear_pointer(&after, g_free);
@@ -945,18 +964,38 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_assert_null(strstr(after, "LC_TIME"));
   g_clear_pointer(&after, g_free);
 
-  /* Bare LANG triggers fallback; explicit LANGUAGE wins over fallback. */
-  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", bare);
+  /* Test fallback against a real locale when available; CI provisions en_AU.
+   * A minimal Slackware installation is still able to run the core suite. */
+  if (rcl_locale_name_is_installed("en_AU", NULL))
+  {
+    call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", bare);
+    g_assert_no_error(polkit.client_error);
+    g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+    g_assert_no_error(error);
+    g_assert_nonnull(strstr(after, "LANGUAGE=\"en_AU:en_GB\""));
+    g_clear_pointer(&after, g_free);
+    call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", explicit_language);
+    g_assert_no_error(polkit.client_error);
+    g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+    g_assert_no_error(error);
+    g_assert_nonnull(strstr(after, "LANGUAGE=\"C\""));
+    g_clear_pointer(&after, g_free);
+  }
+  else
+  {
+    g_assert_null(g_getenv("RCL_TEST_REQUIRE_FALLBACK_LOCALE"));
+    g_test_message("en_AU not installed; optional language-fallback checks omitted");
+  }
+
+  const gchar *bare_posix[] = { "POSIX", NULL };
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", bare_posix);
+  g_assert_no_error(polkit.client_error);
+  const gchar *language_chain[] = { "LANGUAGE=es:en_US:en", NULL };
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", language_chain);
   g_assert_no_error(polkit.client_error);
   g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
   g_assert_no_error(error);
-  g_assert_nonnull(strstr(after, "LANGUAGE=\"en_AU:en_GB\""));
-  g_clear_pointer(&after, g_free);
-  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", explicit_language);
-  g_assert_no_error(polkit.client_error);
-  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
-  g_assert_no_error(error);
-  g_assert_nonnull(strstr(after, "LANGUAGE=\"en_GB\""));
+  g_assert_nonnull(strstr(after, "LANGUAGE=\"es:en_US:en\""));
   g_clear_pointer(&after, g_free);
 
   call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", restore);
@@ -967,7 +1006,7 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_assert_no_error(polkit.client_error);
   g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
   g_assert_no_error(error);
-  g_assert_nonnull(strstr(after, "LC_TIME=\"en_GB.UTF-8\""));
+  g_assert_nonnull(strstr(after, "LC_TIME=\"C\""));
   g_clear_pointer(&after, g_free);
 
   /* Repeating an authorized identical update must not replace either file. */

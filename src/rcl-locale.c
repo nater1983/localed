@@ -31,6 +31,7 @@
 #include <glib-object.h>
 
 #include "rcl-locale.h"
+#include "rcl-locale-validation.h"
 #include "rcl-file-utils.h"
 #include "rcl-file-transaction.h"
 #include "rcl-xkb-config.h"
@@ -828,32 +829,6 @@ rcl_write_rc_keymap_toggle( const gchar *path,
    Input validation
    -------------------------------------------------------------------------- */
 
-/* Locale values (e.g. "en_US.UTF-8") and the LANGUAGE priority list
-   (e.g. "en_US:en_GB:en") share a conservative safe charset. */
-static gboolean
-rcl_locale_value_is_safe( const gchar *value )
-{
-  const gchar *p;
-
-  if( !value || strlen( value ) > MAX_XKB_VALUE_LEN )
-    return FALSE;
-
-  for( p = value; *p; p++ )
-  {
-    guchar c = (guchar) *p;
-    if( g_ascii_isalnum(c) )
-      continue;
-    switch( c )
-    {
-      case '_': case '.': case '-': case '@': case ':': case ',':
-        continue;
-      default:
-        return FALSE;
-    }
-  }
-  return TRUE;
-}
-
 /* Console keymap names and X11 layout/model/variant/options strings are
    restricted to a strict allowlist: alphanumeric characters plus the handful
    of punctuation that appears in real keymap and XKB identifiers.
@@ -1284,18 +1259,6 @@ static gboolean rcl_write_vconsole_x11_files( const gchar *keymap,
 
 /* ---- operation handlers: run only after a successful authorisation ---- */
 
-/* Match systemd v262's locale-name syntax for the standard method.
- * Installed-locale validation is a separate compatibility task. The
- * extension retains its safe LANGUAGE-list and explicit removal syntax. */
-static gboolean
-rcl_standard_locale_value_is_valid(const gchar *value)
-{
-  return value && *value && strlen(value) < 128 &&
-         strspn(value, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-@")
-           == strlen(value) &&
-         !g_str_equal(value, ".") && !g_str_equal(value, "..");
-}
-
 static void
 do_set_locale(RclLocaleDaemon *daemon, gchar **locale,
               gboolean partial, GDBusMethodInvocation *invocation)
@@ -1308,8 +1271,7 @@ do_set_locale(RclLocaleDaemon *daemon, gchar **locale,
 
   if (locale[0] && !locale[1] && !strchr(locale[0], '='))
   {
-    if (!(partial ? (*locale[0] && rcl_locale_value_is_safe(locale[0]))
-                  : rcl_standard_locale_value_is_valid(locale[0])))
+    if (!*locale[0] || !rcl_locale_name_is_valid(locale[0]))
     {
       g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
           G_DBUS_ERROR_INVALID_ARGS, "Invalid locale specification: '%s'", locale[0]);
@@ -1355,11 +1317,10 @@ do_set_locale(RclLocaleDaemon *daemon, gchar **locale,
           seen[k] ? "Duplicate" : "Unknown", key);
       return;
     }
-    if (!(partial ? rcl_locale_value_is_safe(eq + 1)
-                  : rcl_standard_locale_value_is_valid(eq + 1)))
+    if (!rcl_locale_validate_assignment(key, eq + 1, partial, &error))
     {
-      g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
-          G_DBUS_ERROR_INVALID_ARGS, "Invalid value for %s", key);
+      g_dbus_method_invocation_return_gerror(invocation, error);
+      g_clear_error(&error);
       return;
     }
     seen[k] = TRUE;

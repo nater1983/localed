@@ -340,7 +340,7 @@ cmd_set_locale() {
     [ -z "${seen[$key]+yes}" ] || die "duplicate locale variable '$key'"
     seen[$key]=1
     # Preserve explicit removal and LANGUAGE priority lists as extensions.
-    if [ -z "$value" ] || { [ "$key" = LANGUAGE ] && [[ "$value" == *:* ]]; }; then
+    if [ -z "$value" ] || [ "$key" = LANGUAGE ]; then
       method=UpdateLocale
     fi
     if [ -n "$value" ] && ! locale_value_is_safe "$value"; then

@@ -4,6 +4,7 @@
 
 src/main.c
 src/rcl-locale.c
+src/rcl-locale-validation.c
 src/rcl-file-transaction.c
 src/rcl-xkb-config.c
 data/org.freedesktop.locale1.policy
