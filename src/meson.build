@@ -1,5 +1,6 @@
 localed_sources = files(
   'main.c',
+  'rcl-desktop-companion.c',
   'rcl-file-transaction.c',
   'rcl-xkb-config.c',
   'rcl-locale.c',
