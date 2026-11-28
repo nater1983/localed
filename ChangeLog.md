@@ -10,6 +10,11 @@ All notable changes to `localed` are documented in this file.
 - Retain the locale1 D-Bus interface, authorization, native configuration, transaction handling and 0.3.2 maintenance fixes.
 - Keep duplicate-write regression coverage through authorized locale1 calls instead of the internal AccountsService setter.
 
+### Added
+- Discover and start the optional standalone localed-desktop executable after acquiring locale1, with core-only fallback when absent or unavailable.
+- Preserve observation-only startup, use the configured trusted libexec path, and stop the owned companion on name loss and shutdown without an automatic respawn loop.
+- Add isolated companion lifecycle tests and a --no-desktop-companion override.
+
 ### Fixed
 - Automatically isolate D-Bus regression test configuration in unique temporary directories under the build tree; retain production paths and safety assertions even when tests are enabled.
 - Test the default Meson configuration in sanitizer CI and keep the external private-bus daemon separately isolated.
