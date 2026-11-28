@@ -16,6 +16,11 @@ All notable changes to `localed` are documented in this file.
   blank lines and footer comments in both Slackware locale scripts. Insert
   new variables before the matching stock footer, or append if absent.
 - Use the same literal-assignment parser for reading and writing locale data.
+- Reconcile known locale variables during authorized partial updates:
+  explicit requests override both scripts, lang.sh wins conflicting values,
+  and variables present only in lang.csh are preserved.
+- Apply complete SetLocale replacements to both scripts without a
+  shell-specific LC_COLLATE default.
 
 ### Tests
 - Remove obsolete Plasma locale-parser tests; retain keyboard snapshot,
@@ -25,7 +30,11 @@ All notable changes to `localed` are documented in this file.
   companion-only update; check file inode and modification timestamps.
   Phase 2 Slackware regression suite: 5/5 passed.
 - Cover footer insertion, comments, indentation, missing final newline,
-  repeated requests and both locale setter methods. Phase 3 testing pending.
+  repeated requests and both locale setter methods. Phase 3 Slackware
+  regression suite: 5/5 passed.
+- Cover conflicting locale values, unique companion assignments, explicit
+  removals, denied reconciliation, missing-file recovery and no-op updates.
+  Phase 4 compilation and regression testing pending.
 
 ## [0.3.2] - 2026-11-28
 

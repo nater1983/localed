@@ -314,10 +314,15 @@ localectl unset-locale LC_COLLATE
 
 The final two commands are equivalent. An empty value removes the named
 assignment from both `lang.sh` and `lang.csh`. Other existing assignments,
-including `LANGUAGE`, are preserved. The daemon reads the files after
-Polkit authorization and updates them transactionally. This supports
+including `LANGUAGE`, are preserved. If the scripts already differ,
+explicit requests take precedence, `lang.sh` wins conflicting values,
+and assignments present only in `lang.csh` are preserved in both files.
+The daemon reconciles them only on an authorized update, not on startup
+or file-monitor events. It reads both snapshots and updates them
+transactionally. This supports
 simple literal locale assignments, not arbitrary shell programs.
-The standard `SetLocale` D-Bus method retains its replacement semantics;
+The standard `SetLocale` D-Bus method retains its replacement semantics
+for both scripts without injecting a C-shell-only `LC_COLLATE` default;
 the bundled client uses the new `UpdateLocale` extension instead. Upgrade
 the daemon and client together; older daemons do not expose `UpdateLocale`.
 The Plasma locale-file monitor is no longer used. AccountsService language

@@ -1346,7 +1346,7 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
 
   /* Build the known_keys/new_values pair arrays. SetLocale replaces the
      whole locale set (systemd semantics): every known variable not
-     supplied in the call is removed, except the legacy C-shell default. */
+     supplied in the call is removed from both scripts. */
   for( i = 0; locale_variable_names[i] != NULL; i++ )
   {
     guint j;
@@ -2148,55 +2148,50 @@ rcl_locale_write_patch(const RclFileSnapshot *snapshot, GString *contents,
   return ok;
 }
 
-/* Seed a missing companion from the other script without rereading disk
- * or executing shell code. Unsupported known assignments fail closed. */
-static GString *
-rcl_locale_seed_companion(const gchar *contents, gboolean from_csh,
-                          GError **error)
+/* Parse a transaction snapshot without executing either shell script.
+ * Keep explicit empty assignments distinct from absent keys. Last literal
+ * assignment wins, matching the locale property reader. */
+static GHashTable *
+rcl_locale_snapshot_values(const gchar *contents, gboolean csh, GError **error)
 {
   g_autoptr(GHashTable) entries = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                         g_free, g_free);
   g_auto(GStrv) lines = g_strsplit(contents ? contents : "", "\n", -1);
-  GString *out;
   guint i;
 
   for (i = 0; lines[i]; i++)
   {
-    g_autofree gchar *key = rcl_locale_assignment_key(lines[i], from_csh);
+    g_autofree gchar *key = rcl_locale_assignment_key(lines[i], csh);
     gchar *value;
     if (!key || !rcl_locale_variable_is_known(key))
       continue;
-    value = rcl_locale_assignment_value(lines[i], key, from_csh, NULL);
+    value = rcl_locale_assignment_value(lines[i], key, csh, NULL);
     if (!value)
     {
       g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                  "Cannot safely copy complex locale assignment for %s", key);
+                  "Cannot safely read complex locale assignment for %s", key);
       return NULL;
     }
     g_hash_table_replace(entries, g_steal_pointer(&key), value);
   }
 
-  out = g_string_new(from_csh ? "# Written by localed - see localed(8)\n"
-                              : "#!/bin/csh\n# Written by localed - see localed(8)\n");
-  for (i = 0; locale_variable_names[i]; i++)
-    rcl_locale_append_assignment(out, locale_variable_names[i],
-        g_hash_table_lookup(entries, locale_variable_names[i]), !from_csh);
-  return out;
+  return g_steal_pointer(&entries);
 }
 
 /* Update both scripts in the main-loop authorization callback. Other daemon
  * requests cannot interleave between the snapshot and the final rename. */
 static gboolean
 rcl_commit_locale_files(const gchar *const *keys,
-                        const gchar *const *sh_values,
-                        const gchar *const *csh_values,
-                        gboolean seed_missing, GError **error)
+                        const gchar *const *values,
+                        gboolean partial, GError **error)
 {
   RclFileSnapshot sh = {0}, csh = {0};
   g_autoptr(GString) sh_new = NULL;
   g_autoptr(GString) csh_new = NULL;
-  g_autoptr(GString) csh_seed = NULL;
-  g_autoptr(GString) sh_seed = NULL;
+  g_autoptr(GHashTable) sh_values = NULL;
+  g_autoptr(GHashTable) csh_values = NULL;
+  const gchar *merged[G_N_ELEMENTS(locale_variable_names)] = { NULL };
+  guint i, j;
   GError *write_error = NULL, *rollback_error = NULL;
   gboolean ok = FALSE, sh_changed = FALSE;
 
@@ -2211,26 +2206,52 @@ rcl_commit_locale_files(const gchar *const *keys,
     goto fail;
   }
 
-  if (seed_missing && !sh.existed)
+  /* Reconcile only during an authorized update, never at startup or on a
+   * file-monitor event. For partial updates preserve every existing known
+   * value, preferring lang.sh on conflicts because it backs Locale.
+   * Explicitly requested values (including removals) override both files. */
+  if (partial)
   {
-    sh_seed = rcl_locale_seed_companion(csh.contents, TRUE, &write_error);
-    if (!sh_seed)
+    sh_values = rcl_locale_snapshot_values(sh.contents, FALSE, &write_error);
+    if (!sh_values)
+      goto fail;
+    csh_values = rcl_locale_snapshot_values(csh.contents, TRUE, &write_error);
+    if (!csh_values)
       goto fail;
   }
-  if (seed_missing && !csh.existed)
+
+  for (i = 0; locale_variable_names[i]; i++)
   {
-    csh_seed = rcl_locale_seed_companion(sh.contents, FALSE, &write_error);
-    if (!csh_seed)
-      goto fail;
+    const gchar *key = locale_variable_names[i];
+    const gchar *value = NULL;
+
+    for (j = 0; keys[j]; j++)
+      if (g_str_equal(key, keys[j]))
+      {
+        value = values[j] ? values[j] : "";
+        break;
+      }
+
+    if (!value && partial)
+    {
+      const gchar *sh_value = g_hash_table_lookup(sh_values, key);
+      const gchar *csh_value = g_hash_table_lookup(csh_values, key);
+
+      if (sh_value && csh_value && g_strcmp0(sh_value, csh_value) != 0)
+        g_debug("reconciling locale variable %s using lang.sh", key);
+
+      value = sh_value ? sh_value : csh_value;
+    }
+
+    merged[i] = value ? value : "";
   }
-  sh_new = rcl_locale_patch_contents(sh.existed ? sh.contents :
-                                    (sh_seed ? sh_seed->str : NULL),
-                                    keys, sh_values, FALSE, &write_error);
+
+  sh_new = rcl_locale_patch_contents(sh.contents, locale_variable_names,
+                                    merged, FALSE, &write_error);
   if (!sh_new)
     goto fail;
-  csh_new = rcl_locale_patch_contents(csh.existed ? csh.contents :
-                                      (csh_seed ? csh_seed->str : NULL),
-                                      keys, csh_values, TRUE, &write_error);
+  csh_new = rcl_locale_patch_contents(csh.contents, locale_variable_names,
+                                     merged, TRUE, &write_error);
   if (!csh_new)
     goto fail;
 
@@ -2252,41 +2273,21 @@ out:
   return ok;
 }
 
-/* Partial updates preserve unspecified values and seed a missing companion. */
+/* Partial updates reconcile existing values across both shell scripts. */
 static gboolean
 rcl_patch_locale_files(const gchar *const *keys, const gchar *const *values,
                        GError **error)
 {
-  return rcl_commit_locale_files(keys, values, values, TRUE, error);
+  return rcl_commit_locale_files(keys, values, TRUE, error);
 }
 
-/* SetLocale replaces the complete known locale set. Use the same snapshot
- * writer as UpdateLocale to avoid rewriting unchanged files. Preserve the
- * legacy C-shell LC_COLLATE default until its policy is reviewed separately. */
+/* SetLocale replaces the complete known locale set in both scripts.
+ * Do not inject a shell-specific LC_COLLATE default. */
 static gboolean
 rcl_write_locale_files(const gchar *const *known_keys,
                        const gchar *const *new_values, GError **error)
 {
-  const gchar *sh_values[G_N_ELEMENTS(locale_variable_names)] = { NULL };
-  const gchar *csh_values[G_N_ELEMENTS(locale_variable_names)] = { NULL };
-  guint i, j;
-
-  for (i = 0; locale_variable_names[i]; i++)
-  {
-    const gchar *value = "";
-    for (j = 0; known_keys[j]; j++)
-      if (g_str_equal(locale_variable_names[i], known_keys[j]))
-      {
-        value = new_values[j] ? new_values[j] : "";
-        break;
-      }
-    sh_values[i] = value;
-    csh_values[i] = (g_str_equal(locale_variable_names[i], "LC_COLLATE") &&
-                     !*value) ? "C" : value;
-  }
-
-  return rcl_commit_locale_files(locale_variable_names, sh_values, csh_values,
-                                 FALSE, error);
+  return rcl_commit_locale_files(known_keys, new_values, FALSE, error);
 }
 
 /* Commit the console keymap and its toggle sidecar together. */

@@ -1012,8 +1012,14 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_assert_null(strstr(after, "LC_TIME"));
   g_assert_nonnull(strstr(after, "export LANG=\"en_US.UTF-8\""));
 
-  /* Replacement requests are also idempotent, including the legacy
-   * C-shell default. No-op requests still go through authorization. */
+  g_clear_pointer(&after, g_free);
+  g_assert_true(g_file_get_contents(RCL_LANG_CSH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_null(strstr(after, "LC_COLLATE"));
+  g_assert_null(strstr(after, "LC_TIME"));
+
+  /* Replacement requests are also idempotent.
+   * No-op requests still go through authorization. */
   g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_stat), ==, 0);
   g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_stat), ==, 0);
   rcl_locale_test_fail_rename_to(RCL_LANG_CSH_FILE);
@@ -1065,6 +1071,79 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", layout_replace);
   g_assert_no_error(polkit.client_error);
   assert_locale_files(layout_changed_sh, layout_changed_csh);
+
+  /* Reconcile a pre-existing mismatch on the next authorized partial update.
+   * A Bourne-shell value wins conflicts, a C-shell-only override survives,
+   * and explicit empties in lang.sh are not treated as missing values. */
+  g_assert_true(g_file_set_contents(RCL_LANG_SH_FILE,
+      "# Keep sh\nexport LANG=en_US.UTF-8\nexport LC_TIME=en_GB.UTF-8\n"
+      "export LC_NUMERIC=\nexport LC_MESSAGES=C\n", -1, &error));
+  g_assert_no_error(error);
+  g_assert_true(g_file_set_contents(RCL_LANG_CSH_FILE,
+      "# Keep csh\nsetenv LANG en_GB.UTF-8\nsetenv LC_TIME C\n"
+      "setenv LC_COLLATE C\nsetenv LC_NUMERIC C\n", -1, &error));
+  g_assert_no_error(error);
+
+  /* Reject a denied request without modifying either file. */
+  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_stat), ==, 0);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_stat), ==, 0);
+  polkit.authorized = FALSE;
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED);
+  assert_locale_file_unchanged(RCL_LANG_SH_FILE, &sh_stat);
+  assert_locale_file_unchanged(RCL_LANG_CSH_FILE, &csh_stat);
+  polkit.authorized = TRUE;
+
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_files(
+      "# Keep sh\nexport LANG=\\"en_AU.UTF-8\\"\nexport LC_TIME=en_GB.UTF-8\n"
+      "export LC_MESSAGES=C\nexport LC_COLLATE=\\"C\\"\n",
+      "# Keep csh\nsetenv LANG en_AU.UTF-8\nsetenv LC_TIME en_GB.UTF-8\n"
+      "setenv LC_COLLATE C\nsetenv LC_MESSAGES C\n");
+
+  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_stat), ==, 0);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_stat), ==, 0);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_file_unchanged(RCL_LANG_SH_FILE, &sh_stat);
+  assert_locale_file_unchanged(RCL_LANG_CSH_FILE, &csh_stat);
+
+  /* Explicit removals override both scripts and do not reintroduce defaults. */
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", unset);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_files(
+      "# Keep sh\nexport LANG=\\"en_AU.UTF-8\\"\nexport LC_TIME=en_GB.UTF-8\n"
+      "export LC_MESSAGES=C\n",
+      "# Keep csh\nsetenv LANG en_AU.UTF-8\nsetenv LC_TIME en_GB.UTF-8\n"
+      "setenv LC_MESSAGES C\n");
+
+  /* A missing Bourne-shell file is recovered from the C-shell snapshot. */
+  g_assert_cmpint(unlink(RCL_LANG_SH_FILE), ==, 0);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
+  g_assert_no_error(polkit.client_error);
+  g_clear_pointer(&after, g_free);
+  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(after, "export LC_TIME=\\"en_GB.UTF-8\\""));
+  g_assert_nonnull(strstr(after, "export LC_MESSAGES=\\"C\\""));
+  g_assert_null(strstr(after, "LC_COLLATE"));
+
+  /* Full replacement clears omitted overrides in both files. */
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
+  g_assert_no_error(polkit.client_error);
+  g_clear_pointer(&after, g_free);
+  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_null(strstr(after, "LC_TIME"));
+  g_assert_null(strstr(after, "LC_MESSAGES"));
+  g_assert_null(strstr(after, "LC_COLLATE"));
+  g_clear_pointer(&after, g_free);
+  g_assert_true(g_file_get_contents(RCL_LANG_CSH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_null(strstr(after, "LC_TIME"));
+  g_assert_null(strstr(after, "LC_MESSAGES"));
+  g_assert_null(strstr(after, "LC_COLLATE"));
 
   polkit_fixture_free(&polkit);
   rcl_daemon_shutdown(daemon);

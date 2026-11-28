@@ -66,9 +66,10 @@ narrows the output to en_US locales only.
 Does not require root.
 .TP
 .BI set-locale " KEY=value [KEY=value ...]"
-Update only the named system locale variables. Existing omitted variables
-remain unchanged. Empty values remove the named assignments from both
-locale scripts.
+Update only the named system locale variables. Omitted variables are
+preserved and reconciled across both scripts: lang.sh wins conflicting
+values, and lang.csh-only assignments are preserved. Empty values remove
+the named assignments from both locale scripts.
 .I KEY
 must be one of
 .BR LANG ,
