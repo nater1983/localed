@@ -37,12 +37,13 @@ calls a method or reads a property on the
 bus name. It can also be started manually for debugging.
 .PP
 After acquiring locale1, localed optionally starts the standalone
-.B localed-desktop
-executable from its configured libexec directory in observation-only mode.
+.B localed-input-sources-helper
+executable (provided by localed-desktop) from its configured libexec
+directory in observation-only mode.
 If absent or unavailable, core operation continues normally. The owned
 companion is stopped on name loss or shutdown; there is no automatic
-respawn loop. Desktop-specific helpers remain the responsibility of the
-companion package.
+respawn loop. The same executable runs its unprivileged session worker
+mode; the core never accesses desktop settings directly.
 .SH OPTIONS
 .TP
 .B \-\-debug
