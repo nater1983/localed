@@ -860,6 +860,164 @@ test_accounts_duplicate_locale(Fixture *fixture, gconstpointer user_data)
   g_object_unref(daemon);
 }
 
+static void
+call_locale_method(Fixture *fixture, GDBusConnection *daemon_bus,
+                   PolkitFixture *polkit, const gchar *method,
+                   const gchar *const *assignments)
+{
+  polkit->client_done = FALSE;
+  polkit->check_seen = FALSE;
+  g_clear_error(&polkit->client_error);
+  g_dbus_connection_call(fixture->client,
+      g_dbus_connection_get_unique_name(daemon_bus),
+      "/org/freedesktop/locale1", "org.freedesktop.locale1", method,
+      g_variant_new("(@asb)", g_variant_new_strv(assignments, -1), TRUE),
+      NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+      polkit_client_call_done, polkit);
+  iterate_until(polkit, polkit_condition, 5000);
+  g_assert_true(polkit->check_seen);
+}
+
+static void
+assert_locale_files(const gchar *sh_expected, const gchar *csh_expected)
+{
+  g_autoptr(GError) error = NULL;
+  g_autofree gchar *sh = NULL;
+  g_autofree gchar *csh = NULL;
+
+  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &sh, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_true(g_file_get_contents(RCL_LANG_CSH_FILE, &csh, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_cmpstr(sh, ==, sh_expected);
+  g_assert_cmpstr(csh, ==, csh_expected);
+}
+
+static void
+test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
+{
+  const gchar *initial_sh =
+    "# Keep this comment\nexport LANG=en_US.UTF-8\n"
+    "export LC_COLLATE=C\nexport LC_TIME=en_GB.UTF-8\n"
+    "export LANGUAGE=\"en_US:en\"\n";
+  const gchar *initial_csh =
+    "#!/bin/csh\nsetenv LANG en_US.UTF-8\nsetenv LC_COLLATE C\n"
+    "setenv LC_TIME en_GB.UTF-8\nsetenv LANGUAGE en_US:en\n";
+  const gchar *changed_sh =
+    "# Keep this comment\nexport LANG=\"en_AU.UTF-8\"\n"
+    "export LC_COLLATE=C\nexport LC_TIME=en_GB.UTF-8\n"
+    "export LANGUAGE=\"en_US:en\"\n";
+  const gchar *changed_csh =
+    "#!/bin/csh\nsetenv LANG en_AU.UTF-8\nsetenv LC_COLLATE C\n"
+    "setenv LC_TIME en_GB.UTF-8\nsetenv LANGUAGE en_US:en\n";
+  const gchar *unset_sh =
+    "# Keep this comment\nexport LANG=\"en_AU.UTF-8\"\n"
+    "export LC_TIME=en_GB.UTF-8\nexport LANGUAGE=\"en_US:en\"\n";
+  const gchar *unset_csh =
+    "#!/bin/csh\nsetenv LANG en_AU.UTF-8\nsetenv LC_TIME en_GB.UTF-8\n"
+    "setenv LANGUAGE en_US:en\n";
+  const gchar *lang[] = { "LANG=en_AU.UTF-8", NULL };
+  const gchar *unset[] = { "LC_COLLATE=", NULL };
+  const gchar *invalid[] = { "LC_TIME=C", "UNKNOWN=C", NULL };
+  const gchar *duplicate[] = { "LC_TIME=C", "LC_TIME=POSIX", NULL };
+  const gchar *empty[] = { NULL };
+  const gchar *replace[] = { "LANG=en_US.UTF-8", NULL };
+  g_autoptr(GError) error = NULL;
+  GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
+  GDBusConnection *polkit_bus = connect_test_bus(fixture->address);
+  GDBusNodeInfo *node = g_dbus_node_info_new_for_xml(test_polkit_xml, &error);
+  PolkitFixture polkit = { .authorized = TRUE };
+  RclDaemon *daemon = rcl_daemon_new();
+  guint registration_id, name_result;
+  GVariant *reply;
+  g_autofree gchar *after = NULL;
+
+  g_assert_cmpstr(RCL_LANG_SH_FILE, !=, "/etc/profile.d/lang.sh");
+  g_assert_cmpstr(RCL_LANG_CSH_FILE, !=, "/etc/profile.d/lang.csh");
+  g_assert_cmpstr(RCL_LANG_SH_FILE, !=, RCL_LANG_CSH_FILE);
+  g_assert_no_error(error);
+  g_assert_true(g_file_set_contents(RCL_LANG_SH_FILE, initial_sh, -1, &error));
+  g_assert_no_error(error);
+  g_assert_true(g_file_set_contents(RCL_LANG_CSH_FILE, initial_csh, -1, &error));
+  g_assert_no_error(error);
+  g_assert_true(rcl_daemon_startup(daemon, daemon_bus));
+
+  reply = g_dbus_connection_call_sync(polkit_bus, "org.freedesktop.DBus",
+      "/org/freedesktop/DBus", "org.freedesktop.DBus", "RequestName",
+      g_variant_new("(su)", TEST_POLKIT_NAME, 0u), G_VARIANT_TYPE("(u)"),
+      G_DBUS_CALL_FLAGS_NONE, 3000, NULL, &error);
+  g_assert_no_error(error);
+  g_variant_get(reply, "(u)", &name_result);
+  g_variant_unref(reply);
+  g_assert_true(name_result == 1u || name_result == 4u);
+  registration_id = g_dbus_connection_register_object(polkit_bus,
+      TEST_POLKIT_PATH, g_dbus_node_info_lookup_interface(node,
+      "org.freedesktop.PolicyKit1.Authority"), &test_polkit_vtable,
+      &polkit, NULL, &error);
+  g_assert_no_error(error);
+  g_assert_cmpuint(registration_id, >, 0);
+
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_files(changed_sh, changed_csh);
+
+  polkit.authorized = FALSE;
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", unset);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_AUTH_FAILED);
+  assert_locale_files(changed_sh, changed_csh);
+  polkit.authorized = TRUE;
+
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", invalid);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  assert_locale_files(changed_sh, changed_csh);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", duplicate);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  assert_locale_files(changed_sh, changed_csh);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", empty);
+  g_assert_error(polkit.client_error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS);
+  assert_locale_files(changed_sh, changed_csh);
+
+  rcl_locale_test_fail_rename_to(RCL_LANG_CSH_FILE);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", unset);
+  rcl_locale_test_fail_rename_to(NULL);
+  g_assert_nonnull(polkit.client_error);
+  assert_locale_files(changed_sh, changed_csh);
+
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", unset);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_files(unset_sh, unset_csh);
+
+  /* A missing companion is seeded from the existing locale, not from defaults. */
+  g_assert_cmpint(unlink(RCL_LANG_CSH_FILE), ==, 0);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
+  g_assert_no_error(polkit.client_error);
+  g_assert_true(g_file_get_contents(RCL_LANG_CSH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_nonnull(strstr(after, "setenv LC_TIME en_GB.UTF-8"));
+  g_assert_null(strstr(after, "LC_COLLATE"));
+  g_clear_pointer(&after, g_free);
+
+  /* Keep the standard systemd-compatible replacement method. */
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
+  g_assert_no_error(polkit.client_error);
+  g_assert_true(g_file_get_contents(RCL_LANG_SH_FILE, &after, NULL, &error));
+  g_assert_no_error(error);
+  g_assert_null(strstr(after, "LC_TIME"));
+  g_assert_nonnull(strstr(after, "export LANG=\"en_US.UTF-8\""));
+
+  polkit_fixture_free(&polkit);
+  rcl_daemon_shutdown(daemon);
+  g_object_unref(daemon);
+  g_dbus_connection_unregister_object(polkit_bus, registration_id);
+  g_dbus_node_info_unref(node);
+  g_dbus_connection_close_sync(polkit_bus, NULL, NULL);
+  g_dbus_connection_close_sync(daemon_bus, NULL, NULL);
+  g_object_unref(polkit_bus);
+  g_object_unref(daemon_bus);
+  g_assert_cmpint(unlink(RCL_LANG_SH_FILE), ==, 0);
+  g_assert_cmpint(unlink(RCL_LANG_CSH_FILE), ==, 0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -867,6 +1025,9 @@ main(int argc, char **argv)
 
   g_test_add("/dbus/accounts-duplicate-locale", Fixture, NULL,
              fixture_setup, test_accounts_duplicate_locale, fixture_teardown);
+  g_test_add("/dbus/partial-locale-update", Fixture, NULL,
+             fixture_setup, test_partial_locale_update, fixture_teardown);
+
   g_test_add("/dbus/accounts-name-lifecycle", Fixture, NULL,
              fixture_setup, test_accounts_name_lifecycle, fixture_teardown);
   g_test_add("/dbus/repeated-start-stop-cleanup", Fixture, NULL,

@@ -210,7 +210,8 @@ Commands:
   status                          Show current locale and keyboard settings
   list-keymaps [FILTER]           List available console keymaps (optional grep filter)
   list-locales [FILTER]           List available locales (optional grep filter)
-  set-locale KEY=value [...]      Set system locale variables through D-Bus
+  set-locale KEY=value [...]      Update only named system locale variables
+  unset-locale KEY [...]          Remove named system locale variables
   set-keymap [--no-convert] KEYMAP [TOGGLE]
                                   Set the virtual console keymap through D-Bus
   set-x11-keymap [--no-convert] LAYOUT [MODEL [VARIANT [OPTIONS]]]
@@ -240,6 +241,8 @@ Examples:
   localectl list-locales en_US
   localectl set-locale LANG=en_US.UTF-8
   localectl set-locale LANG=en_US.UTF-8 LC_TIME=en_GB.UTF-8
+  localectl set-locale LC_COLLATE=
+  localectl unset-locale LC_COLLATE
   localectl set-keymap us
   localectl set-x11-keymap cz,us pc104 ,dvorak grp:win_space_toggle
   localectl set-x11-keymap cz,us pc104      # keeps existing variant and options
@@ -335,8 +338,19 @@ cmd_set_locale() {
     fi
   done
   # The trailing true permits a Polkit authentication agent to prompt.
-  _gdbus_call SetLocale "[$(printf "'%s', " "$@" | sed 's/, $//')]" true >/dev/null \
-    || die "SetLocale failed (authorization may have been denied)"
+  _gdbus_call UpdateLocale "[$(printf "'%s', " "$@" | sed 's/, $//')]" true >/dev/null \
+    || die "UpdateLocale failed (authorization may have been denied)"
+}
+
+cmd_unset_locale() {
+  [ "$#" -gt 0 ] || die "unset-locale requires at least one locale variable"
+  local key
+  local assignments=()
+  for key in "$@"; do
+    locale_var_is_known "$key" || die "unknown locale variable '$key'"
+    assignments+=("$key=")
+  done
+  cmd_set_locale "${assignments[@]}"
 }
 
 cmd_set_keymap() {
@@ -388,6 +402,7 @@ case "${1:-status}" in
   list-keymaps)           shift; cmd_list_keymaps "$@" ;;
   list-locales)           shift; cmd_list_locales "$@" ;;
   set-locale)             shift; cmd_set_locale "$@" ;;
+  unset-locale)           shift; cmd_unset_locale "$@" ;;
   set-keymap)             shift; cmd_set_keymap "$@" ;;
   set-x11-keymap)              shift; cmd_set_x11_keymap "$@" ;;
   list-x11-keymap-models)      shift; cmd_list_x11_keymap_models "$@" ;;

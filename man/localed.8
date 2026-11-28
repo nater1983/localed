@@ -49,8 +49,7 @@ on the system bus, implementing the
 interface.
 .SS Properties
 All properties are read-only over D-Bus; values are changed via the
-.B Set*
-methods described below, or by editing the underlying files directly
+configuration methods described below, or by editing the underlying files directly
 (see
 .BR FILES ),
 which
@@ -120,7 +119,7 @@ May be empty.
 .SS Methods
 .TP
 .B SetLocale(as locale, b interactive)
-Validates and writes the given locale assignments to
+Replaces the complete set of system locale assignments in
 .IR /etc/profile.d/lang.sh .
 Each element of
 .I locale
@@ -134,10 +133,19 @@ uses only ASCII alphanumeric characters, underscore, period, hyphen,
 at sign, colon, and comma, with a maximum length of 256 bytes.
 An empty
 .I value
-removes that key from the file. Unknown keys cause the entire call to
+removes that key from lang.sh. The legacy C-shell writer retains its
+LC_COLLATE=C default. Use UpdateLocale for partial updates and explicit
+removal from both scripts. Unknown keys cause the entire call to
 fail. Requires the
 .B org.freedesktop.locale1.set-locale
 PolKit action.
+.TP
+.B UpdateLocale(as locale, b interactive)
+Localed extension to change only explicitly named locale assignments.
+Omitted variables remain unchanged. Empty values remove the named
+assignment from both shell scripts. Invalid, duplicate or empty requests
+are rejected. Requires the same PolKit action as SetLocale.
+The standard SetLocale replacement semantics remain unchanged.
 .TP
 .B SetVConsoleKeyboard(s keymap, s keymap_toggle, b convert, b interactive)
 Writes
@@ -191,9 +199,7 @@ means the call fails immediately with
 .B org.freedesktop.DBus.Error.AuthFailed
 unless the caller is already authorised.
 .SH AUTHORIZATION
-Access to the
-.B Set*
-methods over D-Bus is controlled by
+Access to the configuration methods over D-Bus is controlled by
 .BR polkit (8)
 using the following actions, declared in
 .IR /usr/share/polkit-1/actions/org.freedesktop.locale1.policy :
@@ -243,7 +249,7 @@ Slackware login locale script containing exported locale variables
 (e.g.\n.BR "export LANG=\"en_US.UTF-8\"" ). Read for the
 .B Locale
 property and written atomically by
-.BR SetLocale .
+.BR SetLocale " and " UpdateLocale .
 Watched with
 .BR inotify (7).
 .TP
@@ -252,7 +258,9 @@ C-shell companion locale script. Updated alongside
 .I lang.sh
 by
 .B SetLocale
-so C-shell login environments receive the same locale settings.
+and
+.B UpdateLocale .
+Partial updates preserve unspecified assignments in each script.
 .TP
 .I /etc/rc.d/rc.keymap
 Slackware console keyboard script. Called by the boot process to load

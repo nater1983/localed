@@ -79,7 +79,9 @@ void       rcl_daemon_set_debug  ( RclDaemon *daemon, gboolean debug );
 
   Methods:
     SetLocale         (as locale, b interactive)
-      – validates and writes RCL_LANG_SH_FILE
+      – replaces the complete system locale assignment set
+    UpdateLocale      (as locale, b interactive)
+      – changes only named assignments; empty values remove those keys
     SetVConsoleKeyboard(s keymap, s keymap_toggle, b convert, b interactive)
       – writes RCL_RC_KEYMAP_FILE; if convert is TRUE also derives and writes
         a matching X11 layout via the built-in keymap → X11 layout table
