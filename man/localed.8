@@ -249,6 +249,11 @@ name appearance and disappearance. A PropertiesChanged signal does not
 identify its original caller, so this bridge cannot perform caller-based
 PolKit authorization. Other users must use the locale1 D-Bus methods,
 where PolKit evaluates the actual D-Bus caller.
+.SS Desktop keyboard observation
+The optional GNOME and Plasma 6 backends observe per-user keyboard settings
+without changing system-wide keyboard configuration. Only authorized
+SetVConsoleKeyboard and SetX11Keyboard requests (including conversion)
+write keyboard defaults. Byte-identical outputs are not rewritten.
 .SH FILES
 .TP
 .I /etc/profile.d/lang.sh

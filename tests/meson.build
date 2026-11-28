@@ -66,11 +66,13 @@ if get_option('desktop-backend') == 'gnome'
     ],
     dependencies        : [glib_dep, gio_dep, gio_unix],
     include_directories : [config_h_inc, include_directories('../src', '../src/backends/gnome')],
+    c_args : ['-DRCL_BACKEND_TESTING'],
   )
   
   test(
     'GNOME input-sources backend lifecycle',
     input_sources_test,
+    is_parallel : false,
     timeout : 30,
     env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
   )
@@ -93,11 +95,13 @@ if get_option('desktop-backend') == 'plasma6'
       config_h_inc,
       include_directories('../src', '../src/backends/plasma6'),
     ],
+    c_args : ['-DRCL_BACKEND_TESTING'],
   )
 
   test(
     'Plasma 6 input-sources backend lifecycle',
     plasma6_input_sources_test,
+    is_parallel : false,
     timeout : 30,
     env : ['G_DEBUG=fatal-warnings', 'G_SLICE=always-malloc'],
   )

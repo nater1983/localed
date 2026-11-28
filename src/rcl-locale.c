@@ -454,87 +454,27 @@ read_x11_keyboard_conf( const gchar *path,
 #undef SANITISE_XKB
 }
 
-static gboolean
-write_x11_keyboard_conf( const gchar *path,
-                         const gchar *layout, const gchar *model,
-                         const gchar *variant, const gchar *options,
-                         GError **error )
+/* Construct canonical Xorg configuration without touching the filesystem. */
+static GString *
+rcl_render_x11_keyboard(const gchar *layout, const gchar *model,
+                        const gchar *variant, const gchar *options)
 {
-  GString *out;
-  gchar   *dir;
-  gchar   *tmp_path;
-  gboolean ok;
-
-  dir = g_path_get_dirname( path );
-  if( g_mkdir_with_parents( dir, 0755 ) != 0 && errno != EEXIST )
-  {
-    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 _("mkdir -p %s: %s"), dir, g_strerror(errno) );
-    g_free( dir );
-    return FALSE;
-  }
-  g_free( dir );
-  out = g_string_new( NULL );
-  g_string_append( out, "# Written by localed - see localed(8)\n" );
-  g_string_append( out, "Section \"InputClass\"\n" );
-  g_string_append( out, "    Identifier \"system-keyboard\"\n" );
-  g_string_append( out, "    MatchIsKeyboard \"on\"\n" );
-  g_string_append_printf( out, "    Option \"XkbLayout\" \"%s\"\n",  layout  ? layout  : "" );
-  g_string_append_printf( out, "    Option \"XkbModel\" \"%s\"\n",   model   ? model   : "" );
-  g_string_append_printf( out, "    Option \"XkbVariant\" \"%s\"\n", variant ? variant : "" );
-  g_string_append_printf( out, "    Option \"XkbOptions\" \"%s\"\n", options ? options : "" );
-  g_string_append( out, "EndSection\n" );
-
-  tmp_path = g_strdup_printf( "%s.XXXXXX", path );
-  {
-    int fd = g_mkstemp( tmp_path );
-    if( fd == -1 )
-    {
-      int saved_errno = errno;
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
-                   _("create temporary file for %s: %s"),
-                   path, g_strerror(saved_errno) );
-      g_free( tmp_path );
-      g_string_free( out, TRUE );
-      return FALSE;
-    }
-
-    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
-    {
-      g_free( tmp_path );
-      g_string_free( out, TRUE );
-      return FALSE;
-    }
-  }
-  ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
-
-  if( ok )
-  {
-    /* 00-keyboard.conf must be world-readable so Xorg (which may run as a
-     * dedicated user on hardened setups) can read it.  g_file_set_contents()
-     * creates the temp file 0600; chmod it to 0644 before the rename so the
-     * final file is always accessible, even when localed creates it from
-     * scratch. */
-    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
-      ok = FALSE;
-
-    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
-    {
-      int saved_errno = errno;
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
-                   _("rename(%s, %s): %s"),
-                   tmp_path, path, g_strerror(saved_errno) );
-      ok = FALSE;
-    }
-  }
-
-  if( !ok )
-    rcl_file_cleanup_temporary( tmp_path, error );
-
-  g_free( tmp_path );
-  g_string_free( out, TRUE );
-  return ok;
+  GString *out = g_string_new(NULL);
+  g_string_append(out, "# Written by localed - see localed(8)\n");
+  g_string_append(out, "Section \"InputClass\"\n");
+  g_string_append(out, "    Identifier \"system-keyboard\"\n");
+  g_string_append(out, "    MatchIsKeyboard \"on\"\n");
+  g_string_append_printf(out, "    Option \"XkbLayout\" \"%s\"\n", layout);
+  g_string_append_printf(out, "    Option \"XkbModel\" \"%s\"\n", model);
+  g_string_append_printf(out, "    Option \"XkbVariant\" \"%s\"\n", variant);
+  g_string_append_printf(out, "    Option \"XkbOptions\" \"%s\"\n", options);
+  g_string_append(out, "EndSection\n");
+  return out;
 }
+
+static gboolean write_x11_keyboard_conf(const gchar *path,
+    const gchar *layout, const gchar *model, const gchar *variant,
+    const gchar *options, GError **error);
 
 /* --------------------------------------------------------------------------
    Slackware rc.keymap reader/writer.
@@ -643,82 +583,21 @@ rcl_read_rc_keymap( const gchar *path )
   return result ? result : g_strdup( "" );
 }
 
-/* Write a Slackware rc.keymap script for the given keymap.
- * An empty keymap writes a no-op script (preserves the file but calls
- * no loadkeys, consistent with "keymap cleared" semantics). */
-static gboolean
-rcl_write_rc_keymap( const gchar *path, const gchar *keymap, GError **error )
+/* An empty keymap renders a no-op script, not a loadkeys invocation. */
+static GString *
+rcl_render_rc_keymap(const gchar *keymap)
 {
-  GString *out;
-  gchar   *tmp_path;
-  gchar   *dir;
-  gboolean ok;
-
-  dir = g_path_get_dirname( path );
-  if( g_mkdir_with_parents( dir, 0755 ) != 0 && errno != EEXIST )
-  {
-    g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                 _("mkdir -p %s: %s"), dir, g_strerror(errno) );
-    g_free( dir );
-    return FALSE;
-  }
-  g_free( dir );
-  out = g_string_new( NULL );
-  g_string_append( out,
-    "#!/bin/bash\n"
-    "# Written by localed - see localed(8)\n"
-    "# More keymaps are in /usr/share/kbd/keymaps\n"
-    "if [ -x /usr/bin/loadkeys ]; then\n" );
-
-  if( keymap && keymap[0] != '\0' )
-    g_string_append_printf( out, "  /usr/bin/loadkeys \"%s\"\n", keymap );
+  GString *out = g_string_new(
+      "#!/bin/bash\n"
+      "# Written by localed - see localed(8)\n"
+      "# More keymaps are in /usr/share/kbd/keymaps\n"
+      "if [ -x /usr/bin/loadkeys ]; then\n");
+  if (keymap && *keymap)
+    g_string_append_printf(out, "  /usr/bin/loadkeys \"%s\"\n", keymap);
   else
-    g_string_append( out, "  : # no keymap configured\n" );
-
-  g_string_append( out, "fi\n" );
-
-  tmp_path = g_strdup_printf( "%s.XXXXXX", path );
-  {
-    int fd = g_mkstemp( tmp_path );
-    if( fd == -1 )
-    {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   _("create temporary file for %s: %s"), path, g_strerror(errno) );
-      g_free( tmp_path );
-      g_string_free( out, TRUE );
-      return FALSE;
-    }
-    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
-    {
-      g_free( tmp_path );
-      g_string_free( out, TRUE );
-      return FALSE;
-    }
-  }
-  ok = g_file_set_contents( tmp_path, out->str, (gssize)out->len, error );
-
-  if( ok )
-  {
-    /* Preserve existing mode, defaulting to executable 0755. */
-    if( !rcl_file_apply_mode_for_write( tmp_path, path, 0755, error ) )
-    {
-      ok = FALSE;
-    }
-
-    if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
-    {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   _("rename(%s, %s): %s"), tmp_path, path, g_strerror(errno) );
-      ok = FALSE;
-    }
-  }
-
-  if( !ok )
-    rcl_file_cleanup_temporary( tmp_path, error );
-
-  g_free( tmp_path );
-  g_string_free( out, TRUE );
-  return ok;
+    g_string_append(out, "  : # no keymap configured\n");
+  g_string_append(out, "fi\n");
+  return out;
 }
 
 /* Read the toggle keymap from the sidecar file.
@@ -749,75 +628,6 @@ rcl_read_rc_keymap_toggle( const gchar *path )
   }
 
   return result;
-}
-
-/* Write (or remove) the toggle keymap sidecar file.
- * An empty keymap_toggle removes the file. */
-static gboolean
-rcl_write_rc_keymap_toggle( const gchar *path,
-                             const gchar *keymap_toggle,
-                             GError     **error )
-{
-  if( !keymap_toggle || keymap_toggle[0] == '\0' )
-  {
-    /* Remove the sidecar; ENOENT is fine */
-    if( g_unlink( path ) != 0 && errno != ENOENT )
-    {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   _("unlink(%s): %s"), path, g_strerror(errno) );
-      return FALSE;
-    }
-    return TRUE;
-  }
-
-  {
-    gchar    *line     = g_strdup_printf( "%s\n", keymap_toggle );
-    gchar    *tmp_path = g_strdup_printf( "%s.XXXXXX", path );
-    int       fd;
-    gboolean  ok;
-    fd = g_mkstemp( tmp_path );
-
-    if( fd == -1 )
-    {
-      g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   _("create temporary file for %s: %s"), path, g_strerror(errno) );
-      g_free( tmp_path );
-      return FALSE;
-    }
-    if( !rcl_file_close_temporary( fd, tmp_path, path, error ) )
-    {
-      g_free( tmp_path );
-      g_free( line );
-      return FALSE;
-    }
-    ok = g_file_set_contents( tmp_path, line, -1, error );
-
-    if( ok )
-    {
-      /* Make the sidecar world-readable (0644) so it is consistent with
-       * lang.sh and rc.keymap permissions; g_file_set_contents creates the
-       * temp file 0600 which would leave the sidecar unreadable by non-root
-       * readers if created from scratch. */
-      if( !rcl_file_apply_mode_for_write( tmp_path, path, 0644, error ) )
-      {
-        ok = FALSE;
-      }
-
-      if( ok && rcl_locale_rename( tmp_path, path ) != 0 )
-      {
-        g_set_error( error, G_IO_ERROR, g_io_error_from_errno(errno),
-                     _("rename(%s, %s): %s"), tmp_path, path, g_strerror(errno) );
-        ok = FALSE;
-      }
-    }
-
-    if( !ok )
-      rcl_file_cleanup_temporary( tmp_path, error );
-
-    g_free( tmp_path );
-    g_free( line );
-    return ok;
-  }
 }
 
 /* Maximum accepted length for locale and keyboard configuration values. */
@@ -1634,73 +1444,6 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
-#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
-/* Trusted in-process keyboard entry points used by the GNOME input-source
- * backend. Public D-Bus requests continue through authorized D-Bus handlers. */
-gboolean
-rcl_locale_daemon_set_vconsole_keyboard_internal(
-    RclLocaleDaemon *daemon,
-    const gchar *keymap,
-    const gchar *keymap_toggle,
-    GError **error)
-{
-  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), FALSE);
-  g_return_val_if_fail(keymap != NULL, FALSE);
-  g_return_val_if_fail(keymap_toggle != NULL, FALSE);
-
-  if ((keymap[0] != '\0' && !rcl_keyboard_value_is_safe(keymap)) ||
-      (keymap_toggle[0] != '\0' &&
-       !rcl_keyboard_value_is_safe(keymap_toggle)))
-  {
-    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                        _("Invalid console keyboard configuration value"));
-    return FALSE;
-  }
-
-  if (!rcl_write_vconsole_files(keymap, keymap_toggle, error))
-  {
-    rcl_daemon_sync_dbus_properties(daemon);
-    return FALSE;
-  }
-
-  rcl_daemon_sync_dbus_properties(daemon);
-  return TRUE;
-}
-
-gboolean
-rcl_locale_daemon_set_x11_keyboard_internal(
-    RclLocaleDaemon *daemon,
-    const gchar *layout,
-    const gchar *model,
-    const gchar *variant,
-    const gchar *options,
-    GError **error)
-{
-  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), FALSE);
-  g_return_val_if_fail(layout != NULL, FALSE);
-  g_return_val_if_fail(model != NULL, FALSE);
-  g_return_val_if_fail(variant != NULL, FALSE);
-  g_return_val_if_fail(options != NULL, FALSE);
-
-  if (!rcl_x11_keyboard_values_are_valid(layout, model, variant, options))
-  {
-    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                        _("Invalid X11 keyboard configuration value"));
-    return FALSE;
-  }
-
-  if (!write_x11_keyboard_conf(RCL_X11_KEYBOARD_FILE, layout, model,
-                               variant, options, error))
-  {
-    rcl_daemon_sync_dbus_properties(daemon);
-    return FALSE;
-  }
-
-  rcl_daemon_sync_dbus_properties(daemon);
-  return TRUE;
-}
-#endif /* HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND */
-
 /* ---- asynchronous PolicyKit D-Bus authorization ---- */
 
 static void
@@ -2103,8 +1846,9 @@ rcl_locale_patch_contents(const gchar *contents, const gchar *const *keys,
 }
 
 static gboolean
-rcl_locale_write_patch(const RclFileSnapshot *snapshot, GString *contents,
-                       gboolean *changed, GError **error)
+rcl_write_snapshot_contents(const RclFileSnapshot *snapshot, GString *contents,
+                            mode_t default_mode, gboolean *changed,
+                            GError **error)
 {
   g_autofree gchar *dir = g_path_get_dirname(snapshot->path);
   g_autofree gchar *tmp = g_strdup_printf("%s.XXXXXX", snapshot->path);
@@ -2134,7 +1878,7 @@ rcl_locale_write_patch(const RclFileSnapshot *snapshot, GString *contents,
     return FALSE;
   ok = g_file_set_contents(tmp, contents->str, contents->len, error);
   if (ok)
-    ok = rcl_file_apply_mode_for_write(tmp, snapshot->path, 0755, error);
+    ok = rcl_file_apply_mode_for_write(tmp, snapshot->path, default_mode, error);
   if (ok && rcl_locale_rename(tmp, snapshot->path) != 0)
   {
     g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
@@ -2255,9 +1999,9 @@ rcl_commit_locale_files(const gchar *const *keys,
   if (!csh_new)
     goto fail;
 
-  if (!rcl_locale_write_patch(&sh, sh_new, &sh_changed, &write_error))
+  if (!rcl_write_snapshot_contents(&sh, sh_new, 0755, &sh_changed, &write_error))
     goto fail;
-  if (!rcl_locale_write_patch(&csh, csh_new, NULL, &write_error))
+  if (!rcl_write_snapshot_contents(&csh, csh_new, 0755, NULL, &write_error))
   {
     if (sh_changed && !rcl_file_snapshot_restore(&sh, &rollback_error))
       rcl_report_rollback_failure(&write_error, rollback_error);
@@ -2290,107 +2034,134 @@ rcl_write_locale_files(const gchar *const *known_keys,
   return rcl_commit_locale_files(known_keys, new_values, FALSE, error);
 }
 
-/* Commit the console keymap and its toggle sidecar together. */
-static gboolean
-rcl_write_vconsole_files( const gchar *keymap, const gchar *keymap_toggle,
-                          GError **error )
+/* Keyboard files are changed only by authorized public setter handlers.
+ * Prepare all requested snapshots before writing any file, then restore
+ * only files actually changed if a later operation fails. */
+typedef struct
 {
-  RclFileSnapshot keymap_snapshot = { 0 }, toggle_snapshot = { 0 };
-  GError *write_error = NULL, *rollback_error = NULL;
+  const gchar *path;
+  GString *contents; /* NULL means remove the optional toggle sidecar. */
+  mode_t mode;
+  RclFileSnapshot snapshot;
+  gboolean changed;
+} RclKeyboardWrite;
+
+static gboolean
+rcl_commit_keyboard_files(RclKeyboardWrite *files, guint count, GError **error)
+{
+  GError *write_error = NULL;
+  guint i;
   gboolean ok = FALSE;
 
-  if( !rcl_file_snapshot_take( &keymap_snapshot, RCL_RC_KEYMAP_FILE, &write_error ) ||
-      !rcl_file_snapshot_take( &toggle_snapshot, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) )
-    goto fail;
-  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
-    goto fail;
-  if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE,
-                                   keymap_toggle, &write_error ) )
+  for (i = 0; i < count; i++)
+    if (!rcl_file_snapshot_take(&files[i].snapshot, files[i].path, &write_error))
+      goto out;
+
+  for (i = 0; i < count; i++)
   {
-    if( !rcl_file_snapshot_restore( &keymap_snapshot, &rollback_error ) )
-      rcl_report_rollback_failure( &write_error, rollback_error );
-    goto fail;
+    RclKeyboardWrite *file = &files[i];
+
+    if (file->contents)
+    {
+      if (!rcl_write_snapshot_contents(&file->snapshot, file->contents,
+                                       file->mode, &file->changed, &write_error))
+        goto rollback;
+    }
+    else if (file->snapshot.existed)
+    {
+      if (g_unlink(file->path) != 0)
+      {
+        int saved_errno = errno;
+        g_set_error(&write_error, G_IO_ERROR, g_io_error_from_errno(saved_errno),
+                    _("unlink(%s): %s"), file->path, g_strerror(saved_errno));
+        goto rollback;
+      }
+      file->changed = TRUE;
+    }
   }
   ok = TRUE;
   goto out;
 
-fail:
-  rcl_report_write_failure( error, write_error );
-out:
-  rcl_file_snapshot_clear( &keymap_snapshot );
-  rcl_file_snapshot_clear( &toggle_snapshot );
-  return ok;
-}
-
-/* The optional X11/console conversion is part of the requested update.
- * Snapshot both files so a failed second write does not leave the source
- * setting changed while the converted setting remains stale. */
-static gboolean
-rcl_write_x11_vconsole_files( const gchar *layout, const gchar *model,
-                              const gchar *variant, const gchar *options,
-                              const gchar *keymap, GError **error )
-{
-  RclFileSnapshot x11 = { 0 };
-  GError *write_error = NULL, *rollback_error = NULL;
-  gboolean ok = FALSE;
-
-  if( !rcl_file_snapshot_take( &x11, RCL_X11_KEYBOARD_FILE, &write_error ) )
-    goto fail;
-  if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
-                                variant, options, &write_error ) )
-    goto fail;
-  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
-  {
-    if( !rcl_file_snapshot_restore( &x11, &rollback_error ) )
-      rcl_report_rollback_failure( &write_error, rollback_error );
-    goto fail;
-  }
-  ok = TRUE;
-  goto out;
-fail:
-  rcl_report_write_failure( error, write_error );
-out:
-  rcl_file_snapshot_clear( &x11 );
-  return ok;
-}
-
-static gboolean
-rcl_write_vconsole_x11_files( const gchar *keymap, const gchar *keymap_toggle,
-                              const gchar *layout, const gchar *model,
-                              const gchar *variant, const gchar *options,
-                              GError **error )
-{
-  RclFileSnapshot vc = { 0 }, toggle = { 0 };
-  GError *write_error = NULL, *rollback_error = NULL;
-  gboolean keymap_written = FALSE, toggle_written = FALSE, ok = FALSE;
-
-  if( !rcl_file_snapshot_take( &vc, RCL_RC_KEYMAP_FILE, &write_error ) ||
-      !rcl_file_snapshot_take( &toggle, RCL_RC_KEYMAP_TOGGLE_FILE, &write_error ) )
-    goto fail;
-  if( !rcl_write_rc_keymap( RCL_RC_KEYMAP_FILE, keymap, &write_error ) )
-    goto fail;
-  keymap_written = TRUE;
-  if( !rcl_write_rc_keymap_toggle( RCL_RC_KEYMAP_TOGGLE_FILE,
-                                   keymap_toggle, &write_error ) )
-    goto rollback;
-  toggle_written = TRUE;
-  if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE, layout, model,
-                                variant, options, &write_error ) )
-    goto rollback;
-  ok = TRUE;
-  goto out;
 rollback:
-  if( toggle_written && !rcl_file_snapshot_restore( &toggle, &rollback_error ) )
-    rcl_report_rollback_failure( &write_error, rollback_error );
-  rollback_error = NULL;
-  if( keymap_written && !rcl_file_snapshot_restore( &vc, &rollback_error ) )
-    rcl_report_rollback_failure( &write_error, rollback_error );
-fail:
-  rcl_report_write_failure( error, write_error );
+  while (i > 0)
+  {
+    GError *rollback_error = NULL;
+    RclKeyboardWrite *file = &files[--i];
+    if (file->changed &&
+        !rcl_file_snapshot_restore(&file->snapshot, &rollback_error))
+      rcl_report_rollback_failure(&write_error, rollback_error);
+  }
 out:
-  rcl_file_snapshot_clear( &vc );
-  rcl_file_snapshot_clear( &toggle );
+  if (!ok)
+    rcl_report_write_failure(error, write_error);
+  for (i = 0; i < count; i++)
+    rcl_file_snapshot_clear(&files[i].snapshot);
   return ok;
+}
+
+static gboolean
+write_x11_keyboard_conf(const gchar *path,
+    const gchar *layout, const gchar *model, const gchar *variant,
+    const gchar *options, GError **error)
+{
+  g_autoptr(GString) x11 = rcl_render_x11_keyboard(layout, model, variant, options);
+  RclKeyboardWrite files[] = {
+    { .path = path, .contents = x11, .mode = 0644 }
+  };
+  return rcl_commit_keyboard_files(files, G_N_ELEMENTS(files), error);
+}
+
+static GString *
+rcl_render_toggle(const gchar *toggle)
+{
+  if (!toggle || !*toggle)
+    return NULL;
+  GString *out = g_string_new(toggle);
+  g_string_append_c(out, '\n');
+  return out;
+}
+
+static gboolean
+rcl_write_vconsole_files(const gchar *keymap, const gchar *keymap_toggle,
+                         GError **error)
+{
+  g_autoptr(GString) vc = rcl_render_rc_keymap(keymap);
+  g_autoptr(GString) toggle = rcl_render_toggle(keymap_toggle);
+  RclKeyboardWrite files[] = {
+    { .path = RCL_RC_KEYMAP_FILE, .contents = vc, .mode = 0755 },
+    { .path = RCL_RC_KEYMAP_TOGGLE_FILE, .contents = toggle, .mode = 0644 }
+  };
+  return rcl_commit_keyboard_files(files, G_N_ELEMENTS(files), error);
+}
+
+static gboolean
+rcl_write_x11_vconsole_files(const gchar *layout, const gchar *model,
+    const gchar *variant, const gchar *options, const gchar *keymap,
+    GError **error)
+{
+  g_autoptr(GString) x11 = rcl_render_x11_keyboard(layout, model, variant, options);
+  g_autoptr(GString) vc = rcl_render_rc_keymap(keymap);
+  RclKeyboardWrite files[] = {
+    { .path = RCL_X11_KEYBOARD_FILE, .contents = x11, .mode = 0644 },
+    { .path = RCL_RC_KEYMAP_FILE, .contents = vc, .mode = 0755 }
+  };
+  return rcl_commit_keyboard_files(files, G_N_ELEMENTS(files), error);
+}
+
+static gboolean
+rcl_write_vconsole_x11_files(const gchar *keymap, const gchar *keymap_toggle,
+    const gchar *layout, const gchar *model, const gchar *variant,
+    const gchar *options, GError **error)
+{
+  g_autoptr(GString) vc = rcl_render_rc_keymap(keymap);
+  g_autoptr(GString) toggle = rcl_render_toggle(keymap_toggle);
+  g_autoptr(GString) x11 = rcl_render_x11_keyboard(layout, model, variant, options);
+  RclKeyboardWrite files[] = {
+    { .path = RCL_RC_KEYMAP_FILE, .contents = vc, .mode = 0755 },
+    { .path = RCL_RC_KEYMAP_TOGGLE_FILE, .contents = toggle, .mode = 0644 },
+    { .path = RCL_X11_KEYBOARD_FILE, .contents = x11, .mode = 0644 }
+  };
+  return rcl_commit_keyboard_files(files, G_N_ELEMENTS(files), error);
 }
 
 /* --------------------------------------------------------------------------

@@ -454,6 +454,8 @@ get_locale_string_property ( Fixture *fixture,
   return result;
 }
 
+static void assert_locale_file_unchanged(const gchar *path, const GStatBuf *before);
+
 static void
 test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
 {
@@ -559,6 +561,29 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
   g_assert_no_error(error);
   g_assert_nonnull(strstr(contents, "Option \"XkbLayout\" \"gb\""));
   g_free(contents);
+
+  /* A repeated authorized conversion must not rename either file. */
+  {
+    GStatBuf vc_stat, x11_stat;
+    g_assert_cmpint(g_stat(RCL_RC_KEYMAP_FILE, &vc_stat), ==, 0);
+    g_assert_cmpint(g_stat(expected_path, &x11_stat), ==, 0);
+    rcl_locale_test_fail_rename_to(expected_path);
+    polkit_fixture.client_done = FALSE;
+    polkit_fixture.check_seen = FALSE;
+    g_clear_error(&polkit_fixture.client_error);
+    g_dbus_connection_call(
+      fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+      "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetVConsoleKeyboard",
+      g_variant_new("(ssbb)", "uk", "", TRUE, TRUE),
+      NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+      polkit_client_call_done, &polkit_fixture);
+    iterate_until(&polkit_fixture, polkit_condition, 5000);
+    rcl_locale_test_fail_rename_to(NULL);
+    g_assert_true(polkit_fixture.check_seen);
+    g_assert_no_error(polkit_fixture.client_error);
+    assert_locale_file_unchanged(RCL_RC_KEYMAP_FILE, &vc_stat);
+    assert_locale_file_unchanged(expected_path, &x11_stat);
+  }
 
   /*
    * Do not use call_sync() here: the daemon's object is dispatched by this

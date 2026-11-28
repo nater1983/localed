@@ -34,4 +34,8 @@ gboolean rcl_gnome_backend_get_active_session(RclGnomeBackend *self,
                                                gchar **session_type,
                                                gchar **desktop);
 
+#ifdef RCL_BACKEND_TESTING
+void rcl_gnome_backend_test_observe(const gchar *line);
+#endif
+
 G_END_DECLS

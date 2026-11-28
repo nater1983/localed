@@ -8,7 +8,7 @@ All notable changes to `localed` are documented in this file.
 - Remove the Plasma 6 plasma-localerc monitor and self-issued SetLocale
   requests; per-user Plasma locale settings no longer trigger system locale
   updates through this backend.
-- Retain Plasma keyboard input-source discovery and synchronization.
+- Retain Plasma keyboard input-source discovery.
 - Share the snapshot-based locale writer between SetLocale and UpdateLocale;
   skip byte-identical outputs and preserve existing literal assignments in
   place when unchanged. Avoid rolling back an untouched locale file.
@@ -28,6 +28,10 @@ All notable changes to `localed` are documented in this file.
 - Install the corrected rule at the existing vendor path so upgrades
   replace the former passwordless rule. Guard against packaging a rule
   granting unconditional YES.
+- Make GNOME and Plasma keyboard backends observation-only; remove the
+  internal keyboard setters that bypassed caller-based authorization.
+- Share snapshot-based keyboard transactions, skip byte-identical writes,
+  and roll back only modified files on failure.
 
 ### Tests
 - Remove obsolete Plasma locale-parser tests; retain keyboard snapshot,
@@ -44,7 +48,10 @@ All notable changes to `localed` are documented in this file.
   Phase 4 Slackware regression suite: 5/5 passed.
 - Verify both Polkit actions retain their authentication defaults, the
   generated rule requires administrator authentication, and the Meson
-  manifest installs both policy and rule. Phase 5 testing pending.
+  manifest installs both policy and rule. Phase 5 Slackware regression
+  suite: 6/6 passed.
+- Cover read-only backend observation, absent configuration files and
+  repeated keyboard requests. Phase 6 testing pending.
 
 ## [0.3.2] - 2026-11-28
 

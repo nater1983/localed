@@ -24,7 +24,7 @@ The daemon follows the same general service pattern as
 - Does not require systemd; it uses D-Bus and a logind-compatible session
   manager for desktop session discovery.
 
-The Plasma 6 input-source backend handles keyboard settings only. It does
+The Plasma 6 input-source backend observes keyboard settings only. It does
 not monitor `~/.config/plasma-localerc` or copy a user's locale preferences
 to the system-wide locale scripts. Plasma continues to manage its own
 per-user locale preferences.
@@ -190,9 +190,8 @@ vendor rules. Do not remove unrelated administrator-managed rules under
 `/etc/polkit-1`.
 
 The `privileged-group` build option configures the vendor authentication
-rule and the AccountsService bridge. Desktop backend internal keyboard
-writes and AccountsService synchronization are unchanged by this
-authorization correction.
+rule and the AccountsService bridge. Desktop keyboard observation does not bypass Polkit or write system defaults.
+AccountsService synchronization remains unchanged.
 
 ## Desktop input-source integration
 
@@ -215,17 +214,10 @@ When enabled, the GNOME backend:
 - Locates and connects to that user's GNOME session bus.
 - Reads the GNOME input-source settings through GSettings.
 - Monitors changes to the GNOME input-source list and active source.
-- Synchronizes the complete GNOME XKB layout, variant, and options list to
-  the configured Xorg keyboard file.
-- Synchronizes the active GNOME source to Slackware's console keymap when a
-  matching console keymap mapping is available.
+- Validates and logs per-user XKB layout, variant and options snapshots.
 
-The complete XKB layout list and the active console keymap are deliberately
-handled separately. For example, if GNOME has `us` and `es` configured
-but `us` is active, the Xorg configuration contains `us,es` while
-`rc.keymap` uses `us`. Switching the active GNOME source to `es` changes
-the console keymap to `es` without removing either XKB layout from the
-Xorg configuration.
+Switching the active GNOME layout or changing its input-source list does
+not change system keyboard defaults. GNOME manages its own session layout.
 
 The GNOME backend is compiled into `localed`; its session settings reader
 is compiled into the shared `localed-input-sources-helper` executable.
@@ -255,10 +247,13 @@ field is **not** an XKB variant. The helper reads `VariantList` and
 with the ordered layout list.
 
 The helper monitors KWin's `layoutChanged` and `layoutListChanged` signals.
-Active-layout changes update the Slackware console keymap, while layout-list
-changes refresh the complete XKB layout, variant, and options configuration
-in the configured Xorg keyboard file. The existing XKB validation and
-console-keymap mapping are reused.
+These signals refresh the observed per-user snapshot only. Plasma manages
+the session layout itself; neither the console keymap nor Xorg system
+defaults are changed by backend observation.
+
+System defaults are written only through authorized `SetVConsoleKeyboard`
+or `SetX11Keyboard` calls, including their optional conversion. Repeated
+byte-identical configuration requests skip writes.
 
 As with GNOME, the Plasma-specific reader is compiled into the single
 `localed-input-sources-helper` executable. No separate Plasma helper binary
