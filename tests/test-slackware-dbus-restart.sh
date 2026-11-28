@@ -105,7 +105,7 @@ start_bus
 # a PTY so --debug messages are captured in the typescript for assertions.
 # Exercise --replace as a one-time startup instruction. Once locale1 is
 # acquired, the daemon must reconnect normally after the bus restarts.
-script -q -f -e -c "exec \"$LOCALed\" --debug --replace" "$log" &
+script -q -f -e -c "exec \"$LOCALed\" --debug --replace --no-desktop-companion" "$log" &
 script_pid=$!
 i=0
 while [ -z "$localed_pid" ]; do

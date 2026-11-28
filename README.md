@@ -25,6 +25,33 @@ The daemon follows the same general service pattern as
 Desktop integration is maintained separately in the [localed-desktop source tree](https://github.com/nater1983/localed-desktop).
 It is not part of the core daemon.
 
+### Optional desktop companion
+
+After acquiring the locale1 bus name, `localed` checks its configured
+libexec directory for `localed-input-sources-helper` (normally
+`/usr/libexec/localed-input-sources-helper`), provided by the separate
+localed-desktop package. If installed as a trusted root-owned
+executable in a root-owned, non-writable-by-other-users directory tree,
+localed starts it in observation-only mode. It does not search PATH or
+follow symbolic links in that path. If the executable is absent, unsafe,
+or fails to launch, the core locale1 service continues normally. No
+restart timer is scheduled if the companion exits; detection is repeated
+on the next locale1 ownership acquisition or daemon restart.
+
+The core stops its owned companion on shutdown or loss of locale1 ownership.
+The installed helper is a single executable: the core starts it with
+`--managed-companion`, and it invokes itself with `--session-worker`
+after dropping to the verified desktop session user. Desktop selection
+and worker lifecycle remain in the companion package. No desktop build or
+runtime dependencies are added to localed.
+
+To disable automatic companion startup, launch localed with
+`--no-desktop-companion`. Do not run an independently managed companion at
+the same time as the automatically started one. Automatic discovery does
+not enable synchronization of personal desktop settings to system defaults.
+Upgrade or remove legacy integrated input-sources helpers before using
+this feature; older binaries with the same name are not compatible.
+
 ## Dependencies
 
 | Library / service | pkg-config name | Minimum version / requirement |

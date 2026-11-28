@@ -58,3 +58,17 @@ xkb_config_test = executable(
 
 test('Xorg XKB configuration parsing', xkb_config_test)
 
+
+# Exercise companion launch and cleanup without using the installed binary.
+desktop_companion_test = executable(
+  'test-desktop-companion',
+  [
+    'test-desktop-companion.c',
+    '../src/rcl-desktop-companion.c',
+  ],
+  dependencies        : [glib_dep, gio_dep],
+  include_directories : include_directories('../src'),
+  c_args              : ['-DRCL_DESKTOP_COMPANION_TESTING'],
+)
+
+test('optional desktop companion lifecycle', desktop_companion_test, timeout : 15)
