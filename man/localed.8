@@ -4,7 +4,7 @@
 localed \- D-Bus locale and keyboard management daemon for non-systemd Linux systems
 .SH SYNOPSIS
 .B /usr/libexec/localed
-.RB [ \-\-replace ] [ \-\-verbose ] [ \-\-debug ]
+.RB [ \-\-replace ] [ \-\-verbose ] [ \-\-debug ] [ \-\-no-desktop-companion ]
 .SH DESCRIPTION
 .B localed
 is a standalone system daemon that implements the
@@ -35,10 +35,21 @@ is normally started on demand by D-Bus activation when a client first
 calls a method or reads a property on the
 .B org.freedesktop.locale1
 bus name. It can also be started manually for debugging.
+.PP
+After acquiring locale1, localed optionally starts the standalone
+.B localed-desktop
+executable from its configured libexec directory in observation-only mode.
+If absent or unavailable, core operation continues normally. The owned
+companion is stopped on name loss or shutdown; there is no automatic
+respawn loop. Desktop-specific helpers remain the responsibility of the
+companion package.
 .SH OPTIONS
 .TP
 .B \-\-debug
 Enable verbose debug logging to standard error in addition to syslog.
+.TP
+.B \-\-no-desktop-companion
+Do not discover or start the optional desktop companion.
 .SH "D-BUS INTERFACE"
 .B localed
 registers the object
