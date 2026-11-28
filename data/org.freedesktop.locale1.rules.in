@@ -1,0 +1,16 @@
+// Localed vendor authorization rule. Membership is not authorization:
+// active local callers may retain administrator authentication temporarily;
+// inactive or remote callers require administrator authentication.
+polkit.addRule(
+  function(action, subject) {
+    if ((action.id == "org.freedesktop.locale1.set-locale" ||
+         action.id == "org.freedesktop.locale1.set-keyboard") &&
+        subject.isInGroup("@PRIVILEGED_GROUP@")) {
+      if (subject.local && subject.active) {
+        return polkit.Result.AUTH_ADMIN_KEEP;
+      }
+      return polkit.Result.AUTH_ADMIN;
+    }
+    // Leave other subjects and actions to the configured Polkit policy.
+  }
+);

@@ -244,7 +244,8 @@ so PolKit may display an authentication prompt when needed. Authorization
 is determined by the PolKit policy and any administrator rules. The
 shipped policy requires administrator authentication unless already
 authorized; active local sessions may retain temporary authorization.
-Localed installs no unconditional wheel authorization rule. The status command
+Localed installs a vendor rule requiring administrator authentication for
+members of the configured privileged group. The status command
 also reads the D-Bus properties. The list commands only enumerate locally
 installed data and do not require elevated privileges.
 .SH FILES

@@ -21,11 +21,13 @@ All notable changes to `localed` are documented in this file.
   and variables present only in lang.csh are preserved.
 - Apply complete SetLocale replacements to both scripts without a
   shell-specific LC_COLLATE default.
-- Remove the unconditional privileged-group Polkit rule for public locale
-  and keyboard requests; retain the existing auth_admin/auth_admin_keep
-  policy defaults. The privileged-group option remains for AccountsService.
-- Prevent the obsolete vendor rule from entering the Slackware package and
-  document cleanup for previous manual installations.
+- Retain the privileged-group Polkit rule for public locale and keyboard
+  requests, but replace unconditional YES with auth_admin_keep for active
+  local sessions and auth_admin otherwise. Other callers fall through to
+  the existing policy defaults. Preserve the configured group option.
+- Install the corrected rule at the existing vendor path so upgrades
+  replace the former passwordless rule. Guard against packaging a rule
+  granting unconditional YES.
 
 ### Tests
 - Remove obsolete Plasma locale-parser tests; retain keyboard snapshot,
@@ -40,9 +42,9 @@ All notable changes to `localed` are documented in this file.
 - Cover conflicting locale values, unique companion assignments, explicit
   removals, denied reconciliation, missing-file recovery and no-op updates.
   Phase 4 Slackware regression suite: 5/5 passed.
-- Verify both Polkit actions retain their authentication defaults and the
-  Meson installation manifest excludes the obsolete rule. Phase 5 testing
-  pending.
+- Verify both Polkit actions retain their authentication defaults, the
+  generated rule requires administrator authentication, and the Meson
+  manifest installs both policy and rule. Phase 5 testing pending.
 
 ## [0.3.2] - 2026-11-28
 

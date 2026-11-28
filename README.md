@@ -176,23 +176,23 @@ install a separately named GNOME helper.
 ### Authorization and upgrading
 
 The shipped Polkit policy uses `auth_admin` for inactive and remote
-callers and `auth_admin_keep` for active local callers. Authentication
-may be cached temporarily by Polkit. Group membership alone does not
-authorize locale1 D-Bus configuration requests through localed.
+callers and `auth_admin_keep` for active local callers. The vendor rule
+at `/usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules` explicitly
+applies the same requirements to members of the configured privileged
+group (default: `wheel`). Other callers fall through to Polkit policy.
+Group membership alone does not authorize a request; Polkit may
+temporarily retain administrator authentication for active local sessions.
 
-The former vendor rule
-`/usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules` is no longer
-installed. When upgrading a Slackware package with `upgradepkg`, the
-obsolete file is removed if it was owned exclusively by the old package.
-For an earlier manual installation, inspect the old rule under the
-installation prefix and remove it if it is the former localed vendor
-rule. A new Meson installation does not uninstall old files. Do not
-remove unrelated or administrator-managed rules under `/etc/polkit-1`.
+Package upgrades and manual installs using the same prefix replace the
+previous passwordless vendor rule at its existing path. If an older
+installation used a different prefix, inspect any remaining duplicate
+vendor rules. Do not remove unrelated administrator-managed rules under
+`/etc/polkit-1`.
 
-The `privileged-group` build option remains for the AccountsService
-bridge only; it does not configure a Polkit authorization bypass.
-Desktop backend internal keyboard writes and AccountsService
-synchronization are not changed by this authorization correction.
+The `privileged-group` build option configures the vendor authentication
+rule and the AccountsService bridge. Desktop backend internal keyboard
+writes and AccountsService synchronization are unchanged by this
+authorization correction.
 
 ## Desktop input-source integration
 

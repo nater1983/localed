@@ -60,8 +60,22 @@ install_data(
   install_dir : polkit_policy_dir,
 )
 
+rules_conf = configuration_data()
+rules_conf.set('PRIVILEGED_GROUP', get_option('privileged-group'))
+
+polkit_rules_dir = join_paths(prefix, datadir, 'polkit-1', 'rules.d')
+
+configure_file(
+  input         : 'org.freedesktop.locale1.rules.in',
+  output        : 'org.freedesktop.locale1.rules',
+  configuration : rules_conf,
+  install       : true,
+  install_dir   : polkit_rules_dir,
+)
+
 summary({
   'D-Bus service dir' : dbus_service_dir,
   'D-Bus conf dir'    : dbus_conf_dir,
   'polkit policy dir' : polkit_policy_dir,
+  'polkit rules dir'  : polkit_rules_dir,
 }, section : 'Data files')

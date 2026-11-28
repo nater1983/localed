@@ -2,6 +2,7 @@
 """Verify the shipped policy and configured installation manifest."""
 
 import json
+import re
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
@@ -30,6 +31,18 @@ with (build / "meson-info" / "intro-installed.json").open(encoding="utf-8") as f
 
 destinations = [Path(path).name for path in installed.values()]
 assert "org.freedesktop.locale1.policy" in destinations, "policy missing from install"
-assert "org.freedesktop.locale1.rules" not in destinations, "obsolete rule installed"
-assert not (source / "data" / "org.freedesktop.locale1.rules.in").exists()
-print("Polkit authentication defaults and installation manifest verified.")
+assert "org.freedesktop.locale1.rules" in destinations, "vendor rule missing from install"
+
+rule = (build / "data" / "org.freedesktop.locale1.rules").read_text(
+    encoding="utf-8"
+)
+assert "@PRIVILEGED_GROUP@" not in rule, "group placeholder not configured"
+assert set(re.findall(r'action\.id\s*==\s*"([^"]+)"', rule)) == expected_ids
+assert re.search(r'subject\.isInGroup\("[^"]+"\)', rule)
+assert re.search(r'if\s*\(subject\.local\s*&&\s*subject\.active\)\s*\{\s*'
+                 r'return polkit\.Result\.AUTH_ADMIN_KEEP;', rule)
+assert set(re.findall(r'return\s+polkit\.Result\.(\w+)\s*;', rule)) == {
+    "AUTH_ADMIN_KEEP", "AUTH_ADMIN"
+}
+assert not re.search(r'polkit\.Result\.YES\b', rule)
+print("Polkit authentication defaults, vendor rule and install manifest verified.")

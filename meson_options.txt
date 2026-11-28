@@ -47,7 +47,7 @@ option(
   'privileged-group',
   type        : 'string',
   value       : 'wheel',
-  description : 'Group eligible for AccountsService language synchronization',
+  description : 'Group matched by the Polkit authentication rule and AccountsService bridge',
 )
 
 option(

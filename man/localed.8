@@ -214,18 +214,21 @@ The policy defaults require
 .B auth_admin
 for inactive or remote callers and
 .B auth_admin_keep
-for an active local session. PolKit may temporarily retain an
-authorization. Localed no longer installs a rule that grants
-unconditional authorization based on group membership. Site-specific
-administrator rules may still affect the effective policy.
-.PP
-When upgrading a manual installation, inspect and remove the obsolete
-vendor rule from the old installation prefix if it is the former
-localed rule. Normal Slackware package upgrades remove obsolete
-package-owned files. Administrator-managed rules are not removed.
-The
+for an active local session. The installed vendor rule explicitly
+applies these same requirements to members of the group configured by the
 .B privileged-group
-meson option applies only to the AccountsService bridge.
+meson option (default
+.BR wheel ).
+Other callers fall through to PolKit policy. Group membership alone
+does not grant authorization. PolKit may temporarily retain an
+authorization; site-specific administrator rules may affect the
+effective policy.
+.PP
+Package upgrades and manual installations at the same prefix replace
+the previous passwordless vendor rule. Inspect any duplicate vendor
+rules from earlier installations at different prefixes. Administrator
+rules are not removed. The privileged group is also used by the
+AccountsService bridge.
 .PP
 These PolKit actions govern D-Bus callers, including the bundled
 .BR localectl (1)
@@ -303,6 +306,10 @@ is called.
 .TP
 .I /usr/share/polkit-1/actions/org.freedesktop.locale1.policy
 PolKit action declarations and default authorization requirements.
+.TP
+.I /usr/share/polkit-1/rules.d/org.freedesktop.locale1.rules
+Vendor rule requiring administrator authentication for the configured
+privileged group, with temporary authorization for active local sessions.
 .SH "SEE ALSO"
 .BR localectl (1),
 .BR polkit (8),
