@@ -118,24 +118,15 @@ May be empty.
 .SS Methods
 .TP
 .B SetLocale(as locale, b interactive)
-Replaces the complete set of system locale assignments in
-.IR /etc/profile.d/lang.sh .
-Each element of
-.I locale
-must be of the form
-.IR KEY = value ,
-where
-.I KEY
-is one of the fourteen known locale variable names and
-.I value
-uses only ASCII alphanumeric characters, underscore, period, hyphen,
-at sign, colon, and comma, with a maximum length of 256 bytes.
-An empty
-.I value
-removes that key from lang.sh. The legacy C-shell writer retains its
-LC_COLLATE=C default. Use UpdateLocale for partial updates and explicit
-removal from both scripts. Unknown keys cause the entire call to
-fail. Requires the
+Merges the supplied nonempty locale assignments with the existing system
+locale. The daemon derives LANGUAGE from an incoming LANG when applicable
+and removes redundant variables equal to LANG, matching systemd v262
+merge and simplification behavior.
+A single bare locale is interpreted as LANG. Unknown or duplicate keys
+and empty or syntactically invalid values cause the entire call to fail.
+Both Slackware scripts are updated transactionally. Use UpdateLocale for
+explicit removal or LANGUAGE priority lists.
+Requires the
 .B org.freedesktop.locale1.set-locale
 PolKit action.
 .TP
@@ -144,7 +135,6 @@ Localed extension to change only explicitly named locale assignments.
 Omitted variables remain unchanged. Empty values remove the named
 assignment from both shell scripts. Invalid, duplicate or empty requests
 are rejected. Requires the same PolKit action as SetLocale.
-The standard SetLocale replacement semantics remain unchanged.
 .TP
 .B SetVConsoleKeyboard(s keymap, s keymap_toggle, b convert, b interactive)
 Writes

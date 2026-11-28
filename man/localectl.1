@@ -18,14 +18,15 @@ system D-Bus service to query and change locale and keyboard settings.
 Configuration changes are sent to
 .B localed
 using the
+.B SetLocale,
 .B UpdateLocale,
 .B SetVConsoleKeyboard,
 and
 .B SetX11Keyboard
 methods. The daemon validates and persists the settings, performs
 PolKit authorization, and emits property-change signals.
-The client and daemon must both support UpdateLocale for partial locale
-updates; upgrade them together.
+Upgrade the client and daemon together. Explicit removals and LANGUAGE
+priority lists use the localed-specific UpdateLocale extension.
 .PP
 Changing settings does not require running
 .B localectl
@@ -65,10 +66,12 @@ metacharacters have no special meaning. For example,
 narrows the output to en_US locales only.
 Does not require root.
 .TP
-.BI set-locale " KEY=value [KEY=value ...]"
-Update only the named system locale variables. Existing omitted variables
-remain unchanged. Empty values remove the named assignments from both
-locale scripts.
+.BI set-locale " LOCALE | KEY=value [KEY=value ...]"
+Merge named system locale variables through SetLocale. A bare locale is
+interpreted as LANG. LANGUAGE fallback and redundant-value simplification
+follow upstream behavior. Empty assignments and LANGUAGE priority lists
+select UpdateLocale for the entire request; that extension changes only
+named variables and preserves other assignments.
 .I KEY
 must be one of
 .BR LANG ,
