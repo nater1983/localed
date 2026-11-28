@@ -4,6 +4,12 @@ All notable changes to `localed` are documented in this file.
 
 ## [0.4.0] - Unreleased
 
+### Removed — Desktop integration extraction
+- Move GNOME, Plasma 6 and AccountsService integration into the separate localed-desktop project source tree.
+- Remove automatic account and desktop-to-system synchronization, session discovery, input-source helpers and the desktop-backend build option from the core daemon.
+- Retain the locale1 D-Bus interface, authorization, native configuration, transaction handling and 0.3.2 maintenance fixes.
+- Keep duplicate-write regression coverage through authorized locale1 calls instead of the internal AccountsService setter.
+
 ### Fixed
 - Forward-port 0.3.2 partial system locale updates through the authorized UpdateLocale D-Bus extension and localectl unset-locale, preserving standard SetLocale replacement semantics.
 - Retain unrelated assignments in both Slackware locale scripts, with transactional rollback and missing-companion recovery.

@@ -1808,47 +1808,6 @@ do_set_locale( RclLocaleDaemon *daemon, gchar **locale,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
-/*
- * Apply a GNOME AccountsService language update without making a recursive
- * D-Bus call to our own locale1 service. The bridge in main.c has already
- * checked the affected user's membership in PRIVILEGED_GROUP.
- *
- * Match SetLocale semantics: replace the system locale assignments with LANG,
- * and apply the same LANGUAGE fallback when the selected value has a mapping.
- */
-gboolean
-rcl_locale_daemon_set_language_from_accounts( RclLocaleDaemon *daemon,
-                                              const gchar *language,
-                                              GError **error )
-{
-  const gchar *known_keys[3] = { "LANG", NULL, NULL };
-  const gchar *new_values[3] = { language, NULL, NULL };
-  const gchar *fallback;
-
-  if (!language || !rcl_locale_value_is_safe(language))
-  {
-    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                        _("Invalid locale value from AccountsService"));
-    return FALSE;
-  }
-
-  fallback = rcl_find_language_fallback(language);
-  if (fallback)
-  {
-    known_keys[1] = "LANGUAGE";
-    new_values[1] = fallback;
-  }
-
-  if (!rcl_write_locale_files(known_keys, new_values, error))
-  {
-    rcl_daemon_sync_dbus_properties(daemon);
-    return FALSE;
-  }
-
-  rcl_daemon_sync_dbus_properties(daemon);
-  return TRUE;
-}
-
 static void
 do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
                           const gchar *keymap, const gchar *keymap_toggle,
@@ -1987,72 +1946,6 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
   g_dbus_method_invocation_return_value( invocation, NULL );
 }
 
-#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
-/* Trusted in-process keyboard entry points used by the GNOME input-source
- * backend. Public D-Bus requests continue through authorized D-Bus handlers. */
-gboolean
-rcl_locale_daemon_set_vconsole_keyboard_internal(
-    RclLocaleDaemon *daemon,
-    const gchar *keymap,
-    const gchar *keymap_toggle,
-    GError **error)
-{
-  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), FALSE);
-  g_return_val_if_fail(keymap != NULL, FALSE);
-  g_return_val_if_fail(keymap_toggle != NULL, FALSE);
-
-  if ((keymap[0] != '\0' && !rcl_keyboard_value_is_safe(keymap)) ||
-      (keymap_toggle[0] != '\0' &&
-       !rcl_keyboard_value_is_safe(keymap_toggle)))
-  {
-    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                        _("Invalid console keyboard configuration value"));
-    return FALSE;
-  }
-
-  if (!rcl_write_vconsole_files(keymap, keymap_toggle, error))
-  {
-    rcl_daemon_sync_dbus_properties(daemon);
-    return FALSE;
-  }
-
-  rcl_daemon_sync_dbus_properties(daemon);
-  return TRUE;
-}
-
-gboolean
-rcl_locale_daemon_set_x11_keyboard_internal(
-    RclLocaleDaemon *daemon,
-    const gchar *layout,
-    const gchar *model,
-    const gchar *variant,
-    const gchar *options,
-    GError **error)
-{
-  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), FALSE);
-  g_return_val_if_fail(layout != NULL, FALSE);
-  g_return_val_if_fail(model != NULL, FALSE);
-  g_return_val_if_fail(variant != NULL, FALSE);
-  g_return_val_if_fail(options != NULL, FALSE);
-
-  if (!rcl_x11_keyboard_values_are_valid(layout, model, variant, options))
-  {
-    g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                        _("Invalid X11 keyboard configuration value"));
-    return FALSE;
-  }
-
-  if (!write_x11_keyboard_conf(RCL_X11_KEYBOARD_FILE, layout, model,
-                               variant, options, error))
-  {
-    rcl_daemon_sync_dbus_properties(daemon);
-    return FALSE;
-  }
-
-  rcl_daemon_sync_dbus_properties(daemon);
-  return TRUE;
-}
-#endif /* HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND */
 
 /* ---- asynchronous PolicyKit D-Bus authorization ---- */
 

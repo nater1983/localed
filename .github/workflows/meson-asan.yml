@@ -12,10 +12,6 @@ on:
 jobs:
   meson-asan:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        desktop-backend: [none, gnome, plasma6]
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +37,6 @@ jobs:
           meson setup build-asan \
             --buildtype=debug \
             -Db_sanitize=address,undefined \
-            -Ddesktop-backend=${{ matrix.desktop-backend }} \
             -Dtests=true \
             -Dlang_sh="$RUNNER_TEMP/localed-test-config/lang.sh" \
             -Drc_keymap="$RUNNER_TEMP/localed-test-config/rc.keymap" \

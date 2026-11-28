@@ -51,14 +51,6 @@ option(
 )
 
 option(
-  'desktop-backend',
-  type        : 'combo',
-  choices     : ['none', 'gnome', 'plasma6'],
-  value       : 'none',
-  description : 'Desktop integration backend to build',
-)
-
-option(
   'tests',
   type        : 'boolean',
   value       : false,

@@ -34,13 +34,6 @@
 #include <locale.h>
 
 #include "rcl-locale.h"
-#include "backends/backend-interface.h"
-#if HAVE_GNOME_BACKEND
-#include "backends/gnome/gnome-backend.h"
-#elif HAVE_PLASMA6_BACKEND
-#include "backends/plasma6/plasma6-backend.h"
-#endif
-#include "rcl-accounts-service.h"
 
 #define LOCALE_SERVICE_NAME  "org.freedesktop.locale1"
 
@@ -81,10 +74,6 @@ typedef struct RclState
   gboolean    reconnecting;
   gboolean    exiting;
   guint       sync_id;
-  RclAccountsService *accounts_service;
-#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
-  RclBackend *backend;
-#endif
 } RclState;
 
 /* ───────────────────────────────────────────── */
@@ -104,10 +93,6 @@ rcl_state_free(RclState *state)
     state->reconnect_id = 0;
   }
 
-#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
-  g_clear_object(&state->backend);
-#endif
-  g_clear_object(&state->accounts_service);
 
   if (state->watch_id)
   {
@@ -249,12 +234,6 @@ rcl_main_name_acquired(GDBusConnection *connection,
 
   state->has_name = TRUE;
 
-#if HAVE_GNOME_BACKEND || HAVE_PLASMA6_BACKEND
-  /* Start the selected desktop backend only after locale1 is registered. */
-  if (state->backend &&
-      !rcl_backend_start(state->backend, NULL))
-    g_warning("could not start desktop backend session discovery");
-#endif
 
   /*
    * --replace controls the initial name request only.  Once this instance
@@ -641,23 +620,6 @@ gint main(gint argc, gchar **argv)
     g_clear_error(&error);
   }
 
-  /* AccountsService integration is managed independently from the daemon. */
-  state->accounts_service = rcl_accounts_service_new(
-      RCL_LOCALE_DAEMON(state->daemon));
-  if (!rcl_accounts_service_start(state->accounts_service, &error))
-  {
-    g_warning("could not start AccountsService integration: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
-  }
-
-#if HAVE_GNOME_BACKEND
-  state->backend =
-      rcl_gnome_backend_new(RCL_LOCALE_DAEMON(state->daemon));
-#elif HAVE_PLASMA6_BACKEND
-  state->backend =
-      rcl_plasma6_backend_new(RCL_LOCALE_DAEMON(state->daemon));
-#endif
 
   /* Acquire the D-Bus name for the first time */
   rcl_acquire_name(state);

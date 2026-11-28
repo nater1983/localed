@@ -14,7 +14,7 @@ localed: org.freedesktop.locale1 D-Bus interface as a drop-in
 localed: replacement for systemd-localed on systems without systemd.
 localed:
 localed: It supports PolKit authentication and manages Slackware locale
-localed: scripts, console keymaps, and X11 keyboard configuration. Optional
-localed: GNOME and KDE Plasma 6 input-source backends are available.
+localed: scripts, console keymaps, and X11 keyboard configuration.
+localed: Desktop preferences are not monitored by this service.
 localed:
 localed:
