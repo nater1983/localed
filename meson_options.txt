@@ -47,7 +47,7 @@ option(
   'privileged-group',
   type        : 'string',
   value       : 'wheel',
-  description : 'Group matched by the Polkit authentication rule and AccountsService bridge',
+  description : 'Group matched by the Polkit authentication rule',
 )
 
 option(

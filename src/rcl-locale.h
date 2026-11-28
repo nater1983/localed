@@ -131,8 +131,6 @@ GType rcl_locale_daemon_get_type ( void ) G_GNUC_CONST;
  * the initial property values.
  */
 void rcl_daemon_sync_dbus_properties ( RclLocaleDaemon *daemon );
-gboolean rcl_locale_daemon_set_language_from_accounts (
-    RclLocaleDaemon *daemon, const gchar *language, GError **error );
 #ifdef RCL_LOCALE_TESTING
 /* Inject a failure for the next matching configuration-file rename. */
 void rcl_locale_test_fail_rename_to ( const gchar *destination );

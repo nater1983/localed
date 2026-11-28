@@ -18,7 +18,7 @@ The daemon follows the same general service pattern as
 - Validates Xorg XKB configuration before accepting or reporting values.
 - Uses Polkit policy for public locale and keyboard configuration requests,
   without granting unconditional authorization to members of `wheel`.
-- Integrates with AccountsService when it is available at runtime.
+- Observes AccountsService per-user language changes without changing system defaults.
 - Provides optional desktop input-source integration through a build-time
   backend selection.
 - Does not require systemd; it uses D-Bus and a logind-compatible session
@@ -40,9 +40,9 @@ per-user locale preferences.
 
 The daemon is activated by `dbus-daemon` through D-Bus system-service
 activation (`[D-BUS Service]`). There is no systemd dependency.
-AccountsService integration is optional at runtime: `localed` monitors its
-D-Bus name and synchronizes account language changes when the service is
-available. No AccountsService development library is required.
+AccountsService observation is optional at runtime: `localed` monitors its
+D-Bus name and logs per-user language changes when the service is available.
+No AccountsService development library is required.
 
 The GNOME input-source backend uses GIO/GSettings and the GNOME session's
 D-Bus connection. It does not add a separate helper executable or a separate
@@ -190,8 +190,8 @@ vendor rules. Do not remove unrelated administrator-managed rules under
 `/etc/polkit-1`.
 
 The `privileged-group` build option configures the vendor authentication
-rule and the AccountsService bridge. Desktop keyboard observation does not bypass Polkit or write system defaults.
-AccountsService synchronization remains unchanged.
+rule. Desktop keyboard and AccountsService language observation do not
+bypass Polkit or write system defaults.
 
 ## Desktop input-source integration
 
@@ -341,9 +341,8 @@ The standard `SetLocale` D-Bus method retains its replacement semantics
 for both scripts without injecting a C-shell-only `LC_COLLATE` default;
 the bundled client uses the new `UpdateLocale` extension instead. Upgrade
 the daemon and client together; older daemons do not expose `UpdateLocale`.
-The Plasma locale-file monitor is no longer used. AccountsService language
-synchronization remains unchanged and may still replace regional locale
-settings.
+The Plasma locale-file monitor is no longer used. AccountsService per-user
+language notifications also leave system locale settings unchanged.
 
 ## Keyboard conversion
 
@@ -354,16 +353,18 @@ single-layout keymaps (`us`, `de`, `fr`, `gb`, `es`, `ru`, `se`,
 etc.). No conversion is attempted when no match is found, rather than
 guessing.
 
-## AccountsService integration
+## AccountsService observation
 
-When `org.freedesktop.Accounts` is available on the system bus, `localed`
-subscribes to account `Language` property changes and applies them for
-accounts in the configured privileged group (default: `wheel`). The
-monitor is optional and reconnects when AccountsService appears or restarts.
-Because D-Bus property-change signals do not identify the original caller,
-this integration cannot perform caller-based Polkit authorization. Other
-users should request system-wide changes through the
-`org.freedesktop.locale1` D-Bus methods, which are authorized by Polkit.
+When `org.freedesktop.Accounts` is available on the system bus, localed
+observes account `Language` property changes for diagnostic logging only.
+The monitor follows service appearance, disappearance and bus reconnection.
+It does not change system locale files or the locale1 system properties,
+regardless of account UID or group membership. AccountsService and desktop
+clients remain responsible for per-user language preferences.
+
+System locale changes require explicit, Polkit-authorized
+`SetLocale` or `UpdateLocale` calls. Property-change signals do not identify
+the original caller and cannot authorize a system update.
 
 ## Adding a translation
 

@@ -641,9 +641,8 @@ gint main(gint argc, gchar **argv)
     g_clear_error(&error);
   }
 
-  /* AccountsService integration is managed independently from the daemon. */
-  state->accounts_service = rcl_accounts_service_new(
-      RCL_LOCALE_DAEMON(state->daemon));
+  /* Observe AccountsService independently of the system locale daemon. */
+  state->accounts_service = rcl_accounts_service_new();
   if (!rcl_accounts_service_start(state->accounts_service, &error))
   {
     g_warning("could not start AccountsService integration: %s",

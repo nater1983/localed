@@ -1,7 +1,5 @@
 #include "config.h"
 #include <errno.h>
-#include <grp.h>
-#include <pwd.h>
 #include <gio/gio.h>
 #include "rcl-accounts-service.h"
 
@@ -11,39 +9,17 @@
 
 struct _RclAccountsService {
   GObject parent_instance;
-  RclLocaleDaemon *daemon;
   GDBusConnection *connection;
   guint watch_id;
   guint subscription_id;
   gulong connection_closed_id;
   guint reconnect_id;
   gboolean stopping;
+#ifdef RCL_LOCALE_TESTING
+  guint observed_languages;
+#endif
 };
 G_DEFINE_TYPE(RclAccountsService, rcl_accounts_service, G_TYPE_OBJECT)
-
-static gboolean uid_in_privileged_group(guint64 uid)
-{
-  struct passwd *pw;
-  struct group *gr;
-  gid_t *groups;
-  int ngroups = 16;
-  gboolean found = FALSE;
-  if (uid > G_MAXINT || !(pw = getpwuid((uid_t) uid)) ||
-      !(gr = getgrnam(PRIVILEGED_GROUP)))
-    return FALSE;
-  groups = g_new(gid_t, ngroups);
-  if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0) {
-    groups = g_renew(gid_t, groups, ngroups);
-    if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0) {
-      g_free(groups);
-      return FALSE;
-    }
-  }
-  for (int i = 0; i < ngroups; i++)
-    if (groups[i] == gr->gr_gid) { found = TRUE; break; }
-  g_free(groups);
-  return found;
-}
 
 static gboolean parse_uid(const gchar *text, guint64 *uid)
 {
@@ -68,32 +44,27 @@ static void properties_changed(GDBusConnection *connection, const gchar *sender,
   const gchar *changed_interface, *language;
   guint64 uid;
   GVariant *changed = NULL, *invalidated = NULL, *value = NULL;
-  GError *error = NULL;
-  if (!g_str_has_prefix(path, USER_PREFIX) ||
+  if (!path || !g_str_has_prefix(path, USER_PREFIX) ||
       g_strcmp0(interface, "org.freedesktop.DBus.Properties") ||
       g_strcmp0(signal, "PropertiesChanged"))
     return;
-  if (!parse_uid(path + strlen(USER_PREFIX), &uid)) return;
+  if (!parse_uid(path + strlen(USER_PREFIX), &uid) ||
+      !g_variant_is_of_type(parameters, G_VARIANT_TYPE("(sa{sv}as)")))
+    return;
   g_variant_get(parameters, "(&s@a{sv}@as)", &changed_interface, &changed, &invalidated);
   if (g_strcmp0(changed_interface, "org.freedesktop.Accounts.User")) goto out;
   value = g_variant_lookup_value(changed, "Language", G_VARIANT_TYPE_STRING);
   if (!value) goto out;
   language = g_variant_get_string(value, NULL);
   if (!*language || !g_utf8_validate(language, -1, NULL)) goto out;
-  /* Signals have no original caller credentials. This group check applies
-   * to the affected account and is not caller-based Polkit authorization. */
-  if (!uid_in_privileged_group(uid)) {
-    g_debug("ignoring AccountsService language change for uid %" G_GUINT64_FORMAT
-            ": account is not in group '%s'", uid, PRIVILEGED_GROUP);
-    goto out;
-  }
-  if (!rcl_locale_daemon_set_language_from_accounts(self->daemon, language, &error)) {
-    g_warning("AccountsService locale bridge: %s",
-              error ? error->message : "unknown error");
-    g_clear_error(&error);
-  } else {
-    g_debug("applied AccountsService language change");
-  }
+  /* A property notification describes a per-user preference, not an
+   * authorized request to change the machine's locale. Never write system
+   * defaults or change the locale1 property in response to this signal. */
+#ifdef RCL_LOCALE_TESTING
+  self->observed_languages++;
+#endif
+  g_debug("observed AccountsService language change for uid %" G_GUINT64_FORMAT
+          "; system locale unchanged", uid);
 out:
   g_clear_pointer(&value, g_variant_unref);
   g_clear_pointer(&changed, g_variant_unref);
@@ -269,7 +240,6 @@ static void rcl_accounts_service_dispose(GObject *object)
 {
   RclAccountsService *self = RCL_ACCOUNTS_SERVICE(object);
   rcl_accounts_service_stop(self);
-  g_clear_object(&self->daemon);
   G_OBJECT_CLASS(rcl_accounts_service_parent_class)->dispose(object);
 }
 static void rcl_accounts_service_class_init(RclAccountsServiceClass *klass)
@@ -278,11 +248,14 @@ static void rcl_accounts_service_class_init(RclAccountsServiceClass *klass)
 }
 static void rcl_accounts_service_init(RclAccountsService *self) { (void) self; }
 
-RclAccountsService *rcl_accounts_service_new(RclLocaleDaemon *daemon)
+RclAccountsService *rcl_accounts_service_new(void)
 {
-  RclAccountsService *self;
-  g_return_val_if_fail(RCL_IS_LOCALE_DAEMON(daemon), NULL);
-  self = g_object_new(RCL_TYPE_ACCOUNTS_SERVICE, NULL);
-  self->daemon = g_object_ref(daemon);
-  return self;
+  return g_object_new(RCL_TYPE_ACCOUNTS_SERVICE, NULL);
 }
+
+#ifdef RCL_LOCALE_TESTING
+guint rcl_accounts_service_test_observed_languages(RclAccountsService *self)
+{
+  return self->observed_languages;
+}
+#endif

@@ -227,8 +227,7 @@ effective policy.
 Package upgrades and manual installations at the same prefix replace
 the previous passwordless vendor rule. Inspect any duplicate vendor
 rules from earlier installations at different prefixes. Administrator
-rules are not removed. The privileged group is also used by the
-AccountsService bridge.
+rules are not removed. The privileged group is used by the vendor rule.
 .PP
 These PolKit actions govern D-Bus callers, including the bundled
 .BR localectl (1)
@@ -237,18 +236,16 @@ client. Its set and unset commands call the locale1 D-Bus methods with
 so an authentication agent may prompt when required. Its status command
 reads D-Bus properties; its list commands enumerate locally installed
 locale and keyboard data and do not change system configuration.
-.SS AccountsService integration
-When the system-bus name
+.SS AccountsService observation
+When
 .B org.freedesktop.Accounts
-is available,
-.B localed
-monitors account language-property changes and synchronizes the language
-for accounts belonging to the configured privileged group (default
-.BR wheel ). The integration is optional and follows AccountsService
-name appearance and disappearance. A PropertiesChanged signal does not
-identify its original caller, so this bridge cannot perform caller-based
-PolKit authorization. Other users must use the locale1 D-Bus methods,
-where PolKit evaluates the actual D-Bus caller.
+is available, localed observes per-user language-property notifications
+for diagnostic logging. It does not modify the system locale or locale1
+properties, regardless of account UID or group membership. The monitor
+follows service appearance, disappearance and system-bus reconnection.
+A PropertiesChanged signal does not identify its original caller and
+cannot authorize a system change. System locale updates require explicit
+PolKit-authorized SetLocale or UpdateLocale calls.
 .SS Desktop keyboard observation
 The optional GNOME and Plasma 6 backends observe per-user keyboard settings
 without changing system-wide keyboard configuration. Only authorized

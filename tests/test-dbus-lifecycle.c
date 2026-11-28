@@ -130,7 +130,7 @@ test_accounts_name_lifecycle(Fixture *fixture, gconstpointer user_data)
 
   daemon = g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
   g_assert_nonnull(daemon);
-  service = rcl_accounts_service_new(daemon);
+  service = rcl_accounts_service_new();
   g_assert_nonnull(service);
 
   /* Appearance triggers a PropertiesChanged subscription; disappearance
@@ -149,6 +149,94 @@ test_accounts_name_lifecycle(Fixture *fixture, gconstpointer user_data)
   g_object_unref(daemon);
 }
 
+/* Deliver a real property signal from the isolated AccountsService owner
+ * and wait for the production callback, rather than only sleeping. */
+static void
+emit_accounts_language(Fixture *fixture, RclAccountsService *service,
+                       const gchar *path, const gchar *language)
+{
+  g_autoptr(GError) error = NULL;
+  GVariantBuilder changed;
+  guint before = rcl_accounts_service_test_observed_languages(service);
+  gint64 deadline = g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND;
+
+  g_variant_builder_init(&changed, G_VARIANT_TYPE("a{sv}"));
+  g_variant_builder_add(&changed, "{sv}", "Language",
+                        g_variant_new_string(language));
+  g_assert_true(g_dbus_connection_emit_signal(fixture->client, NULL, path,
+      "org.freedesktop.DBus.Properties", "PropertiesChanged",
+      g_variant_new("(sa{sv}@as)", "org.freedesktop.Accounts.User",
+                    &changed, g_variant_new_strv(NULL, 0)), &error));
+  g_assert_no_error(error);
+  g_assert_true(g_dbus_connection_flush_sync(fixture->client, NULL, &error));
+  g_assert_no_error(error);
+
+  while (rcl_accounts_service_test_observed_languages(service) == before &&
+         g_get_monotonic_time() < deadline)
+    iterate_for(10);
+
+  g_assert_cmpuint(rcl_accounts_service_test_observed_languages(service),
+                   ==, before + 1);
+}
+
+static void
+test_accounts_language_observation(Fixture *fixture, gconstpointer user_data)
+{
+  const gchar *paths[] = { RCL_LANG_SH_FILE, RCL_LANG_CSH_FILE };
+  const gchar *contents[] = {
+    "# Existing locale\nexport LANG=\"en_US.UTF-8\"\nexport LC_COLLATE=C\n",
+    "# Existing locale\nsetenv LANG en_US.UTF-8\nsetenv LC_COLLATE C\n"
+  };
+  GStatBuf before[G_N_ELEMENTS(paths)];
+  g_autoptr(RclAccountsService) service = rcl_accounts_service_new();
+  g_autoptr(GError) error = NULL;
+  guint i;
+
+  g_assert_cmpstr(paths[0], !=, "/etc/profile.d/lang.sh");
+  g_assert_cmpstr(paths[1], !=, "/etc/profile.d/lang.csh");
+  g_assert_cmpstr(paths[0], !=, paths[1]);
+
+  for (i = 0; i < G_N_ELEMENTS(paths); i++)
+  {
+    g_assert_true(g_file_set_contents(paths[i], contents[i], -1, &error));
+    g_assert_no_error(error);
+    g_assert_cmpint(g_stat(paths[i], &before[i]), ==, 0);
+  }
+
+  request_accounts_name(fixture, TRUE);
+  g_assert_true(rcl_accounts_service_start(service, &error));
+  g_assert_no_error(error);
+  iterate_for(100);
+
+  /* Account UID and privileged-group membership cannot authorize writes. */
+  emit_accounts_language(fixture, service,
+                         "/org/freedesktop/Accounts/User0", "es_ES.UTF-8");
+  emit_accounts_language(fixture, service,
+                         "/org/freedesktop/Accounts/User1000", "de_DE.UTF-8");
+
+  for (i = 0; i < G_N_ELEMENTS(paths); i++)
+  {
+    GStatBuf after;
+    g_autofree gchar *actual = NULL;
+    g_assert_cmpint(g_stat(paths[i], &after), ==, 0);
+    g_assert_cmpuint(after.st_ino, ==, before[i].st_ino);
+    g_assert_cmpint(after.st_mtim.tv_sec, ==, before[i].st_mtim.tv_sec);
+    g_assert_cmpint(after.st_mtim.tv_nsec, ==, before[i].st_mtim.tv_nsec);
+    g_assert_true(g_file_get_contents(paths[i], &actual, NULL, &error));
+    g_assert_no_error(error);
+    g_assert_cmpstr(actual, ==, contents[i]);
+    g_assert_cmpint(g_unlink(paths[i]), ==, 0);
+  }
+
+  emit_accounts_language(fixture, service,
+                         "/org/freedesktop/Accounts/User1000", "fr_FR.UTF-8");
+  for (i = 0; i < G_N_ELEMENTS(paths); i++)
+    g_assert_false(g_file_test(paths[i], G_FILE_TEST_EXISTS));
+
+  rcl_accounts_service_stop(service);
+  request_accounts_name(fixture, FALSE);
+}
+
 static void
 test_repeated_start_stop_cleanup(Fixture *fixture, gconstpointer user_data)
 {
@@ -156,7 +244,7 @@ test_repeated_start_stop_cleanup(Fixture *fixture, gconstpointer user_data)
     RclLocaleDaemon *daemon =
       g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
     RclAccountsService *service =
-      rcl_accounts_service_new(daemon);
+      rcl_accounts_service_new();
 
     g_assert_nonnull(daemon);
     g_assert_nonnull(service);
@@ -183,7 +271,7 @@ test_system_bus_restart(Fixture *fixture, gconstpointer user_data)
 {
   RclLocaleDaemon *daemon =
     g_object_new(RCL_TYPE_LOCALE_DAEMON, NULL);
-  RclAccountsService *service = rcl_accounts_service_new(daemon);
+  RclAccountsService *service = rcl_accounts_service_new();
 
   g_assert_nonnull(daemon);
   g_assert_nonnull(service);
@@ -1214,6 +1302,8 @@ main(int argc, char **argv)
   g_test_add("/dbus/partial-locale-update", Fixture, NULL,
              fixture_setup, test_partial_locale_update, fixture_teardown);
 
+  g_test_add("/dbus/accounts-language-observation", Fixture, NULL,
+             fixture_setup, test_accounts_language_observation, fixture_teardown);
   g_test_add("/dbus/accounts-name-lifecycle", Fixture, NULL,
              fixture_setup, test_accounts_name_lifecycle, fixture_teardown);
   g_test_add("/dbus/repeated-start-stop-cleanup", Fixture, NULL,

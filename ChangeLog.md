@@ -32,6 +32,9 @@ All notable changes to `localed` are documented in this file.
   internal keyboard setters that bypassed caller-based authorization.
 - Share snapshot-based keyboard transactions, skip byte-identical writes,
   and roll back only modified files on failure.
+- Make AccountsService language monitoring observation-only; remove the
+  internal locale setter and account-group authorization bypass. Keep
+  Polkit rules and the configured privileged-group option.
 
 ### Tests
 - Remove obsolete Plasma locale-parser tests; retain keyboard snapshot,
@@ -51,7 +54,11 @@ All notable changes to `localed` are documented in this file.
   manifest installs both policy and rule. Phase 5 Slackware regression
   suite: 6/6 passed.
 - Cover read-only backend observation, absent configuration files and
-  repeated keyboard requests. Phase 6 testing pending.
+  repeated keyboard requests. Phase 6 Slackware regression suite: 6/6
+  passed with Plasma 6; GNOME validation pending.
+- Deliver AccountsService language signals over an isolated D-Bus bus and
+  verify unchanged locale files and absent-file behavior. Phase 7 testing
+  pending.
 
 ## [0.3.2] - 2026-11-28
 

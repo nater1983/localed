@@ -88,8 +88,8 @@ conf.set_quoted('LOCALEDIR',       localedir)
 conf.set_quoted('SYSCONFDIR',      sysconfdir)
 
 # Distro-specific tunables (meson_options.txt).
-# PRIVILEGED_GROUP: group used by the Polkit authentication rule and the
-# AccountsService language bridge. Group membership is not authorization.
+# PRIVILEGED_GROUP: group used by the Polkit authentication rule.
+# Group membership alone is not authorization.
 # lang_sh:          path to the Slackware locale shell script
 #   (/etc/profile.d/lang.sh; sourced at login via /etc/profile;
 #    uses "export KEY=value" syntax, not the KEY=value format of
