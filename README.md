@@ -24,9 +24,10 @@ The daemon follows the same general service pattern as
 - Does not require systemd; it uses D-Bus and a logind-compatible session
   manager for desktop session discovery.
 
-The Plasma 6 backend reads the system locale from `[Formats] LANG` in
-`~/.config/plasma-localerc`, not the translation preference list in
-`[Translations] LANGUAGE`. Missing or invalid `LANG` values are skipped.
+The Plasma 6 input-source backend handles keyboard settings only. It does
+not monitor `~/.config/plasma-localerc` or copy a user's locale preferences
+to the system-wide locale scripts. Plasma continues to manage its own
+per-user locale preferences.
 
 ## Dependencies
 
@@ -319,8 +320,9 @@ simple literal locale assignments, not arbitrary shell programs.
 The standard `SetLocale` D-Bus method retains its replacement semantics;
 the bundled client uses the new `UpdateLocale` extension instead. Upgrade
 the daemon and client together; older daemons do not expose `UpdateLocale`.
-Automatic desktop synchronization is unchanged by this maintenance fix and
-may still replace existing regional locale settings.
+The Plasma locale-file monitor is no longer used. AccountsService language
+synchronization remains unchanged and may still replace regional locale
+settings.
 
 ## Keyboard conversion
 

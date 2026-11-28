@@ -209,10 +209,6 @@ msgstr ""
 msgid "GNOME input-sources GSettings schema is unavailable"
 msgstr ""
 
-#: src/backends/plasma6/plasma6-backend.c:185
-msgid "Invalid LANG value in Plasma [Formats]"
-msgstr ""
-
 #: src/backends/plasma6/plasma6-input-sources-helper.c:153
 #, c-format
 msgid "could not read Plasma keyboard layouts: %s\n"

@@ -2,6 +2,18 @@
 
 All notable changes to `localed` are documented in this file.
 
+## [0.3.3] - Unreleased
+
+### Fixed
+- Remove the Plasma 6 plasma-localerc monitor and self-issued SetLocale
+  requests; per-user Plasma locale settings no longer trigger system locale
+  updates through this backend.
+- Retain Plasma keyboard input-source discovery and synchronization.
+
+### Tests
+- Remove obsolete Plasma locale-parser tests; retain keyboard snapshot,
+  layout signature and lifecycle coverage. Runtime validation pending.
+
 ## [0.3.2] - 2026-11-28
 
 Maintenance release for partial system locale updates.
