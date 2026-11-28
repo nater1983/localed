@@ -9,6 +9,8 @@
 
 #include <gio/gio.h>
 #include <glib.h>
+#include <glib/gstdio.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -851,6 +853,17 @@ assert_locale_files(const gchar *sh_expected, const gchar *csh_expected)
   g_assert_cmpstr(csh, ==, csh_expected);
 }
 
+/* Compare inode and high-resolution mtime to detect an unnecessary rename. */
+static void
+assert_locale_file_unchanged(const gchar *path, const GStatBuf *before)
+{
+  GStatBuf after;
+  g_assert_cmpint(g_stat(path, &after), ==, 0);
+  g_assert_cmpuint(after.st_ino, ==, before->st_ino);
+  g_assert_cmpint(after.st_mtim.tv_sec, ==, before->st_mtim.tv_sec);
+  g_assert_cmpint(after.st_mtim.tv_nsec, ==, before->st_mtim.tv_nsec);
+}
+
 static void
 test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
 {
@@ -889,6 +902,7 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   guint registration_id, name_result;
   GVariant *reply;
   g_autofree gchar *after = NULL;
+  GStatBuf sh_stat, csh_stat;
 
   g_assert_cmpstr(RCL_LANG_SH_FILE, !=, "/etc/profile.d/lang.sh");
   g_assert_cmpstr(RCL_LANG_CSH_FILE, !=, "/etc/profile.d/lang.csh");
@@ -918,6 +932,16 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
   g_assert_no_error(polkit.client_error);
   assert_locale_files(changed_sh, changed_csh);
+
+  /* A repeated partial request must not rename either file. */
+  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_stat), ==, 0);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_stat), ==, 0);
+  rcl_locale_test_fail_rename_to(RCL_LANG_CSH_FILE);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", lang);
+  rcl_locale_test_fail_rename_to(NULL);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_file_unchanged(RCL_LANG_SH_FILE, &sh_stat);
+  assert_locale_file_unchanged(RCL_LANG_CSH_FILE, &csh_stat);
 
   polkit.authorized = FALSE;
   call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", unset);
@@ -962,6 +986,34 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   g_assert_no_error(error);
   g_assert_null(strstr(after, "LC_TIME"));
   g_assert_nonnull(strstr(after, "export LANG=\"en_US.UTF-8\""));
+
+  /* Replacement requests are also idempotent, including the legacy
+   * C-shell default. No-op requests still go through authorization. */
+  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_stat), ==, 0);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_stat), ==, 0);
+  rcl_locale_test_fail_rename_to(RCL_LANG_CSH_FILE);
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
+  rcl_locale_test_fail_rename_to(NULL);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_file_unchanged(RCL_LANG_SH_FILE, &sh_stat);
+  assert_locale_file_unchanged(RCL_LANG_CSH_FILE, &csh_stat);
+
+  /* Only the companion needs repair. A failed C-shell write must not
+   * restore (and thereby replace) the untouched Bourne-shell file. */
+  g_assert_true(g_file_set_contents(RCL_LANG_CSH_FILE,
+      "setenv LANG en_AU.UTF-8\nsetenv LC_COLLATE C\n", -1, &error));
+  g_assert_no_error(error);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_stat), ==, 0);
+  rcl_locale_test_fail_rename_to(RCL_LANG_CSH_FILE);
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
+  rcl_locale_test_fail_rename_to(NULL);
+  g_assert_nonnull(polkit.client_error);
+  assert_locale_file_unchanged(RCL_LANG_SH_FILE, &sh_stat);
+  assert_locale_file_unchanged(RCL_LANG_CSH_FILE, &csh_stat);
+
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_file_unchanged(RCL_LANG_SH_FILE, &sh_stat);
 
   polkit_fixture_free(&polkit);
   rcl_daemon_shutdown(daemon);
