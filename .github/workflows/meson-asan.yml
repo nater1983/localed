@@ -26,7 +26,13 @@ jobs:
             meson \
             ninja-build \
             pkg-config \
-            dbus-daemon
+            dbus-daemon \
+            locales
+
+      # glibc bug 25770 leaks memory in newlocale() with LOCPATH set.
+      # Use the disposable runner locale archive; keep LSan enabled.
+      - name: Generate test locale in runner locale archive
+        run: sudo localedef -i en_AU -f ISO-8859-1 en_AU
 
       - name: Configure isolated test paths
         run: |
@@ -67,6 +73,7 @@ jobs:
 
       - name: Run tests with leak detection
         env:
+          RCL_TEST_REQUIRE_FALLBACK_LOCALE: "1"
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:strict_string_checks=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           G_SLICE: always-malloc

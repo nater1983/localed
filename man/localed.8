@@ -124,6 +124,9 @@ and removes redundant variables equal to LANG, matching systemd v262
 merge and simplification behavior.
 A single bare locale is interpreted as LANG. Unknown or duplicate keys
 and empty or syntactically invalid values cause the entire call to fail.
+Requested locale names must be installed (C and POSIX are always valid).
+Locale availability is checked without changing the daemon's process locale;
+locales are not generated automatically.
 Both Slackware scripts are updated transactionally. Use UpdateLocale for
 explicit removal or LANGUAGE priority lists.
 Requires the
@@ -134,7 +137,10 @@ PolKit action.
 Localed extension to change only explicitly named locale assignments.
 Omitted variables remain unchanged. Empty values remove the named
 assignment from both shell scripts. Invalid, duplicate or empty requests
-are rejected. Requires the same PolKit action as SetLocale.
+are rejected. Nonempty locale assignments must name installed locales,
+except LANGUAGE, whose colon-separated translation preferences are
+checked for valid syntax without requiring installed glibc locales.
+Requires the same PolKit action as SetLocale.
 .TP
 .B SetVConsoleKeyboard(s keymap, s keymap_toggle, b convert, b interactive)
 Writes

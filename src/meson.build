@@ -3,6 +3,7 @@ localed_sources = files(
   'rcl-file-transaction.c',
   'rcl-xkb-config.c',
   'rcl-locale.c',
+  'rcl-locale-validation.c',
 )
 
 executable(
