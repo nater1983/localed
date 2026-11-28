@@ -893,6 +893,29 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   const gchar *duplicate[] = { "LC_TIME=C", "LC_TIME=POSIX", NULL };
   const gchar *empty[] = { NULL };
   const gchar *replace[] = { "LANG=en_US.UTF-8", NULL };
+  const gchar *layout_update[] = { "LANG=en_AU.UTF-8", "LC_TIME=en_GB.UTF-8", NULL };
+  const gchar *layout_replace[] = { "LANG=en_AU.UTF-8", "LC_COLLATE=C",
+                                   "LC_TIME=en_GB.UTF-8", NULL };
+  const gchar *layout_sh =
+    "#!/bin/sh\n\n# Preserve documentation\n"
+    "#export LANG=C\n\texport LANG='en_US.UTF-8'  # preferred locale\n"
+    "export LC_COLLATE=C\n\n# End of unrelated section\n"
+    "# End of /etc/profile.d/lang.sh\n# Preserve trailing comment\n";
+  const gchar *layout_csh =
+    "#!/bin/csh\n\n# Preserve documentation\n"
+    "\tsetenv LANG en_US.UTF-8  # preferred locale\n"
+    "setenv LC_COLLATE C\n\n# End of /etc/profile.d/lang.csh";
+  const gchar *layout_changed_sh =
+    "#!/bin/sh\n\n# Preserve documentation\n"
+    "#export LANG=C\n\texport LANG=\"en_AU.UTF-8\"  # preferred locale\n"
+    "export LC_COLLATE=C\n\n# End of unrelated section\n"
+    "export LC_TIME=\"en_GB.UTF-8\"\n"
+    "# End of /etc/profile.d/lang.sh\n# Preserve trailing comment\n";
+  const gchar *layout_changed_csh =
+    "#!/bin/csh\n\n# Preserve documentation\n"
+    "\tsetenv LANG en_AU.UTF-8  # preferred locale\n"
+    "setenv LC_COLLATE C\n\nsetenv LC_TIME en_GB.UTF-8\n"
+    "# End of /etc/profile.d/lang.csh";
   g_autoptr(GError) error = NULL;
   GDBusConnection *daemon_bus = connect_test_bus(fixture->address);
   GDBusConnection *polkit_bus = connect_test_bus(fixture->address);
@@ -1014,6 +1037,32 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", replace);
   g_assert_no_error(polkit.client_error);
   assert_locale_file_unchanged(RCL_LANG_SH_FILE, &sh_stat);
+
+  /* Both shell formats retain the stock footer and surrounding text.
+   * The C-shell fixture intentionally has no final newline. */
+  g_assert_true(g_file_set_contents(RCL_LANG_SH_FILE, layout_sh, -1, &error));
+  g_assert_no_error(error);
+  g_assert_true(g_file_set_contents(RCL_LANG_CSH_FILE, layout_csh, -1, &error));
+  g_assert_no_error(error);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", layout_update);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_files(layout_changed_sh, layout_changed_csh);
+
+  g_assert_cmpint(g_stat(RCL_LANG_SH_FILE, &sh_stat), ==, 0);
+  g_assert_cmpint(g_stat(RCL_LANG_CSH_FILE, &csh_stat), ==, 0);
+  call_locale_method(fixture, daemon_bus, &polkit, "UpdateLocale", layout_update);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_file_unchanged(RCL_LANG_SH_FILE, &sh_stat);
+  assert_locale_file_unchanged(RCL_LANG_CSH_FILE, &csh_stat);
+
+  /* Explicit replacement uses the same layout-preserving writer. */
+  g_assert_true(g_file_set_contents(RCL_LANG_SH_FILE, layout_sh, -1, &error));
+  g_assert_no_error(error);
+  g_assert_true(g_file_set_contents(RCL_LANG_CSH_FILE, layout_csh, -1, &error));
+  g_assert_no_error(error);
+  call_locale_method(fixture, daemon_bus, &polkit, "SetLocale", layout_replace);
+  g_assert_no_error(polkit.client_error);
+  assert_locale_files(layout_changed_sh, layout_changed_csh);
 
   polkit_fixture_free(&polkit);
   rcl_daemon_shutdown(daemon);

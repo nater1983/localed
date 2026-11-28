@@ -910,90 +910,42 @@ rcl_keyboard_value_is_safe( const gchar *value )
    are preserved on write via a read-modify-write strategy.
    -------------------------------------------------------------------------- */
 
-/*
- * rcl_read_lang_sh:
- * Parse /etc/profile.d/lang.sh and return a GHashTable (key->value) of
- * known locale variable assignments.  Lines of the form
- *   export KEY=value
- *   export KEY="value"
- * are recognised; the "export " prefix and optional quotes are stripped.
- * Returns an empty table (never NULL) when the file is missing.
- * The caller must g_hash_table_unref() the result.
- */
-static GHashTable *
-rcl_read_lang_sh( const gchar *path )
-{
-  GHashTable *table = g_hash_table_new_full( g_str_hash, g_str_equal,
-                                              g_free, g_free );
-  gchar  *contents = NULL;
-  gchar **lines;
-  gsize   i;
+static gchar *rcl_locale_assignment_key(const gchar *line, gboolean csh);
+static gchar *rcl_locale_assignment_value(const gchar *line, const gchar *key,
+                                         gboolean csh, const gchar **suffix);
 
-  if( !g_file_get_contents( path, &contents, NULL, NULL ) )
+/* Read the same simple literal exports accepted by the locale writer,
+ * including indentation, quoting and trailing comments. Never source them. */
+static GHashTable *
+rcl_read_lang_sh(const gchar *path)
+{
+  GHashTable *table = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             g_free, g_free);
+  g_autofree gchar *contents = NULL;
+  g_auto(GStrv) lines = NULL;
+  guint i;
+
+  if (!g_file_get_contents(path, &contents, NULL, NULL))
     return table;
 
-  lines = g_strsplit( contents, "\n", -1 );
-  g_free( contents );
-
-  for( i = 0; lines[i] != NULL; i++ )
+  lines = g_strsplit(contents, "\n", -1);
+  for (i = 0; lines[i]; i++)
   {
-    gchar *line = g_strstrip( lines[i] );
-    gchar *rest, *eq, *key, *val;
-    gsize  len;
+    g_autofree gchar *key = rcl_locale_assignment_key(lines[i], FALSE);
+    gchar *value;
 
-    if( line[0] == '#' || line[0] == '\0' )
+    if (!key || !rcl_locale_variable_is_known(key))
       continue;
 
-    /* Must start with "export " */
-    if( strncmp( line, "export ", 7 ) != 0 )
-      continue;
-
-    rest = line + 7;
-    while( *rest == ' ' || *rest == '\t' )
-      rest++;
-
-    eq = strchr( rest, '=' );
-    if( !eq )
-      continue;
-
-    key = g_strndup( rest, (gsize)(eq - rest) );
-    g_strstrip( key );
-
-    /* Only store known locale variables */
-    if( !rcl_locale_variable_is_known( key ) )
+    value = rcl_locale_assignment_value(lines[i], key, FALSE, NULL);
+    if (!value)
     {
-      g_free( key );
+      g_warning("rcl_read_lang_sh: skipping unsafe value for %s", key);
       continue;
     }
 
-    val = g_strdup( eq + 1 );
-    g_strstrip( val );
-
-    /* Strip surrounding double quotes */
-    len = strlen( val );
-    if( len >= 2 && val[0] == '"' && val[len-1] == '"' )
-    {
-      gchar *unquoted = g_strndup( val + 1, len - 2 );
-      g_free( val );
-      val = unquoted;
-    }
-
-    /* Validate the value against the same safe-charset used by SetLocale.
-     * Values that fail (e.g. from manual edits to lang.sh) are silently
-     * skipped so a corrupt file cannot inject unsafe strings into the
-     * Locale D-Bus property. */
-    if( val[0] != '\0' && !rcl_locale_value_is_safe( val ) )
-    {
-      g_warning( "rcl_read_lang_sh: skipping unsafe value for %s", key );
-      g_free( val );
-      g_free( key );
-      continue;
-    }
-
-    g_hash_table_replace( table, key, val );
+    g_hash_table_replace(table, g_steal_pointer(&key), value);
   }
-
-  g_strfreev( lines );
   return table;
 }
 
@@ -1963,7 +1915,7 @@ rcl_locale_assignment_key(const gchar *line, gboolean csh)
  * shell statements rather than accidentally removing a second variable. */
 static gchar *
 rcl_locale_assignment_value(const gchar *line, const gchar *key,
-                             gboolean csh)
+                             gboolean csh, const gchar **suffix)
 {
   const gchar *p = line, *start;
   gchar quote = '\0';
@@ -2001,6 +1953,8 @@ rcl_locale_assignment_value(const gchar *line, const gchar *key,
     p++;
   if (*p && !g_ascii_isspace(*p))
     return NULL;
+  if (suffix)
+    *suffix = p;
   while (g_ascii_isspace(*p))
     p++;
   return (!*p || *p == '#') ? g_steal_pointer(&value) : NULL;
@@ -2020,6 +1974,48 @@ rcl_locale_append_assignment(GString *out, const gchar *key,
     g_string_append_printf(out, "export %s=\"%s\"\n", key, value);
 }
 
+/* Recognize the Slackware footer, including when a test uses a relocated
+ * configuration path. Do not mistake unrelated end comments for it. */
+static gboolean
+rcl_locale_is_footer(const gchar *line, gboolean csh)
+{
+  g_autofree gchar *copy = g_strdup(line);
+  const gchar *marker = g_strstrip(copy);
+  const gchar *stock = csh ? "/etc/profile.d/lang.csh" :
+                             "/etc/profile.d/lang.sh";
+  const gchar *configured = csh ? RCL_LANG_CSH_FILE : RCL_LANG_SH_FILE;
+
+  if (!g_str_has_prefix(marker, "# End of "))
+    return FALSE;
+
+  marker += strlen("# End of ");
+  return g_str_equal(marker, stock) || g_str_equal(marker, configured);
+}
+
+/* Preserve leading indentation, trailing whitespace/comments and the
+ * original line termination when changing an existing assignment. */
+static void
+rcl_locale_replace_assignment(GString *out, const gchar *line,
+                              const gchar *key, const gchar *value,
+                              const gchar *suffix, gboolean csh,
+                              gboolean newline)
+{
+  const gchar *start = line;
+
+  if (!value || !*value)
+    return;
+  while (*start == ' ' || *start == '\t')
+    start++;
+  g_string_append_len(out, line, start - line);
+  if (csh)
+    g_string_append_printf(out, "setenv %s %s", key, value);
+  else
+    g_string_append_printf(out, "export %s=\"%s\"", key, value);
+  g_string_append(out, suffix);
+  if (newline)
+    g_string_append_c(out, '\n');
+}
+
 /* Build an update from the transaction snapshot, not from a cached D-Bus
  * property. Absent/empty values remove only their named assignments. */
 static GString *
@@ -2029,6 +2025,8 @@ rcl_locale_patch_contents(const gchar *contents, const gchar *const *keys,
 {
   GString *out = g_string_new(NULL);
   gboolean seen[G_N_ELEMENTS(locale_variable_names)] = { FALSE };
+  gboolean have_footer = FALSE;
+  gsize footer_offset = 0;
   guint i;
   const gchar *line = contents;
 
@@ -2042,10 +2040,18 @@ rcl_locale_patch_contents(const gchar *contents, const gchar *const *keys,
       g_autofree gchar *key = rcl_locale_assignment_key(copy, csh);
       gboolean replace = FALSE;
 
+      if (!have_footer && rcl_locale_is_footer(copy, csh))
+      {
+        have_footer = TRUE;
+        footer_offset = out->len;
+      }
+
       for (i = 0; key && keys[i]; i++)
         if (g_str_equal(key, keys[i]))
         {
-          g_autofree gchar *previous = rcl_locale_assignment_value(copy, key, csh);
+          const gchar *suffix = NULL;
+          g_autofree gchar *previous =
+              rcl_locale_assignment_value(copy, key, csh, &suffix);
           if (!previous)
           {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
@@ -2059,7 +2065,8 @@ rcl_locale_patch_contents(const gchar *contents, const gchar *const *keys,
             if (*previous && g_strcmp0(previous, values[i]) == 0)
               g_string_append_len(out, line, length + (end != NULL));
             else
-              rcl_locale_append_assignment(out, keys[i], values[i], csh);
+              rcl_locale_replace_assignment(out, copy, keys[i], values[i],
+                                            suffix, csh, end != NULL);
           }
           seen[i] = TRUE;
           replace = TRUE;
@@ -2077,9 +2084,21 @@ rcl_locale_patch_contents(const gchar *contents, const gchar *const *keys,
     g_string_append(out, "# Written by localed - see localed(8)\n");
   }
 
-  for (i = 0; keys[i]; i++)
-    if (!seen[i])
-      rcl_locale_append_assignment(out, keys[i], values[i], csh);
+  if (have_footer)
+  {
+    g_autoptr(GString) additions = g_string_new(NULL);
+    for (i = 0; keys[i]; i++)
+      if (!seen[i])
+        rcl_locale_append_assignment(additions, keys[i], values[i], csh);
+    if (additions->len)
+      g_string_insert_len(out, footer_offset, additions->str, additions->len);
+  }
+  else
+  {
+    for (i = 0; keys[i]; i++)
+      if (!seen[i])
+        rcl_locale_append_assignment(out, keys[i], values[i], csh);
+  }
   return out;
 }
 
@@ -2147,7 +2166,7 @@ rcl_locale_seed_companion(const gchar *contents, gboolean from_csh,
     gchar *value;
     if (!key || !rcl_locale_variable_is_known(key))
       continue;
-    value = rcl_locale_assignment_value(lines[i], key, from_csh);
+    value = rcl_locale_assignment_value(lines[i], key, from_csh, NULL);
     if (!value)
     {
       g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,

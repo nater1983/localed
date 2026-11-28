@@ -12,6 +12,10 @@ All notable changes to `localed` are documented in this file.
 - Share the snapshot-based locale writer between SetLocale and UpdateLocale;
   skip byte-identical outputs and preserve existing literal assignments in
   place when unchanged. Avoid rolling back an untouched locale file.
+- Preserve existing assignment indentation, inline comments, line endings,
+  blank lines and footer comments in both Slackware locale scripts. Insert
+  new variables before the matching stock footer, or append if absent.
+- Use the same literal-assignment parser for reading and writing locale data.
 
 ### Tests
 - Remove obsolete Plasma locale-parser tests; retain keyboard snapshot,
@@ -19,7 +23,9 @@ All notable changes to `localed` are documented in this file.
   passed after Phase 1; live Plasma validation pending.
 - Extend D-Bus coverage for repeated identical requests and a failed
   companion-only update; check file inode and modification timestamps.
-  Phase 2 compilation and regression testing pending.
+  Phase 2 Slackware regression suite: 5/5 passed.
+- Cover footer insertion, comments, indentation, missing final newline,
+  repeated requests and both locale setter methods. Phase 3 testing pending.
 
 ## [0.3.2] - 2026-11-28
 
