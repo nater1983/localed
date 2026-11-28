@@ -24,6 +24,8 @@ and
 .B SetX11Keyboard
 methods. The daemon validates and persists the settings, performs
 PolKit authorization, and emits property-change signals.
+The client and daemon must both support UpdateLocale for partial locale
+updates; upgrade them together.
 .PP
 Changing settings does not require running
 .B localectl
@@ -171,9 +173,14 @@ localectl set-locale LANG=en_US.UTF-8 LC_TIME=en_GB.UTF-8
 .EE
 .RE
 .PP
+Remove a locale override without changing other variables:
+.PP
+.RS
 .EX
+localectl set-locale LC_COLLATE=""
 localectl unset-locale LC_COLLATE
 .EE
+.RE
 .PP
 Set the console keymap:
 .PP
@@ -228,7 +235,7 @@ Returns 0 on success and 1 on error (for example, an unknown locale
 variable, an invalid value, a missing argument, or insufficient
 permissions).
 .SH AUTHORIZATION
-The set commands communicate with
+The set and unset commands communicate with
 .B localed
 through the system D-Bus and pass
 .I interactive=true
