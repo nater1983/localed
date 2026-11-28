@@ -894,8 +894,10 @@ test_partial_locale_update(Fixture *fixture, gconstpointer user_data)
   const gchar *empty[] = { NULL };
   const gchar *replace[] = { "LANG=en_US.UTF-8", NULL };
   const gchar *layout_update[] = { "LANG=en_AU.UTF-8", "LC_TIME=en_GB.UTF-8", NULL };
+  /* Suppress SetLocale's existing LANGUAGE fallback for en_AU so both
+   * requests can be compared against the same expected file contents. */
   const gchar *layout_replace[] = { "LANG=en_AU.UTF-8", "LC_COLLATE=C",
-                                   "LC_TIME=en_GB.UTF-8", NULL };
+                                   "LC_TIME=en_GB.UTF-8", "LANGUAGE=", NULL };
   const gchar *layout_sh =
     "#!/bin/sh\n\n# Preserve documentation\n"
     "#export LANG=C\n\texport LANG='en_US.UTF-8'  # preferred locale\n"
