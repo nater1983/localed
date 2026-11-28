@@ -195,14 +195,23 @@ installed glibc locale. Explicit removals and existing unspecified settings
 are preserved. Missing locales are rejected; localed does not generate
 locales automatically.
 
-## Keyboard conversion
+## Keyboard validation and conversion
+
+Nonempty console keymap and toggle names must identify installed readable
+`.map` or `.map.gz` files under `/usr/share/keymaps`, `/usr/share/kbd/keymaps`
+or `/usr/lib/kbd/keymaps`. The daemon searches subdirectories and supports
+file aliases but does not follow symlink directories. Invalid requests fail
+before Polkit and are checked again after authorization. Empty values retain
+reset semantics. This verifies file availability, not map contents; no
+keymap is loaded during validation.
+
 
 `SetVConsoleKeyboard` and `SetX11Keyboard` both accept a `convert`
 boolean. When `true`, a built-in mapping table translates the console
 keymap to an X11 layout (or vice versa). The table covers common
 single-layout keymaps (`us`, `de`, `fr`, `gb`, `es`, `ru`, `se`,
-etc.). No conversion is attempted when no match is found, rather than
-guessing.
+etc.). No conversion is attempted when no match is found or the derived
+console keymap is unavailable, rather than persisting an unusable keymap.
 
 ## Adding a translation
 

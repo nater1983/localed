@@ -149,6 +149,9 @@ and
 .I keymap_toggle
 to
 .IR /etc/rc.d/rc.keymap .
+Nonempty keymap and toggle names must identify installed readable .map or
+.map.gz files in the standard keymap directories. Empty values reset the
+corresponding setting. Validation does not load the map.
 When
 .I convert
 is

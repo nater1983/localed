@@ -32,6 +32,9 @@ typedef struct
 /* Only one fixture is active in a test process. Each gets a fresh private
  * directory, so separate test processes and repeated runs cannot collide. */
 static gchar *test_paths[RCL_TEST_FILE_COUNT];
+static const gchar *const fixture_maps[] = {
+  "uk.map", "us.map", "de.map.gz", "ch-fr.map"
+};
 
 const gchar *
 rcl_locale_test_get_path(RclLocaleTestFile file)
@@ -62,6 +65,14 @@ fixture_config_setup(Fixture *fixture)
     test_paths[i] = g_build_filename(fixture->config_dir, names[i], NULL);
   }
 
+  /* The daemon's test-only search root is this fixture directory. */
+  for (guint i = 0; i < G_N_ELEMENTS(fixture_maps); i++) {
+    g_autofree gchar *path = g_build_filename(fixture->config_dir, fixture_maps[i], NULL);
+    g_autoptr(GError) error = NULL;
+    g_assert_true(g_file_set_contents(path, "", 0, &error));
+    g_assert_no_error(error);
+  }
+
   /* Retain independent fail-closed checks before any daemon is constructed. */
   g_assert_cmpstr(RCL_LANG_SH_FILE, !=, "/etc/profile.d/lang.sh");
   g_assert_cmpstr(RCL_LANG_CSH_FILE, !=, "/etc/profile.d/lang.csh");
@@ -77,6 +88,10 @@ fixture_config_teardown(Fixture *fixture)
     if (g_unlink(test_paths[i]) != 0 && errno != ENOENT)
       g_error("Cannot remove test file %s: %s", test_paths[i], g_strerror(errno));
     g_clear_pointer(&test_paths[i], g_free);
+  }
+  for (guint i = 0; i < G_N_ELEMENTS(fixture_maps); i++) {
+    g_autofree gchar *path = g_build_filename(fixture->config_dir, fixture_maps[i], NULL);
+    g_assert_cmpint(g_unlink(path), ==, 0);
   }
   if (g_rmdir(fixture->config_dir) != 0)
     g_error("Cannot remove test directory %s: %s",
@@ -559,6 +574,40 @@ test_authorized_x11_keyboard_update(Fixture *fixture, gconstpointer user_data)
     g_assert_true(g_file_get_contents(expected_path, &before_x11,
                                       NULL, &error));
     g_assert_no_error(error);
+
+    /* Missing primary/toggle and unsafe names fail before authorization;
+     * all three configuration files must remain byte-for-byte unchanged. */
+    const struct { const gchar *keymap; const gchar *toggle; gint code; } bad[] = {
+      { "localed-missing-987654321", "", G_DBUS_ERROR_FAILED },
+      { "uk", "localed-missing-987654321", G_DBUS_ERROR_FAILED },
+      { "-C", "", G_DBUS_ERROR_INVALID_ARGS },
+      { "uk", "../us", G_DBUS_ERROR_INVALID_ARGS },
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(bad); i++) {
+      polkit_fixture.client_done = FALSE;
+      polkit_fixture.check_seen = FALSE;
+      g_clear_error(&polkit_fixture.client_error);
+      g_dbus_connection_call(fixture->client, g_dbus_connection_get_unique_name(daemon_bus),
+        "/org/freedesktop/locale1", "org.freedesktop.locale1", "SetVConsoleKeyboard",
+        g_variant_new("(ssbb)", bad[i].keymap, bad[i].toggle, TRUE, TRUE),
+        NULL, G_DBUS_CALL_FLAGS_NONE, 5000, NULL,
+        polkit_client_call_done, &polkit_fixture);
+      iterate_until(&polkit_fixture, polkit_condition, 5000);
+      g_assert_error(polkit_fixture.client_error, G_DBUS_ERROR, bad[i].code);
+      g_assert_false(polkit_fixture.check_seen);
+      g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_FILE, &after, NULL, &error));
+      g_assert_no_error(error);
+      g_assert_cmpstr(after, ==, before_keymap);
+      g_clear_pointer(&after, g_free);
+      g_assert_true(g_file_get_contents(RCL_RC_KEYMAP_TOGGLE_FILE, &after, NULL, &error));
+      g_assert_no_error(error);
+      g_assert_cmpstr(after, ==, before_toggle);
+      g_clear_pointer(&after, g_free);
+      g_assert_true(g_file_get_contents(expected_path, &after, NULL, &error));
+      g_assert_no_error(error);
+      g_assert_cmpstr(after, ==, before_x11);
+      g_clear_pointer(&after, g_free);
+    }
 
     {
       const gchar *failure_paths[] = {

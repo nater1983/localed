@@ -32,6 +32,7 @@
 
 #include "rcl-locale.h"
 #include "rcl-locale-validation.h"
+#include "rcl-keymap-validation.h"
 #include "rcl-file-utils.h"
 #include "rcl-file-transaction.h"
 #include "rcl-xkb-config.h"
@@ -1343,6 +1344,18 @@ do_set_locale(RclLocaleDaemon *daemon, gchar **locale,
   g_dbus_method_invocation_return_value(invocation, NULL);
 }
 
+static gboolean
+rcl_console_keymap_validate(const gchar *name, GError **error)
+{
+#ifdef RCL_LOCALE_TESTING
+  g_autofree gchar *root = g_path_get_dirname(RCL_LANG_SH_FILE);
+  const gchar *dirs[] = { root, NULL };
+  return rcl_keymap_validate(name, dirs, error);
+#else
+  return rcl_keymap_validate(name, NULL, error);
+#endif
+}
+
 static void
 do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
                           const gchar *keymap, const gchar *keymap_toggle,
@@ -1351,17 +1364,12 @@ do_set_vconsole_keyboard( RclLocaleDaemon *daemon,
 {
   GError *error = NULL;
 
-  if( keymap[0] != '\0' && !rcl_keyboard_value_is_safe( keymap ) )
+  /* Recheck after authorization in case the installed maps changed. */
+  if (!rcl_console_keymap_validate(keymap, &error) ||
+      !rcl_console_keymap_validate(keymap_toggle, &error))
   {
-    g_dbus_method_invocation_return_error( invocation,
-      G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS, "Invalid keymap '%s'", keymap );
-    return;
-  }
-  if( keymap_toggle[0] != '\0' && !rcl_keyboard_value_is_safe( keymap_toggle ) )
-  {
-    g_dbus_method_invocation_return_error( invocation,
-      G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-      "Invalid keymap toggle '%s'", keymap_toggle );
+    g_dbus_method_invocation_return_gerror(invocation, error);
+    g_clear_error(&error);
     return;
   }
 
@@ -1441,8 +1449,9 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
 
   if( convert && layout[0] != '\0' )
   {
-    gchar *vc_keymap = NULL;
-    if( rcl_x11_to_keymap( layout, variant, &vc_keymap ) )
+    g_autofree gchar *vc_keymap = NULL;
+    if( rcl_x11_to_keymap( layout, variant, &vc_keymap ) &&
+        rcl_console_keymap_validate(vc_keymap, NULL) )
     {
       if( !rcl_write_x11_vconsole_files( layout, model, variant, options,
                                          vc_keymap, &error ) )
@@ -1450,14 +1459,12 @@ do_set_x11_keyboard( RclLocaleDaemon *daemon,
         rcl_daemon_sync_dbus_properties( daemon );
         g_dbus_method_invocation_return_gerror( invocation, error );
         g_clear_error( &error );
-        g_free( vc_keymap );
         return;
       }
-      g_free( vc_keymap );
     }
     else
     {
-      g_debug( "convert: no built-in console mapping for X11 layout '%s'", layout );
+      g_debug( "convert: no installed console mapping for X11 layout '%s'", layout );
       if( !write_x11_keyboard_conf( RCL_X11_KEYBOARD_FILE,
                                     layout, model, variant, options, &error ) )
       {
@@ -2211,6 +2218,14 @@ handle_method_call( GDBusConnection       *connection,
 
     g_variant_get( parameters, "(&s&sbb)", &keymap, &keymap_toggle,
                    &convert, &interactive );
+
+    g_autoptr(GError) error = NULL;
+    if (!rcl_console_keymap_validate(keymap, &error) ||
+        !rcl_console_keymap_validate(keymap_toggle, &error))
+    {
+      g_dbus_method_invocation_return_gerror(invocation, error);
+      return;
+    }
 
     ctx = g_new0( AuthCtx, 1 );
     ctx->daemon         = g_object_ref( daemon );
